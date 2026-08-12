@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="mark-gradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#2DD4BF"/>
+      <stop offset="50%" stop-color="#38BDF8"/>
+      <stop offset="100%" stop-color="#818CF8"/>
+    </linearGradient>
+  </defs>
+  <g>
+    <rect x="272" y="220" width="320" height="28" rx="14" fill="url(#mark-gradient)" opacity="0.9"/>
+    <rect x="272" y="280" width="480" height="20" rx="10" fill="#475569"/>
+    <rect x="272" y="320" width="380" height="20" rx="10" fill="#475569"/>
+    <rect x="272" y="692" width="420" height="20" rx="10" fill="#475569"/>
+    <rect x="272" y="732" width="480" height="20" rx="10" fill="#475569"/>
+    <rect x="272" y="772" width="300" height="20" rx="10" fill="#475569"/>
+  </g>
+</svg>

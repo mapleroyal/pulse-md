@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <title>Pulse MD portable application icon — small-size master</title>
+  <desc>An optically simplified transparent document icon for raster sizes of 48 pixels and below.</desc>
+  <defs>
+    <linearGradient id="paper-small" x1="176" y1="94" x2="858" y2="938" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFFFFF"/>
+      <stop offset="1" stop-color="#E5ECF5"/>
+    </linearGradient>
+    <linearGradient id="edge-small" x1="152" y1="78" x2="884" y2="946" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#C9D4E2"/>
+      <stop offset="1" stop-color="#64748B"/>
+    </linearGradient>
+    <linearGradient id="fold-small" x1="656" y1="82" x2="880" y2="322" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#F8FAFD"/>
+      <stop offset="1" stop-color="#C8D4E2"/>
+    </linearGradient>
+    <linearGradient id="aurora-small" x1="214" y1="312" x2="870" y2="744" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#0FAF9E"/>
+      <stop offset="0.46" stop-color="#079EE6"/>
+      <stop offset="0.72" stop-color="#3678ED"/>
+      <stop offset="1" stop-color="#6158E8"/>
+    </linearGradient>
+  </defs>
+
+  <!-- No blur, no placeholder lines, a larger silhouette, and heavier keylines: every surviving feature earns pixels. -->
+  <path
+    d="M224 72H652L896 316V856C896 909 853 952 800 952H224C171 952 128 909 128 856V168C128 115 171 72 224 72Z"
+    fill="url(#paper-small)"
+    stroke="url(#edge-small)"
+    stroke-width="28"
+    stroke-linejoin="round"
+  />
+  <path d="M652 72L896 316H752C696.8 316 652 271.2 652 216Z" fill="url(#fold-small)"/>
+  <path
+    d="M652 72V216C652 271.2 696.8 316 752 316H896"
+    fill="none"
+    stroke="url(#edge-small)"
+    stroke-width="28"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+  />
+
+  <!-- The mark is re-spaced and thickened independently from the large master for 16–48 px use. -->
+  <g fill="url(#aurora-small)">
+    <path d="M214 732V324H316L424 528L532 324H634V732H532V460L424 664L316 460V732Z"/>
+    <path d="M702 324H804V528H870L752 732L634 528H702Z"/>
+  </g>
+</svg>

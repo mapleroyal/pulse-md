@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <title>Pulse MD portable application icon — full master</title>
+  <desc>A transparent, portable document silhouette with an aurora Markdown M and down arrow.</desc>
+  <defs>
+    <linearGradient id="paper" x1="214" y1="126" x2="838" y2="890" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFFFFF"/>
+      <stop offset="0.55" stop-color="#F4F7FB"/>
+      <stop offset="1" stop-color="#E7EDF5"/>
+    </linearGradient>
+    <linearGradient id="edge" x1="196" y1="112" x2="852" y2="902" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#DCE4EE"/>
+      <stop offset="0.55" stop-color="#B7C3D2"/>
+      <stop offset="1" stop-color="#7E8DA2"/>
+    </linearGradient>
+    <linearGradient id="fold" x1="650" y1="112" x2="850" y2="330" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#F8FAFD"/>
+      <stop offset="1" stop-color="#CFD9E6"/>
+    </linearGradient>
+    <linearGradient id="aurora" x1="236" y1="370" x2="806" y2="688" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#14B8A6"/>
+      <stop offset="0.47" stop-color="#0EA5E9"/>
+      <stop offset="0.72" stop-color="#3B82F6"/>
+      <stop offset="1" stop-color="#6366F1"/>
+    </linearGradient>
+    <linearGradient id="ink" x1="238" y1="280" x2="736" y2="840" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#9AABBF"/>
+      <stop offset="1" stop-color="#718198"/>
+    </linearGradient>
+    <filter id="cast-shadow" x="72" y="48" width="880" height="944" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feDropShadow dx="0" dy="22" stdDeviation="28" flood-color="#0F172A" flood-opacity="0.24"/>
+    </filter>
+  </defs>
+
+  <!-- The exterior remains transparent. A restrained cast shadow is baked in so the fixed artwork reads on pale launchers. -->
+  <path
+    d="M238 104H642L866 328V826C866 874.6 826.6 914 778 914H238C189.4 914 150 874.6 150 826V192C150 143.4 189.4 104 238 104Z"
+    fill="#0F172A"
+    filter="url(#cast-shadow)"
+    opacity="0.9"
+  />
+
+  <!-- Cool paper, deliberately independent of OS light/dark mode. -->
+  <path
+    d="M238 104H642L866 328V826C866 874.6 826.6 914 778 914H238C189.4 914 150 874.6 150 826V192C150 143.4 189.4 104 238 104Z"
+    fill="url(#paper)"
+    stroke="url(#edge)"
+    stroke-width="14"
+    stroke-linejoin="round"
+  />
+
+  <!-- Folded corner keeps the same rounded-return construction as the Icon Composer source. -->
+  <path d="M642 104L866 328H734C683.2 328 642 286.8 642 236Z" fill="url(#fold)"/>
+  <path
+    d="M642 104V236C642 286.8 683.2 328 734 328H866"
+    fill="none"
+    stroke="url(#edge)"
+    stroke-width="14"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+  />
+
+  <!-- Rendered Markdown rhythm; kept outside the main mark so it can be dropped at small sizes. -->
+  <rect x="236" y="224" width="294" height="28" rx="14" fill="url(#aurora)"/>
+  <g fill="url(#ink)">
+    <rect x="236" y="282" width="260" height="18" rx="9"/>
+    <rect x="236" y="322" width="342" height="18" rx="9"/>
+    <rect x="236" y="736" width="388" height="18" rx="9"/>
+    <rect x="236" y="776" width="500" height="18" rx="9"/>
+    <rect x="236" y="816" width="320" height="18" rx="9"/>
+  </g>
+
+  <!-- Original Pulse MD M + down-arrow proportions, enlarged into the icon's visual anchor. -->
+  <g fill="url(#aurora)">
+    <path d="M236 676V382H310L410 529L510 382H584V676H510V490L410 638L310 490V676Z"/>
+    <path d="M666 382H740V529H806L703 676L600 529H666Z"/>
+  </g>
+</svg>

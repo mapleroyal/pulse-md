@@ -1,0 +1,155 @@
+appId: io.github.mapleroyal.pulse-md
+productName: Pulse MD
+extraMetadata:
+  pmdDistributionChannel: official
+protocols:
+  - name: Pulse MD Scratch Link
+    schemes:
+      - pulse-md
+asar: true
+afterExtract: scripts/after-extract.mjs
+afterPack: scripts/after-pack.mjs
+electronFuses:
+  runAsNode: false
+  enableNodeOptionsEnvironmentVariable: false
+  enableNodeCliInspectArguments: false
+  enableEmbeddedAsarIntegrityValidation: true
+  onlyLoadAppFromAsar: true
+  grantFileProtocolExtraPrivileges: false
+directories:
+  output: release
+files:
+  - dist/**/*
+  - dist-electron/**/*
+  - LICENSE
+  - THIRD_PARTY_NOTICES.md
+  - package.json
+  - "!node_modules/**/*"
+mac:
+  category: public.app-category.productivity
+  darkModeSupport: true
+  icon: build/pulse-md.icon
+  binaries:
+    - Contents/Resources/native/macos-window-blur.node
+    - Contents/Resources/bin/pmd
+  fileAssociations:
+    - ext:
+        - txt
+        - text
+        - log
+        - json
+        - jsonc
+        - jsonl
+        - html
+        - htm
+        - css
+        - xml
+        - xsl
+        - xsd
+        - yaml
+        - yml
+        - toml
+        - ini
+        - cfg
+        - conf
+        - properties
+        - csv
+        - tsv
+        - js
+        - mjs
+        - cjs
+        - jsx
+        - ts
+        - mts
+        - cts
+        - tsx
+        - py
+        - pyw
+        - rb
+        - php
+        - java
+        - c
+        - h
+        - cc
+        - cpp
+        - cxx
+        - hpp
+        - hxx
+        - cs
+        - go
+        - rs
+        - swift
+        - kt
+        - kts
+        - scala
+        - sh
+        - bash
+        - zsh
+        - fish
+        - ps1
+        - sql
+        - lua
+        - pl
+        - pm
+        - r
+        - tex
+        - svg
+        - vue
+        - svelte
+      name: Plain text and code document
+      rank: Alternate
+      role: Editor
+  extraResources:
+    - from: dist-native/macos-window-blur.node
+      to: native/macos-window-blur.node
+    - from: dist-native/darwin/bin/pmd
+      to: bin/pmd
+  target:
+    - dmg
+    - zip
+dmg:
+  icon: build/pulse-md.icns
+win:
+  icon: build/icons/windows/pulse-md.ico
+  signExts:
+    - .exe
+    - .dll
+    - .node
+  extraResources:
+    - from: dist-native/win32/bin/pmd.exe
+      to: bin/pmd.exe
+  target:
+    - nsis
+  artifactName: ${productName}-${version}-${arch}.${ext}
+nsis:
+  # electron-builder only installs NSIS file associations machine-wide.
+  perMachine: true
+  include: build/installer.nsh
+linux:
+  category: Utility
+  icon: build/icons/linux
+  maintainer: Pulse MD Project
+  syncDesktopName: true
+  extraResources:
+    - from: build/icons/linux/512x512.png
+      to: icons/pulse-md.png
+    - from: dist-native/linux/bin/pmd
+      to: bin/pmd
+  target:
+    - AppImage
+    - deb
+  artifactName: ${productName}-${version}-${arch}.${ext}
+fileAssociations:
+  - ext:
+      - md
+      - markdown
+      - mdown
+      - mkd
+    description: Markdown document
+    mimeType: text/markdown
+    name: Markdown document
+    role: Editor
+npmRebuild: false
+compression: maximum
+electronLanguages:
+  - en-US

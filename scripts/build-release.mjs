@@ -1,0 +1,886 @@
+import { spawnSync } from "node:child_process"
+import { createHash } from "node:crypto"
+import {
+  lstatSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs"
+import os from "node:os"
+import path from "node:path"
+import { pathToFileURL } from "node:url"
+
+const projectRoot = path.resolve(import.meta.dirname, "..")
+const releaseDirectory = path.join(projectRoot, "release")
+const packageMetadata = JSON.parse(
+  readFileSync(path.join(projectRoot, "package.json"), "utf8")
+)
+const officialProductName = "Pulse MD"
+const officialBundleIdentifier = "io.github.mapleroyal.pulse-md"
+const launchServicesTool =
+  "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
+
+function commandFailure(label, result) {
+  const detail = result.error?.message || result.stderr || result.stdout
+  const suffix = detail ? `\n${String(detail).trim()}` : ""
+  return new Error(
+    `${label} failed${result.status === null ? "" : ` (exit ${result.status})`}${suffix}`
+  )
+}
+
+function run(command, args, options = {}) {
+  const result = spawnSync(command, args, {
+    cwd: projectRoot,
+    encoding: "utf8",
+    maxBuffer: 64 * 1024 * 1024,
+    ...options,
+  })
+  if (result.error || result.status !== 0) {
+    throw commandFailure(options.label || command, result)
+  }
+  return result
+}
+
+function runVisible(command, args, options = {}) {
+  const result = spawnSync(command, args, {
+    cwd: projectRoot,
+    env: options.env,
+    stdio: "inherit",
+  })
+  if (result.error || result.status !== 0) {
+    throw new Error(
+      `${options.label || command} failed${
+        result.status === null ? "" : ` (exit ${result.status})`
+      }`
+    )
+  }
+}
+
+function configuredGroup(environment, names) {
+  const present = names.filter((name) => environment[name])
+  if (present.length === 0) return false
+  if (present.length !== names.length) {
+    const missing = names.filter((name) => !environment[name])
+    throw new Error(
+      `Incomplete notarization credentials; missing ${missing.join(", ")}`
+    )
+  }
+  return true
+}
+
+export function notarizationAuthorization(environment) {
+  const apiNames = ["APPLE_API_KEY", "APPLE_API_KEY_ID", "APPLE_API_ISSUER"]
+  const appleIdNames = [
+    "APPLE_ID",
+    "APPLE_APP_SPECIFIC_PASSWORD",
+    "APPLE_TEAM_ID",
+  ]
+  const hasApiKey = configuredGroup(environment, apiNames)
+  const hasAppleId = configuredGroup(environment, appleIdNames)
+  const hasKeychainProfile = Boolean(environment.APPLE_KEYCHAIN_PROFILE)
+  const methodCount = [hasApiKey, hasAppleId, hasKeychainProfile].filter(
+    Boolean
+  ).length
+
+  if (methodCount === 0) {
+    throw new Error(
+      "Official macOS builds require one complete notarytool credential set: the APPLE_API_* triplet, the APPLE_ID triplet, or APPLE_KEYCHAIN_PROFILE"
+    )
+  }
+  if (methodCount > 1) {
+    throw new Error(
+      "Configure exactly one notarization credential method for an official macOS build"
+    )
+  }
+
+  if (hasApiKey) {
+    return {
+      kind: "api-key",
+      notarytoolArgs: [
+        "--key",
+        environment.APPLE_API_KEY,
+        "--key-id",
+        environment.APPLE_API_KEY_ID,
+        "--issuer",
+        environment.APPLE_API_ISSUER,
+      ],
+    }
+  }
+  if (hasAppleId) {
+    return {
+      kind: "apple-id",
+      notarytoolArgs: [
+        "--apple-id",
+        environment.APPLE_ID,
+        "--password",
+        environment.APPLE_APP_SPECIFIC_PASSWORD,
+        "--team-id",
+        environment.APPLE_TEAM_ID,
+      ],
+    }
+  }
+
+  return {
+    kind: "keychain-profile",
+    notarytoolArgs: [
+      "--keychain-profile",
+      environment.APPLE_KEYCHAIN_PROFILE,
+      ...(environment.APPLE_KEYCHAIN
+        ? ["--keychain", environment.APPLE_KEYCHAIN]
+        : []),
+    ],
+  }
+}
+
+export function parseDeveloperIdIdentities(output) {
+  return output
+    .split("\n")
+    .map((line) => /"(Developer ID Application:[^"]+)"/.exec(line)?.[1])
+    .filter(Boolean)
+}
+
+export function resolveMacSigningEnvironment(environment, identityOutput) {
+  const result = { ...environment }
+  const identities = parseDeveloperIdIdentities(identityOutput)
+  const requestedIdentity = environment.CSC_NAME?.trim()
+
+  if (requestedIdentity) {
+    if (!requestedIdentity.startsWith("Developer ID Application:")) {
+      throw new Error(
+        "CSC_NAME for an official macOS build must name a Developer ID Application certificate"
+      )
+    }
+    if (!environment.CSC_LINK && !identities.includes(requestedIdentity)) {
+      throw new Error(
+        `The requested Developer ID Application identity is not available in the keychain: ${requestedIdentity}`
+      )
+    }
+    result.CSC_NAME = requestedIdentity
+    return result
+  }
+
+  if (environment.CSC_LINK) return result
+  if (identities.length === 0) {
+    throw new Error(
+      "Official macOS builds require a Developer ID Application certificate in the keychain or CSC_LINK"
+    )
+  }
+  if (identities.length > 1) {
+    throw new Error(
+      "Multiple Developer ID Application certificates are available; set CSC_NAME to the intended exact identity"
+    )
+  }
+  result.CSC_NAME = identities[0]
+  return result
+}
+
+export function hasWindowsSigningCredentials(environment) {
+  return Boolean(environment.WIN_CSC_LINK || environment.CSC_LINK)
+}
+
+export function electronBuilderArguments(platform, outputDirectory) {
+  const publishNever = ["--publish", "never"]
+  const releaseConfiguration = ["--config", "electron-builder.config.cjs"]
+  const output = outputDirectory
+    ? [`--config.directories.output=${outputDirectory}`]
+    : []
+  if (platform === "mac") {
+    return [
+      "--mac",
+      ...releaseConfiguration,
+      "--config.mac.icon=build/pulse-md.icon",
+      "--config.forceCodeSigning=true",
+      "--config.mac.notarize=true",
+      ...output,
+      ...publishNever,
+    ]
+  }
+  if (platform === "win") {
+    return [
+      "--win",
+      ...releaseConfiguration,
+      "--config.forceCodeSigning=true",
+      ...output,
+      ...publishNever,
+    ]
+  }
+  if (platform === "linux")
+    return ["--linux", ...releaseConfiguration, ...output, ...publishNever]
+  throw new Error(`Unsupported release platform: ${platform}`)
+}
+
+function assertReleaseHost(platform) {
+  const requiredHost = { linux: "linux", mac: "darwin", win: "win32" }[platform]
+  if (!requiredHost)
+    throw new Error(`Unsupported release platform: ${platform}`)
+  if (process.platform !== requiredHost) {
+    throw new Error(
+      `Official ${platform} packages must be built on ${requiredHost}; current host is ${process.platform}`
+    )
+  }
+}
+
+function existingDirectory(directory) {
+  try {
+    const stat = lstatSync(directory)
+    return stat.isDirectory() && !stat.isSymbolicLink()
+  } catch (error) {
+    if (error?.code === "ENOENT") return false
+    throw error
+  }
+}
+
+function discoverAppBundles(directory) {
+  if (!existingDirectory(directory)) return []
+  const apps = []
+  const pending = [directory]
+  while (pending.length > 0) {
+    const current = pending.pop()
+    for (const entry of readdirSync(current, { withFileTypes: true })) {
+      if (entry.isSymbolicLink() || !entry.isDirectory()) continue
+      const target = path.join(current, entry.name)
+      if (entry.name.endsWith(".app")) {
+        apps.push(target)
+      } else {
+        pending.push(target)
+      }
+    }
+  }
+  return apps
+}
+
+function discoverFiles(directory, suffixes) {
+  if (!existingDirectory(directory)) return []
+  const files = []
+  const pending = [directory]
+  while (pending.length > 0) {
+    const current = pending.pop()
+    for (const entry of readdirSync(current, { withFileTypes: true })) {
+      if (entry.isSymbolicLink()) continue
+      const target = path.join(current, entry.name)
+      if (entry.isDirectory()) {
+        pending.push(target)
+      } else if (
+        entry.isFile() &&
+        suffixes.some((suffix) => entry.name.toLowerCase().endsWith(suffix))
+      ) {
+        files.push(target)
+      }
+    }
+  }
+  return files
+}
+
+function releaseEntries(directory) {
+  if (!existingDirectory(directory)) return []
+  return readdirSync(directory, { withFileTypes: true })
+}
+
+function validateReleaseDirectory() {
+  mkdirSync(releaseDirectory, { recursive: true })
+  if (!existingDirectory(releaseDirectory)) {
+    throw new Error(
+      `Release output is not a regular directory: ${releaseDirectory}`
+    )
+  }
+}
+
+function outputLabel(platform) {
+  return { linux: "linux", mac: "macos", win: "windows" }[platform]
+}
+
+export function releaseOutputNames(platform, architecture, version) {
+  const label = outputLabel(platform)
+  if (!label) throw new Error(`Unsupported release platform: ${platform}`)
+  if (!/^[a-z0-9_]+$/.test(architecture)) {
+    throw new Error(`Unexpected release architecture: ${architecture}`)
+  }
+  if (!/^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/.test(version)) {
+    throw new Error(`Unexpected release version: ${version}`)
+  }
+  return {
+    checksumName: `SHA256SUMS-${label}-${architecture}`,
+    directoryName: `official-${label}-${architecture}-${version}`,
+  }
+}
+
+function prepareReleaseOutput(platform, architecture) {
+  validateReleaseDirectory()
+  const names = releaseOutputNames(
+    platform,
+    architecture,
+    packageMetadata.version
+  )
+  const finalDirectory = path.join(releaseDirectory, names.directoryName)
+  if (lstatIfPresent(finalDirectory)) {
+    throw new Error(
+      `Refusing to overwrite an existing official output. Archive or remove it deliberately, then retry: ${finalDirectory}`
+    )
+  }
+  const stagingPrefix = path.join(
+    releaseDirectory,
+    `.staging-${outputLabel(platform)}-`
+  )
+  const stagingDirectory = mkdtempSync(stagingPrefix)
+  assertManagedStagingDirectory(stagingDirectory)
+  return { finalDirectory, stagingDirectory }
+}
+
+function lstatIfPresent(target) {
+  try {
+    return lstatSync(target)
+  } catch (error) {
+    if (error?.code === "ENOENT") return null
+    throw error
+  }
+}
+
+function assertManagedStagingDirectory(target) {
+  const relative = path.relative(releaseDirectory, target)
+  if (
+    path.dirname(relative) !== "." ||
+    !/^\.staging-(?:linux|macos|windows)-[A-Za-z0-9]+$/.test(relative)
+  ) {
+    throw new Error(`Refusing unmanaged release staging path: ${target}`)
+  }
+  const stat = lstatIfPresent(target)
+  if (stat && (!stat.isDirectory() || stat.isSymbolicLink())) {
+    throw new Error(
+      `Release staging path is not a regular directory: ${target}`
+    )
+  }
+}
+
+function removeReleaseStaging(target) {
+  assertManagedStagingDirectory(target)
+  if (!lstatIfPresent(target)) return
+  rmSync(target, { recursive: true })
+  if (lstatIfPresent(target)) {
+    throw new Error(`Release staging cleanup failed: ${target}`)
+  }
+}
+
+function promoteReleaseStaging(stagingDirectory, finalDirectory) {
+  assertManagedStagingDirectory(stagingDirectory)
+  if (lstatIfPresent(finalDirectory)) {
+    throw new Error(
+      `Official output appeared during the build: ${finalDirectory}`
+    )
+  }
+  renameSync(stagingDirectory, finalDirectory)
+  if (!existingDirectory(finalDirectory)) {
+    throw new Error(`Official output promotion failed: ${finalDirectory}`)
+  }
+}
+
+export function isUnusedUpdateMetadata(filename) {
+  return (
+    filename.endsWith(".blockmap") ||
+    /^latest(?:-[^.]+)?\.ya?ml$/.test(filename) ||
+    filename === "builder-debug.yml" ||
+    filename === "builder-effective-config.yaml"
+  )
+}
+
+export function authenticodeArguments(expectedVersion, files) {
+  return [
+    "-NoLogo",
+    "-NoProfile",
+    "-NonInteractive",
+    "-ExecutionPolicy",
+    "Bypass",
+    "-File",
+    path.join(projectRoot, "scripts", "verify-authenticode.ps1"),
+    "-ExpectedVersion",
+    expectedVersion,
+    ...files,
+  ]
+}
+
+function removeUnusedUpdateMetadata(directory) {
+  for (const entry of releaseEntries(directory)) {
+    if (!entry.isFile() || !isUnusedUpdateMetadata(entry.name)) continue
+    const target = path.join(directory, entry.name)
+    const stat = lstatIfPresent(target)
+    if (!stat?.isFile() || stat.isSymbolicLink()) {
+      throw new Error(`Refusing unexpected update metadata target: ${target}`)
+    }
+    rmSync(target)
+  }
+}
+
+function registeredOfficialMacBundles() {
+  const registrations = new Set()
+  let currentPath = null
+  for (const line of run(launchServicesTool, ["-dump"]).stdout.split("\n")) {
+    const pathMatch = /^path:\s+(.+?)(?: \(0x[0-9a-f]+\))?$/.exec(line)
+    if (pathMatch) {
+      currentPath = pathMatch[1]
+      continue
+    }
+    if (
+      currentPath &&
+      /^identifier:\s+io\.github\.mapleroyal\.pulse-md$/.test(line)
+    ) {
+      registrations.add(currentPath)
+    }
+  }
+  return registrations
+}
+
+function canonicalExistingPath(target) {
+  try {
+    return realpathSync.native(target)
+  } catch (error) {
+    if (error?.code === "ENOENT") return path.resolve(target)
+    throw error
+  }
+}
+
+function unregisterOfficialMacBundleIfRegistered(appBundle) {
+  if (process.platform !== "darwin") return
+  const canonicalAppBundle = canonicalExistingPath(appBundle)
+  const registered = [...registeredOfficialMacBundles()].some(
+    (candidate) => canonicalExistingPath(candidate) === canonicalAppBundle
+  )
+  if (!registered) return
+  run(launchServicesTool, ["-u", appBundle], {
+    label: `unregistering generated official app ${appBundle}`,
+  })
+}
+
+export function pruneReleaseStaging(
+  directory,
+  artifacts,
+  platform,
+  unregisterMacBundle = unregisterOfficialMacBundleIfRegistered
+) {
+  if (!existingDirectory(directory)) {
+    throw new Error(`Release staging directory is missing: ${directory}`)
+  }
+  const retained = new Set()
+  for (const artifact of artifacts) {
+    const resolved = path.resolve(artifact)
+    if (path.dirname(resolved) !== path.resolve(directory)) {
+      throw new Error(`Release artifact is outside staging: ${artifact}`)
+    }
+    const stat = lstatIfPresent(resolved)
+    if (!stat?.isFile() || stat.isSymbolicLink()) {
+      throw new Error(`Release artifact is not a regular file: ${artifact}`)
+    }
+    retained.add(resolved)
+  }
+
+  for (const entry of releaseEntries(directory)) {
+    const target = path.join(directory, entry.name)
+    if (retained.has(path.resolve(target))) continue
+    const stat = lstatIfPresent(target)
+    if (!stat || stat.isSymbolicLink()) {
+      throw new Error(`Unexpected release staging entry: ${target}`)
+    }
+    if (!stat.isDirectory()) {
+      throw new Error(`Unexpected release staging file: ${target}`)
+    }
+    if (platform === "mac") {
+      for (const appBundle of discoverAppBundles(target)) {
+        unregisterMacBundle(appBundle)
+      }
+    }
+    rmSync(target, { recursive: true })
+    if (lstatIfPresent(target)) {
+      throw new Error(`Unpacked release cleanup failed: ${target}`)
+    }
+  }
+}
+
+function verifyMacApp(appBundle, architecture) {
+  if (path.basename(appBundle) !== `${officialProductName}.app`) {
+    throw new Error(`Unexpected app in official release output: ${appBundle}`)
+  }
+  run("/usr/bin/codesign", [
+    "--verify",
+    "--deep",
+    "--strict",
+    "--verbose=2",
+    appBundle,
+  ])
+  const details = run("/usr/bin/codesign", [
+    "--display",
+    "--verbose=4",
+    appBundle,
+  ]).stderr
+  if (!/^Authority=Developer ID Application:/m.test(details)) {
+    throw new Error(
+      `Official app is not signed with Developer ID: ${appBundle}`
+    )
+  }
+  if (!details.split("\n").includes(`Identifier=${officialBundleIdentifier}`)) {
+    throw new Error(
+      `Official app has the wrong bundle identifier: ${appBundle}`
+    )
+  }
+  const version = run("/usr/bin/plutil", [
+    "-extract",
+    "CFBundleShortVersionString",
+    "raw",
+    "-o",
+    "-",
+    path.join(appBundle, "Contents", "Info.plist"),
+  ]).stdout.trim()
+  if (version !== packageMetadata.version) {
+    throw new Error(
+      `Official app version is ${version}, expected ${packageMetadata.version}: ${appBundle}`
+    )
+  }
+  const expectedMacArchitecture =
+    architecture === "x64" ? "x86_64" : architecture
+  const architectures = run("/usr/bin/lipo", [
+    "-archs",
+    path.join(appBundle, "Contents", "MacOS", officialProductName),
+  ]).stdout.trim()
+  if (architectures !== expectedMacArchitecture) {
+    throw new Error(
+      `Official app architecture is ${architectures}, expected ${expectedMacArchitecture}: ${appBundle}`
+    )
+  }
+  if (!/^CodeDirectory .+flags=.*\bruntime\b/m.test(details)) {
+    throw new Error(
+      `Official app is missing the hardened runtime: ${appBundle}`
+    )
+  }
+  run(
+    "/usr/sbin/spctl",
+    ["--assess", "--type", "execute", "--verbose=4", appBundle],
+    { label: "Gatekeeper app assessment" }
+  )
+  run("/usr/bin/xcrun", ["stapler", "validate", appBundle], {
+    label: "stapled app ticket validation",
+  })
+}
+
+function submitAndStapleDmg(dmg, authorization) {
+  const submission = run(
+    "/usr/bin/xcrun",
+    [
+      "notarytool",
+      "submit",
+      dmg,
+      ...authorization.notarytoolArgs,
+      "--wait",
+      "--output-format",
+      "json",
+    ],
+    { label: "DMG notarization" }
+  )
+  let result
+  try {
+    result = JSON.parse(submission.stdout)
+  } catch (error) {
+    throw new Error("notarytool returned invalid JSON for the DMG submission", {
+      cause: error,
+    })
+  }
+  if (result.status !== "Accepted") {
+    throw new Error(`Apple did not accept the DMG (status: ${result.status})`)
+  }
+  run("/usr/bin/xcrun", ["stapler", "staple", "-v", dmg], {
+    label: "DMG ticket stapling",
+  })
+  run("/usr/bin/xcrun", ["stapler", "validate", dmg], {
+    label: "stapled DMG ticket validation",
+  })
+  run(
+    "/usr/sbin/spctl",
+    [
+      "--assess",
+      "--type",
+      "open",
+      "--context",
+      "context:primary-signature",
+      "--verbose=4",
+      dmg,
+    ],
+    { label: "Gatekeeper DMG assessment" }
+  )
+}
+
+function verifyMacZip(zip, architecture) {
+  const temporaryDirectory = mkdtempSync(
+    path.join(os.tmpdir(), "pulse-md-release-zip-")
+  )
+  const expectedPrefix = path.join(os.tmpdir(), "pulse-md-release-zip-")
+  if (!temporaryDirectory.startsWith(expectedPrefix)) {
+    throw new Error(
+      `Refusing to use unexpected temporary directory: ${temporaryDirectory}`
+    )
+  }
+  try {
+    run("/usr/bin/ditto", ["-x", "-k", zip, temporaryDirectory], {
+      label: "release ZIP extraction",
+    })
+    const apps = discoverAppBundles(temporaryDirectory)
+    if (apps.length !== 1) {
+      throw new Error(
+        `Official release ZIP must contain one app; found ${apps.length}: ${zip}`
+      )
+    }
+    verifyMacApp(apps[0], architecture)
+  } finally {
+    for (const app of discoverAppBundles(temporaryDirectory)) {
+      unregisterOfficialMacBundleIfRegistered(app)
+    }
+    rmSync(temporaryDirectory, { recursive: true })
+  }
+}
+
+function verifyMacRelease(directory, architecture, authorization) {
+  const entries = releaseEntries(directory)
+  const outputDirectories = entries
+    .filter((entry) => entry.isDirectory() && /^mac(?:-|$)/.test(entry.name))
+    .map((entry) => path.join(directory, entry.name))
+  const apps = outputDirectories.flatMap(discoverAppBundles)
+  if (apps.length === 0) {
+    throw new Error("No unpacked official macOS app was produced")
+  }
+  for (const app of apps) verifyMacApp(app, architecture)
+
+  const versionPrefix = `${officialProductName}-${packageMetadata.version}`
+  const dmgs = entries
+    .filter(
+      (entry) =>
+        entry.isFile() &&
+        entry.name.startsWith(versionPrefix) &&
+        entry.name.endsWith(".dmg")
+    )
+    .map((entry) => path.join(directory, entry.name))
+  const zips = entries
+    .filter(
+      (entry) =>
+        entry.isFile() &&
+        entry.name.startsWith(versionPrefix) &&
+        entry.name.endsWith(".zip")
+    )
+    .map((entry) => path.join(directory, entry.name))
+  if (dmgs.length === 0 || zips.length === 0) {
+    throw new Error(
+      "Official macOS release must produce both DMG and ZIP artifacts"
+    )
+  }
+  for (const dmg of dmgs) submitAndStapleDmg(dmg, authorization)
+  for (const zip of zips) verifyMacZip(zip, architecture)
+  return [...dmgs, ...zips]
+}
+
+function verifyWindowsRelease(directory, architecture) {
+  const entries = releaseEntries(directory)
+  const expectedUnpackedName =
+    architecture === "x64" ? "win-unpacked" : `win-${architecture}-unpacked`
+  const unpacked = entries
+    .filter(
+      (entry) => entry.isDirectory() && entry.name === expectedUnpackedName
+    )
+    .map((entry) => path.join(directory, entry.name))
+  const installers = entries
+    .filter(
+      (entry) =>
+        entry.isFile() &&
+        entry.name.startsWith(
+          `${officialProductName}-${packageMetadata.version}-`
+        ) &&
+        entry.name.endsWith(`-${architecture}.exe`)
+    )
+    .map((entry) => path.join(directory, entry.name))
+  if (unpacked.length === 0 || installers.length === 0) {
+    throw new Error(
+      "Official Windows release must produce an unpacked app and installer"
+    )
+  }
+
+  const signedFiles = [...installers]
+  for (const directory of unpacked) {
+    const discovered = discoverFiles(directory, [".exe", ".dll", ".node"])
+    for (const required of [
+      path.join(directory, `${officialProductName}.exe`),
+      path.join(directory, "resources", "bin", "pmd.exe"),
+    ]) {
+      if (!discovered.includes(required)) {
+        throw new Error(`Required Windows executable is missing: ${required}`)
+      }
+    }
+    signedFiles.push(...discovered)
+  }
+  runVisible(
+    "powershell.exe",
+    authenticodeArguments(packageMetadata.version, signedFiles),
+    { label: "Authenticode verification" }
+  )
+  return installers
+}
+
+function linuxReleaseArtifacts(directory) {
+  const versionPrefix = `${officialProductName}-${packageMetadata.version}-`
+  const artifacts = releaseEntries(directory)
+    .filter(
+      (entry) =>
+        entry.isFile() &&
+        entry.name.startsWith(versionPrefix) &&
+        (entry.name.endsWith(".AppImage") || entry.name.endsWith(".deb"))
+    )
+    .map((entry) => path.join(directory, entry.name))
+  if (
+    !artifacts.some((artifact) => artifact.endsWith(".AppImage")) ||
+    !artifacts.some((artifact) => artifact.endsWith(".deb"))
+  ) {
+    throw new Error(
+      "Official Linux release must produce both AppImage and Debian artifacts"
+    )
+  }
+  return artifacts
+}
+
+function verifyLinuxPackageVersion(artifacts) {
+  for (const artifact of artifacts.filter((candidate) =>
+    candidate.endsWith(".deb")
+  )) {
+    const version = run("dpkg-deb", ["--field", artifact, "Version"], {
+      label: "Debian package version check",
+    }).stdout.trim()
+    if (version !== packageMetadata.version) {
+      throw new Error(
+        `Debian package version is ${version}, expected ${packageMetadata.version}: ${artifact}`
+      )
+    }
+  }
+}
+
+function writeChecksums(directory, platform, architecture, artifacts) {
+  if (artifacts.length === 0) return
+  const lines = [...artifacts]
+    .sort((left, right) =>
+      path.basename(left).localeCompare(path.basename(right))
+    )
+    .map((artifact) => {
+      const digest = createHash("sha256")
+        .update(readFileSync(artifact))
+        .digest("hex")
+      return `${digest}  ${path.basename(artifact)}`
+    })
+  const checksumFile = path.join(
+    directory,
+    releaseOutputNames(platform, architecture, packageMetadata.version)
+      .checksumName
+  )
+  writeFileSync(checksumFile, `${lines.join("\n")}\n`, {
+    encoding: "utf8",
+    flag: "w",
+    mode: 0o644,
+  })
+  console.log(`Wrote ${checksumFile}`)
+}
+
+function npmInvocation(args) {
+  const npmCli = process.env.npm_execpath
+  if (!npmCli) {
+    throw new Error("Run official release builds through an npm script")
+  }
+  return [process.execPath, [npmCli, ...args]]
+}
+
+function builderInvocation(args) {
+  const builderCli = path.join(
+    projectRoot,
+    "node_modules",
+    "electron-builder",
+    "cli.js"
+  )
+  return [process.execPath, [builderCli, ...args]]
+}
+
+async function main() {
+  const [platform, ...options] = process.argv.slice(2)
+  if (!["linux", "mac", "win"].includes(platform) || options.length !== 0) {
+    throw new Error("Usage: node scripts/build-release.mjs <mac|win|linux>")
+  }
+  assertReleaseHost(platform)
+
+  let childEnvironment = { ...process.env }
+  let notarization
+  if (platform === "mac") {
+    notarization = notarizationAuthorization(childEnvironment)
+    const identities = run("/usr/bin/security", [
+      "find-identity",
+      "-v",
+      "-p",
+      "codesigning",
+    ]).stdout
+    childEnvironment = resolveMacSigningEnvironment(
+      childEnvironment,
+      identities
+    )
+  } else if (platform === "win") {
+    if (!hasWindowsSigningCredentials(childEnvironment)) {
+      throw new Error(
+        "Official Windows builds require WIN_CSC_LINK (or CSC_LINK) signing credentials"
+      )
+    }
+  }
+
+  const architecture = process.arch
+  const output = prepareReleaseOutput(platform, architecture)
+  let stagingDirectory = output.stagingDirectory
+  try {
+    if (platform === "mac") {
+      const [npm, args] = npmInvocation(["run", "icon:build"])
+      runVisible(npm, args, { label: "Icon Composer build" })
+    }
+    {
+      const [npm, args] = npmInvocation(["run", "build"])
+      runVisible(npm, args, { label: "application build" })
+    }
+    if (platform === "mac") childEnvironment.PMD_ICON_COMPOSER_BUILD = "1"
+    {
+      const [builder, args] = builderInvocation(
+        electronBuilderArguments(platform, stagingDirectory)
+      )
+      runVisible(builder, args, {
+        env: childEnvironment,
+        label: "electron-builder",
+      })
+    }
+
+    const artifacts =
+      platform === "mac"
+        ? verifyMacRelease(stagingDirectory, architecture, notarization)
+        : platform === "win"
+          ? verifyWindowsRelease(stagingDirectory, architecture)
+          : linuxReleaseArtifacts(stagingDirectory)
+    if (platform === "linux") verifyLinuxPackageVersion(artifacts)
+    removeUnusedUpdateMetadata(stagingDirectory)
+    pruneReleaseStaging(stagingDirectory, artifacts, platform)
+    writeChecksums(stagingDirectory, platform, architecture, artifacts)
+    promoteReleaseStaging(stagingDirectory, output.finalDirectory)
+    stagingDirectory = null
+    console.log(
+      `Official ${platform} release build completed with publication disabled: ${output.finalDirectory}`
+    )
+  } finally {
+    if (stagingDirectory) removeReleaseStaging(stagingDirectory)
+  }
+}
+
+if (
+  process.argv[1] &&
+  import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href
+) {
+  main().catch((error) => {
+    console.error(`Release build failed: ${error.message}`)
+    process.exitCode = 1
+  })
+}
+
+export { officialBundleIdentifier }

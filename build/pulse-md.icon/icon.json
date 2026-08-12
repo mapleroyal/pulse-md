@@ -1,0 +1,191 @@
+{
+  "fill" : "system-light",
+  "groups" : [
+    {
+      "blur-material-specializations" : [
+        {
+          "appearance" : "dark",
+          "value" : 0.3
+        }
+      ],
+      "layers" : [
+        {
+          "image-name" : "folded-corner-dark.svg",
+          "name" : "folded-corner-dark"
+        }
+      ],
+      "name" : "Dark Mode Corner",
+      "opacity-specializations" : [
+        {
+          "value" : 0
+        },
+        {
+          "appearance" : "dark",
+          "value" : 1
+        }
+      ],
+      "position" : {
+        "scale" : 1.75,
+        "translation-in-points" : [
+          -36,
+          178
+        ]
+      },
+      "shadow" : {
+        "kind" : "neutral",
+        "opacity" : 0.5
+      },
+      "translucency-specializations" : [
+        {
+          "value" : {
+            "enabled" : true,
+            "value" : 0.5
+          }
+        },
+        {
+          "appearance" : "dark",
+          "value" : {
+            "enabled" : true,
+            "value" : 1
+          }
+        }
+      ]
+    },
+    {
+      "blend-mode" : "plus-darker",
+      "blur-material-specializations" : [
+        {
+          "value" : 0.37
+        },
+        {
+          "appearance" : "dark",
+          "value" : null
+        }
+      ],
+      "layers" : [
+        {
+          "image-name" : "folded-corner-light.svg",
+          "name" : "folded-corner-light"
+        }
+      ],
+      "name" : "Light Mode Corner",
+      "opacity-specializations" : [
+        {
+          "value" : 1
+        },
+        {
+          "appearance" : "dark",
+          "value" : 0
+        }
+      ],
+      "position" : {
+        "scale" : 1.75,
+        "translation-in-points" : [
+          -36,
+          178
+        ]
+      },
+      "shadow" : {
+        "kind" : "layer-color",
+        "opacity" : 1
+      },
+      "translucency-specializations" : [
+        {
+          "value" : {
+            "enabled" : false,
+            "value" : 1
+          }
+        },
+        {
+          "appearance" : "dark",
+          "value" : {
+            "enabled" : true,
+            "value" : 1
+          }
+        }
+      ]
+    },
+    {
+      "layers" : [
+        {
+          "image-name" : "markdown-mark-dark.svg",
+          "name" : "markdown-mark-dark"
+        },
+        {
+          "image-name" : "placeholder-lines-dark.svg",
+          "name" : "placeholder-lines-dark"
+        }
+      ],
+      "name" : "Dark Mode Content",
+      "opacity-specializations" : [
+        {
+          "value" : 0
+        },
+        {
+          "appearance" : "dark",
+          "value" : 1
+        }
+      ],
+      "position" : {
+        "scale" : 1.43,
+        "translation-in-points" : [
+          0,
+          0
+        ]
+      },
+      "shadow-specializations" : [
+        {
+          "appearance" : "dark",
+          "value" : {
+            "kind" : "none",
+            "opacity" : 0.5
+          }
+        }
+      ],
+      "translucency" : {
+        "enabled" : true,
+        "value" : 0.5
+      }
+    },
+    {
+      "layers" : [
+        {
+          "image-name" : "markdown-mark-light.svg",
+          "name" : "markdown-mark-light"
+        },
+        {
+          "image-name" : "placeholder-lines-light.svg",
+          "name" : "placeholder-lines-light"
+        }
+      ],
+      "name" : "Light Mode Content",
+      "opacity-specializations" : [
+        {
+          "appearance" : "dark",
+          "value" : 0
+        }
+      ],
+      "position" : {
+        "scale" : 1.43,
+        "translation-in-points" : [
+          0,
+          0
+        ]
+      },
+      "shadow" : {
+        "kind" : "neutral",
+        "opacity" : 0.5
+      },
+      "translucency" : {
+        "enabled" : true,
+        "value" : 0.5
+      }
+    }
+  ],
+  "supported-platforms" : {
+    "circles" : [
+      "watchOS"
+    ],
+    "squares" : "shared"
+  }
+}

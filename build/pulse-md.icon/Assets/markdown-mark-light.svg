@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="mark-gradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#14B8A6"/>
+      <stop offset="50%" stop-color="#0EA5E9"/>
+      <stop offset="100%" stop-color="#6366F1"/>
+    </linearGradient>
+  </defs>
+  <g fill="url(#mark-gradient)">
+    <path d="M272 632V392H332L412 512L492 392H552V632H492V472L412 592L332 472V632Z"/>
+    <path d="M642 392H702V512H752L672 632L592 512H642Z"/>
+  </g>
+</svg>

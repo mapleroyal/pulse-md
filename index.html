@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self' 'sha256-tbdmEBDVQn3ZVSbtRByf9yMtSD97bb8mX2gU1amQLI0='; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' pulse-md-image: http: https: data: blob:; connect-src 'self'"
+    />
+    <meta name="color-scheme" content="light dark" />
+    <title>Pulse MD</title>
+    <script>
+      ;(() => {
+        performance.mark("pmd:theme-bootstrap")
+        const parameters = new URLSearchParams(window.location.search)
+        const appearanceMode = parameters.get("appearanceMode")
+        const darkSlot =
+          appearanceMode === "dark" ||
+          (appearanceMode !== "light" &&
+            window.matchMedia("(prefers-color-scheme: dark)").matches)
+        const root = document.documentElement
+        const slot = darkSlot ? "dark" : "light"
+        const backgroundParameter = parameters.get(`${slot}Background`)
+        const foregroundParameter = parameters.get(`${slot}Foreground`)
+        const surfaceSchemeParameter = parameters.get(`${slot}SurfaceScheme`)
+        const fallbackBackground = darkSlot ? "#181818" : "#ffffff"
+        const fallbackForeground = darkSlot ? "#f5f5f5" : "#171717"
+        const background = /^#[\da-f]{6}$/i.test(backgroundParameter ?? "")
+          ? backgroundParameter
+          : fallbackBackground
+        const foreground = /^#[\da-f]{6}$/i.test(foregroundParameter ?? "")
+          ? foregroundParameter
+          : fallbackForeground
+        const darkSurface =
+          surfaceSchemeParameter === "dark" ||
+          (surfaceSchemeParameter !== "light" && darkSlot)
+        const backgroundCapability = parameters.get("backgroundCapability")
+        const requestedTranslucency = Number(
+          parameters.get("backgroundTranslucency")
+        )
+        const backgroundTranslucency =
+          Number.isFinite(requestedTranslucency) &&
+          requestedTranslucency >= 0 &&
+          requestedTranslucency <= 1
+            ? requestedTranslucency
+            : 0
+        const translucentBackground =
+          backgroundCapability === "darwin" &&
+          parameters.get("backgroundEffectEnabled") === "true" &&
+          backgroundTranslucency > 0
+        const requestedLaunchTransitionDuration = Number(
+          parameters.get("launchTransitionDuration")
+        )
+        const launchTransitionPending =
+          translucentBackground &&
+          Number.isFinite(requestedLaunchTransitionDuration) &&
+          requestedLaunchTransitionDuration > 0 &&
+          !window.matchMedia("(prefers-reduced-motion: reduce)").matches
+        const finalSurfaceOpacity = translucentBackground
+          ? 1 - backgroundTranslucency
+          : 1
+        const finalSurfaceAlpha = Math.round(finalSurfaceOpacity * 255)
+          .toString(16)
+          .padStart(2, "0")
+        const finalSurfaceBackground = `${background}${finalSurfaceAlpha}`
+        const finalWindowBackground = translucentBackground
+          ? `${background}00`
+          : background
+        const windowBackground = launchTransitionPending
+          ? background
+          : finalWindowBackground
+
+        root.classList.toggle("dark", darkSurface)
+        root.classList.toggle("light", !darkSurface)
+        root.dataset.backgroundCapability = backgroundCapability ?? "opaque"
+        root.dataset.backgroundEffect = translucentBackground
+          ? "translucent"
+          : "opaque"
+        root.dataset.launchTransition = launchTransitionPending
+          ? "pending"
+          : "settled"
+        root.style.colorScheme = darkSurface ? "dark" : "light"
+        root.style.setProperty("--document-background", background)
+        root.style.setProperty(
+          "--document-surface-background",
+          finalSurfaceBackground
+        )
+        root.style.setProperty(
+          "--document-window-background",
+          windowBackground
+        )
+        root.style.setProperty(
+          "--document-window-final-background",
+          finalWindowBackground
+        )
+        root.style.setProperty("--document-foreground", foreground)
+        // Give Chromium a painted canvas in the launch colors immediately. The
+        // full stylesheet arrives later and keeps reading the same variables.
+        root.style.background = "transparent"
+        root.style.color = "var(--document-foreground)"
+      })()
+    </script>
+    <style>
+      html,
+      body,
+      #root {
+        width: 100%;
+        height: 100%;
+        margin: 0;
+      }
+      html,
+      body {
+        overflow: hidden;
+      }
+      html {
+        background: transparent;
+      }
+      body {
+        background: transparent;
+      }
+      html.dark {
+        --document-background: #181818;
+        --document-foreground: #f5f5f5;
+      }
+      html.light {
+        --document-background: #ffffff;
+        --document-foreground: #171717;
+      }
+      @media (prefers-color-scheme: dark) {
+        html:not(.light) {
+          --document-background: #181818;
+          --document-foreground: #f5f5f5;
+        }
+      }
+    </style>
+  </head>
+  <body spellcheck="true">
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

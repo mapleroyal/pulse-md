@@ -1,0 +1,28 @@
+@media (max-width: 360px) {
+  [data-settings-dialog-footer] {
+    gap: 2px;
+    padding: 6px;
+  }
+
+  .settings-input-pair,
+  .settings-indent-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .settings-zoom-row,
+  .settings-indent-row {
+    display: grid;
+  }
+
+  .settings-zoom-row {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+  }
+
+  .settings-zoom-row > div {
+    width: auto;
+  }
+
+  .settings-indent-row > input {
+    width: 100%;
+  }
+}

@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="border-gradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#E2E8F0"/>
+      <stop offset="100%" stop-color="#CBD5E1"/>
+    </linearGradient>
+    <linearGradient id="flap-gradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#FFFFFF"/>
+      <stop offset="100%" stop-color="#E2E8F0"/>
+    </linearGradient>
+  </defs>
+  <!-- The first closed fill replaces the original live SVG stroke. -->
+  <path d="M630 107.172L836.828 314H712A82 82 0 0 1 630 232Z" fill="url(#border-gradient)"/>
+  <path d="M634 116.828L827.172 310H712A78 78 0 0 1 634 232Z" fill="url(#flap-gradient)"/>
+</svg>
