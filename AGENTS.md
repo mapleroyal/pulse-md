@@ -28,5 +28,9 @@ Repository architecture and UI implementation conventions live in `ARCHITECTURE.
 - **Cleanup**: Whenever an attempt doesn't work, remove it before trying the next one.
 - Reference or use markdown-test.md in the project root for testing markdown rendering and editing behavior. You may also create your own demo files as needed.
 
+## Accessibility
+
+Do not build in accessibility beyond the minimum standard. I don't want to maintain accessibility features/functionality, and I don't use screen readers.
+
 > [!Important] Computer Use Capability
 > You can inspect code bases of installed apps, and obviously of this app. But don't bother with the Computer Use capability—it uses a lot of tokens. Verify stuff in other ways if necessary; I'll handle the manual checks.
