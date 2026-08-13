@@ -1,8 +1,7 @@
 export type EditorMode = "live" | "source"
 export type DocumentKind = "markdown" | "plain-text"
 export type AppPlatform = "darwin" | "linux" | "win32"
-export type ScratchLinkScheme =
-  "pulse-md" | "pulse-md-local" | "pulse-md-development"
+export type ScratchLinkScheme = "pulse-md" | "pulse-md-development"
 export type TabId = string
 export type WindowId = number
 export type TransferId = string

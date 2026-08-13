@@ -88,9 +88,9 @@ describe("copied heading links", () => {
         null,
         "other-tab",
         scratchMetadata,
-        "pulse-md-local"
+        "pulse-md-development"
       )
-    ).toBe(`pulse-md-local://scratch/${scratchId}#caf%C3%A9-heading`)
+    ).toBe(`pulse-md-development://scratch/${scratchId}#caf%C3%A9-heading`)
     expect(
       headingLinkForPaste(
         null,

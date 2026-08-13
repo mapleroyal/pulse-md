@@ -67,6 +67,15 @@ describe("Markdown heading index", () => {
     expect(githubHeadingSlug("A & B / C?")).toBe("a--b--c")
   })
 
+  test("uses HTML numeric character-reference replacement rules", () => {
+    const headings = markdownHeadings(
+      markdownState("# Cost &#x80; &#128; invalid &#xD800; &#55296;")
+    )
+
+    expect(headings[0]?.plainText).toBe("Cost € € invalid � �")
+    expect(headings[0]?.slug).toBe("cost-€-€-invalid-�-�")
+  })
+
   test("resolves percent-encoded fragments against generated ids", () => {
     const headings = markdownHeadings(markdownState("# Café notes"))
     expect(headingForFragment(headings, "#caf%C3%A9-notes")?.plainText).toBe(

@@ -1,16 +1,13 @@
 import { spawn } from "node:child_process"
 import { createRequire } from "node:module"
-import {
-  access,
-  mkdtemp,
-  readdir,
-  rm,
-} from "node:fs/promises"
+import { access, mkdtemp, readFile, readdir, rm } from "node:fs/promises"
 import os from "node:os"
 import net from "node:net"
 import path from "node:path"
 
 import { FuseV1Options, getCurrentFuseWire } from "@electron/fuses"
+
+import { assertAdaptiveMacIconAssetInfo } from "./macos-icon-assets.mjs"
 
 const projectRoot = path.resolve(import.meta.dirname, "..")
 const releaseDirectory = path.join(projectRoot, "release")
@@ -75,6 +72,7 @@ async function packagedLayout() {
           infoPlist,
         ])
         if (executableName.error || executableName.code !== 0) continue
+        if (executableName.stdout.trim() !== "Pulse MD") continue
         const executable = path.join(
           appBundle,
           "Contents",
@@ -84,7 +82,6 @@ async function packagedLayout() {
         if (!(await isFile(executable))) continue
         layouts.push({
           executable,
-          officialPackage: executableName.stdout.trim() === "Pulse MD",
           productName: executableName.stdout.trim(),
           resources: path.join(appBundle, "Contents", "Resources"),
         })
@@ -92,17 +89,13 @@ async function packagedLayout() {
       continue
     }
 
-    const names =
-      process.platform === "win32"
-        ? ["Pulse MD.exe", "Pulse MD Local.exe"]
-        : ["pulse-md", "pulse-md-local"]
+    const names = process.platform === "win32" ? ["Pulse MD.exe"] : ["pulse-md"]
     for (const name of names) {
       const executable = path.join(root, name)
       if (!(await isFile(executable))) continue
       layouts.push({
         executable,
-        officialPackage: name === names[0],
-        productName: name.replace(/\.exe$/, ""),
+        productName: "Pulse MD",
         resources: path.join(root, "resources"),
       })
     }
@@ -124,17 +117,11 @@ async function packagedLayout() {
   )
 }
 
-async function verifyPackagedResources(resources, officialPackage) {
+async function verifyPackagedResources(resources) {
   const cli = path.join(
     resources,
     "bin",
-    officialPackage
-      ? process.platform === "win32"
-        ? "pmd.exe"
-        : "pmd"
-      : process.platform === "win32"
-        ? "pmd-local.exe"
-        : "pmd-local"
+    process.platform === "win32" ? "pmd.exe" : "pmd"
   )
   const nativeAddon =
     process.platform === "darwin"
@@ -162,13 +149,7 @@ async function verifyPackagedResources(resources, officialPackage) {
   const competingCli = path.join(
     resources,
     "bin",
-    officialPackage
-      ? process.platform === "win32"
-        ? "pmd-local.exe"
-        : "pmd-local"
-      : process.platform === "win32"
-        ? "pmd.exe"
-        : "pmd"
+    process.platform === "win32" ? "pmd-local.exe" : "pmd-local"
   )
   if (await isFile(competingCli)) {
     throw new Error(`Package contains another channel's CLI: ${competingCli}`)
@@ -176,25 +157,18 @@ async function verifyPackagedResources(resources, officialPackage) {
   return { cli, nativeAddon }
 }
 
-async function verifyPackagedMetadata(resources, officialPackage) {
+async function verifyPackagedMetadata(resources) {
   const { extractFile } = require("@electron/asar")
   const metadata = JSON.parse(
     extractFile(path.join(resources, "app.asar"), "package.json").toString(
       "utf8"
     )
   )
-  const expected = officialPackage
-    ? {
-        name: "pulse-md",
-        pmdDistributionChannel: "official",
-        productName: "Pulse MD",
-      }
-    : {
-        desktopName: "pulse-md-local.desktop",
-        name: "pulse-md-local",
-        pmdDistributionChannel: "local",
-        productName: "Pulse MD Local",
-      }
+  const expected = {
+    name: "pulse-md",
+    pmdDistributionChannel: "canonical",
+    productName: "Pulse MD",
+  }
   for (const [key, value] of Object.entries(expected)) {
     if (metadata[key] !== value) {
       throw new Error(
@@ -230,7 +204,7 @@ async function verifyElectronFuses(executable) {
   }
 }
 
-async function verifyMacProtocolRegistration(executable, officialPackage) {
+async function verifyMacProtocolRegistration(executable) {
   if (process.platform !== "darwin") return
 
   const infoPlist = path.resolve(path.dirname(executable), "..", "Info.plist")
@@ -267,22 +241,24 @@ async function verifyMacProtocolRegistration(executable, officialPackage) {
           : []
       )
     : []
-  const expectedScheme = officialPackage ? "pulse-md" : "pulse-md-local"
+  const expectedScheme = "pulse-md"
   if (!schemes.includes(expectedScheme)) {
     throw new Error(
       `Packaged app does not register the ${expectedScheme} URL scheme: ${infoPlist}`
     )
   }
-  const competingScheme = officialPackage ? "pulse-md-local" : "pulse-md"
-  if (schemes.includes(competingScheme)) {
+  const competingSchemes = ["pulse-md-local", "pulse-md-development"].filter(
+    (scheme) => schemes.includes(scheme)
+  )
+  if (competingSchemes.length > 0) {
     throw new Error(
-      `Packaged app registers another channel's URL scheme (${schemes.join(", ")}): ${infoPlist}`
+      `Packaged app registers another channel's URL scheme (${competingSchemes.join(", ")}): ${infoPlist}`
     )
   }
 }
 
-async function verifyMacLocalIdentity(executable, officialPackage) {
-  if (process.platform !== "darwin" || officialPackage) return
+async function verifyMacIdentity(executable) {
+  if (process.platform !== "darwin") return
   const infoPlist = path.resolve(path.dirname(executable), "..", "Info.plist")
   const bundleIdentifier = await capture("/usr/bin/plutil", [
     "-extract",
@@ -295,37 +271,13 @@ async function verifyMacLocalIdentity(executable, officialPackage) {
   if (
     bundleIdentifier.error ||
     bundleIdentifier.code !== 0 ||
-    bundleIdentifier.stdout.trim() !== "io.github.mapleroyal.pulse-md.local"
+    bundleIdentifier.stdout.trim() !== "io.github.mapleroyal.pulse-md"
   ) {
     throw new Error(
-      `Local package has the wrong bundle identifier (${describeChildResult(bundleIdentifier)}):\n${
+      `Packaged app has the wrong bundle identifier (${describeChildResult(bundleIdentifier)}):\n${
         bundleIdentifier.stderr || bundleIdentifier.stdout
       }`
     )
-  }
-
-  const documentTypes = await capture("/usr/bin/plutil", [
-    "-extract",
-    "CFBundleDocumentTypes",
-    "json",
-    "-o",
-    "-",
-    infoPlist,
-  ])
-  if (!documentTypes.error && documentTypes.code === 0) {
-    let registrations
-    try {
-      registrations = JSON.parse(documentTypes.stdout)
-    } catch (error) {
-      throw new Error("Local package CFBundleDocumentTypes is not valid JSON", {
-        cause: error,
-      })
-    }
-    if (Array.isArray(registrations) && registrations.length > 0) {
-      throw new Error(
-        `Local package unexpectedly registers document types: ${infoPlist}`
-      )
-    }
   }
 }
 
@@ -341,8 +293,15 @@ async function verifyMacIconPackaging(executable, resources) {
     "-",
     infoPlist,
   ])
-  const usesIconComposer =
-    !iconName.error && iconName.code === 0 && iconName.stdout.trim() === "Icon"
+  if (
+    iconName.error ||
+    iconName.code !== 0 ||
+    iconName.stdout.trim() !== "Icon"
+  ) {
+    throw new Error(
+      `Packaged app does not declare its adaptive icon (${describeChildResult(iconName)}):\n${iconName.stderr || iconName.stdout}`
+    )
+  }
 
   const iconFile = await capture("/usr/bin/plutil", [
     "-extract",
@@ -363,12 +322,44 @@ async function verifyMacIconPackaging(executable, resources) {
   const legacyIconName = iconFile.stdout.trim().endsWith(".icns")
     ? iconFile.stdout.trim()
     : `${iconFile.stdout.trim()}.icns`
-  const iconResources = [path.join(resources, legacyIconName)]
-  if (usesIconComposer) iconResources.push(path.join(resources, "Assets.car"))
+  const legacyIcon = path.join(resources, legacyIconName)
+  const iconResources = [legacyIcon, path.join(resources, "Assets.car")]
   for (const resource of iconResources) {
     if (!(await isFile(resource))) {
       throw new Error(`Packaged icon resource is missing: ${resource}`)
     }
+  }
+  const assetCatalog = path.join(resources, "Assets.car")
+  const assetInfoResult = await capture("/usr/bin/assetutil", [
+    "--info",
+    assetCatalog,
+  ])
+  if (
+    assetInfoResult.error ||
+    assetInfoResult.code !== 0 ||
+    assetInfoResult.signal
+  ) {
+    throw new Error(
+      `Packaged adaptive icon metadata could not be read (${describeChildResult(assetInfoResult)}):\n${assetInfoResult.stderr || assetInfoResult.stdout}`
+    )
+  }
+  let assetInfo
+  try {
+    assetInfo = JSON.parse(assetInfoResult.stdout)
+  } catch (error) {
+    throw new Error(`Packaged adaptive icon metadata is not valid JSON`, {
+      cause: error,
+    })
+  }
+  assertAdaptiveMacIconAssetInfo(assetInfo, assetCatalog)
+  const [expectedFallback, packagedFallback] = await Promise.all([
+    readFile(path.join(projectRoot, "build", "pulse-md.icns")),
+    readFile(legacyIcon),
+  ])
+  if (!packagedFallback.equals(expectedFallback)) {
+    throw new Error(
+      `Packaged legacy icon does not match build/pulse-md.icns: ${legacyIcon}`
+    )
   }
 }
 
@@ -507,16 +498,11 @@ function describeChildResult(result) {
   return result.signal ?? `exit ${result.code ?? "unknown"}`
 }
 
-async function verifyPackagedCli(
-  cli,
-  executable,
-  expectedProductName,
-  officialPackage
-) {
+async function verifyPackagedCli(cli, executable, expectedProductName) {
   const temporaryDirectory = await mkdtemp(
     path.join(os.tmpdir(), "pmd-packaged-cli-")
   )
-  const expectedCliIdentity = officialPackage ? "pulse-md" : "pulse-md-local"
+  const expectedCliIdentity = "pulse-md"
   const endpoint =
     process.platform === "win32"
       ? `\\\\.\\pipe\\${expectedCliIdentity}-packaged-${process.pid}-${Date.now()}`
@@ -598,9 +584,8 @@ async function verifyPackagedCli(
 
     if (
       !doctor.stdout.includes(`Endpoint: ${endpoint}`) ||
-      (officialPackage
-        ? doctor.stdout.includes("Pulse MD Local")
-        : !doctor.stdout.includes("pulse-md-local"))
+      doctor.stdout.includes("Pulse MD Local") ||
+      doctor.stdout.includes("pulse-md-local")
     ) {
       throw new Error(
         `Packaged runtime identity is wrong (${describeChildResult(doctor)}):\n${doctor.stderr || doctor.stdout}`
@@ -700,13 +685,12 @@ async function waitForEndpointShutdown(endpoint) {
 async function verifyDefaultPackagedCliIdentity(
   cli,
   executable,
-  expectedProductName,
-  officialPackage
+  expectedProductName
 ) {
   const temporaryDirectory = await mkdtemp(
     path.join(os.tmpdir(), "pmd-default-identity-")
   )
-  const cliIdentity = officialPackage ? "pulse-md" : "pulse-md-local"
+  const cliIdentity = "pulse-md"
   const environment = {
     ...process.env,
     APPDATA: path.join(temporaryDirectory, "AppData", "Roaming"),
@@ -737,9 +721,9 @@ async function verifyDefaultPackagedCliIdentity(
 
     const lines = doctor.stdout.trimEnd().split(/\r?\n/)
     const value = (label) =>
-      lines.find((line) => line.startsWith(`${label}: `))?.slice(
-        label.length + 2
-      )
+      lines
+        .find((line) => line.startsWith(`${label}: `))
+        ?.slice(label.length + 2)
     const profileDirectory = value("Profiles")
     const scratchDirectory = value("Scratch")
     if (
@@ -796,27 +780,18 @@ function runPlaywright(executable) {
 }
 
 const layout = await packagedLayout()
-const resources = await verifyPackagedResources(
-  layout.resources,
-  layout.officialPackage
-)
-await verifyPackagedMetadata(layout.resources, layout.officialPackage)
+const resources = await verifyPackagedResources(layout.resources)
+await verifyPackagedMetadata(layout.resources)
 await verifyMacIconPackaging(layout.executable, layout.resources)
 await verifyMacPrivacyMetadata(layout.executable)
-await verifyMacProtocolRegistration(layout.executable, layout.officialPackage)
-await verifyMacLocalIdentity(layout.executable, layout.officialPackage)
+await verifyMacProtocolRegistration(layout.executable)
+await verifyMacIdentity(layout.executable)
 await verifyElectronFuses(layout.executable)
 verifyMacNativeAddon(resources.nativeAddon)
-await verifyPackagedCli(
-  resources.cli,
-  layout.executable,
-  layout.productName,
-  layout.officialPackage
-)
+await verifyPackagedCli(resources.cli, layout.executable, layout.productName)
 await verifyDefaultPackagedCliIdentity(
   resources.cli,
   layout.executable,
-  layout.productName,
-  layout.officialPackage
+  layout.productName
 )
 await runPlaywright(layout.executable)

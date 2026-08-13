@@ -41,17 +41,21 @@ describe("parseLaunchIntent", () => {
   it("keeps operating-system scratch launches in their app channel", () => {
     expect(
       parseLaunchIntent(
-        [executablePath, `pulse-md-local://scratch/${scratchId}#Local`],
+        [
+          executablePath,
+          path.resolve(path.sep, "projects", "pulse-md"),
+          `pulse-md-development://scratch/${scratchId}#Dev`,
+        ],
         {
-          expectedScratchLinkScheme: "pulse-md-local",
-          isPackaged: true,
+          expectedScratchLinkScheme: "pulse-md-development",
+          isPackaged: false,
           workingDirectory,
         }
       )
     ).toMatchObject({ kind: "open-scratch", scratchId })
     expect(() =>
       parseLaunchIntent([executablePath, `pulse-md://scratch/${scratchId}`], {
-        expectedScratchLinkScheme: "pulse-md-local",
+        expectedScratchLinkScheme: "pulse-md-development",
         isPackaged: true,
         workingDirectory,
       })

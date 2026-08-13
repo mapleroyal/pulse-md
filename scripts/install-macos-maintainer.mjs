@@ -93,6 +93,13 @@ function requireRegularDirectory(target, description) {
   }
 }
 
+function requireRegularFile(target, description) {
+  const stat = pathStat(target)
+  if (!stat || stat.isSymbolicLink() || !stat.isFile()) {
+    throw new Error(`${description} is not a regular file: ${target}`)
+  }
+}
+
 function plistValue(appBundle, key) {
   return run("/usr/bin/plutil", [
     "-extract",
@@ -110,6 +117,7 @@ function validateBundle(
     canonicalName = true,
     currentVersion = true,
     requireAdHocSignature = false,
+    requireAdaptiveIcon = true,
     requireHelper = true,
   } = {}
 ) {
@@ -134,10 +142,32 @@ function validateBundle(
       : []),
   ]
   for (const required of requiredExecutables) {
-    const stat = pathStat(required)
-    if (!stat?.isFile() || stat.isSymbolicLink()) {
-      throw new Error(`Required installed executable is missing: ${required}`)
+    requireRegularFile(required, "Required installed executable")
+  }
+  if (requireAdaptiveIcon) {
+    if (plistValue(appBundle, "CFBundleIconName") !== "Icon") {
+      throw new Error(
+        `Packaged app does not declare its adaptive icon: ${appBundle}`
+      )
     }
+    const configuredIconFile = plistValue(appBundle, "CFBundleIconFile")
+    if (!configuredIconFile) {
+      throw new Error(
+        `Packaged app does not declare its fallback icon: ${appBundle}`
+      )
+    }
+    const fallbackIconName = configuredIconFile.endsWith(".icns")
+      ? configuredIconFile
+      : `${configuredIconFile}.icns`
+    const resources = path.join(appBundle, "Contents", "Resources")
+    requireRegularFile(
+      path.join(resources, "Assets.car"),
+      "Icon Composer asset catalog"
+    )
+    requireRegularFile(
+      path.join(resources, fallbackIconName),
+      "Legacy icon fallback"
+    )
   }
   run("/usr/bin/codesign", [
     "--verify",
@@ -330,6 +360,7 @@ function installCandidate(candidate, token) {
       try {
         validateBundle(installedApp, {
           currentVersion: false,
+          requireAdaptiveIcon: false,
           requireHelper: false,
         })
       } catch (error) {
@@ -391,6 +422,10 @@ async function main() {
       }
     }
     {
+      const [npm, args] = npmInvocation(["run", "icon:build"])
+      runVisible(npm, args, { label: "adaptive macOS icon build" })
+    }
+    {
       const [npm, args] = npmInvocation(["run", "build"])
       runVisible(npm, args, { label: "application build" })
     }
@@ -405,7 +440,11 @@ async function main() {
         "never",
       ])
       runVisible(builder, args, {
-        env: { ...process.env, CSC_IDENTITY_AUTO_DISCOVERY: "false" },
+        env: {
+          ...process.env,
+          CSC_IDENTITY_AUTO_DISCOVERY: "false",
+          PMD_ICON_COMPOSER_BUILD: "1",
+        },
         label: "maintainer electron-builder package",
       })
     }

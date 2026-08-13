@@ -2,7 +2,6 @@ import { defineConfig } from "@playwright/test"
 
 const PARALLEL_E2E_TESTS = [
   "**/extensions.spec.ts",
-  "**/list-interaction.spec.ts",
   "**/math.spec.ts",
   "**/media.spec.ts",
   "**/mermaid.spec.ts",

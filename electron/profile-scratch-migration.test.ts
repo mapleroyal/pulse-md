@@ -112,8 +112,8 @@ describe("standalone scratch migration", () => {
 
   it("rebinds imported canonical scratch links to the destination channel", () => {
     const source = Buffer.from(
-      `[official](pulse-md://scratch/${migratedIds[0]}#one)\n` +
-        `[local](<pulse-md-local://scratch/${migratedIds[1]}#two>)\n` +
+      `[installed](pulse-md://scratch/${migratedIds[0]}#one)\n` +
+        `[development](<pulse-md-development://scratch/${migratedIds[1]}#two>)\n` +
         `[malformed](pulse-md://scratch/${migratedIds[2]}/extra)\n` +
         `\`pulse-md://scratch/${migratedIds[2]}#code\`\n`,
       "utf8"
@@ -124,8 +124,8 @@ describe("standalone scratch migration", () => {
         "pulse-md-development"
       ).toString("utf8")
     ).toBe(
-      `[official](pulse-md-development://scratch/${migratedIds[0]}#one)\n` +
-        `[local](<pulse-md-development://scratch/${migratedIds[1]}#two>)\n` +
+      `[installed](pulse-md-development://scratch/${migratedIds[0]}#one)\n` +
+        `[development](<pulse-md-development://scratch/${migratedIds[1]}#two>)\n` +
         `[malformed](pulse-md://scratch/${migratedIds[2]}/extra)\n` +
         `\`pulse-md://scratch/${migratedIds[2]}#code\`\n`
     )
@@ -278,10 +278,10 @@ describe("standalone scratch migration", () => {
     const result = await migrateStandaloneScratchStorage(
       profileStore,
       scratchStore,
-      "pulse-md-local"
+      "pulse-md-development"
     )
     expect(await scratchStore.readText(result.scratchIds[0]!)).toBe(
-      `[Self](pulse-md-local://scratch/${result.scratchIds[0]}#Checkpoint)`
+      `[Self](pulse-md-development://scratch/${result.scratchIds[0]}#Checkpoint)`
     )
   })
 })

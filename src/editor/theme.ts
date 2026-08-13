@@ -135,6 +135,8 @@ export const markdownEditorTheme = EditorView.baseTheme({
   },
   "&.cm-md-live .cm-md-heading-anchor": {
     alignItems: "center",
+    background: "none",
+    border: "0",
     boxSizing: "border-box",
     color: "color-mix(in oklab, currentColor 58%, transparent) !important",
     cursor: "pointer",
@@ -143,6 +145,7 @@ export const markdownEditorTheme = EditorView.baseTheme({
     justifyContent: "flex-start",
     left: "-1.75rem",
     opacity: "0",
+    padding: "0",
     position: "absolute",
     top: `calc(${editorLinePaddingBlockPx}px + ${editorTextLineHeight / 2}em)`,
     transform: "translateY(-50%)",
@@ -155,14 +158,15 @@ export const markdownEditorTheme = EditorView.baseTheme({
     pointerEvents: "none",
     width: "1rem",
   },
-  "&.cm-md-live .cm-md-heading:hover .cm-md-heading-anchor, &.cm-md-live .cm-md-heading-anchor:hover":
+  "&.cm-md-live .cm-md-heading:hover .cm-md-heading-anchor, &.cm-md-live .cm-md-heading-anchor:hover, &.cm-md-live .cm-md-heading-anchor:focus-visible":
     {
       opacity: "0.82",
     },
-  "&.cm-md-live .cm-md-heading-anchor:hover": {
-    color: "currentColor !important",
-    opacity: "1",
-  },
+  "&.cm-md-live .cm-md-heading-anchor:hover, &.cm-md-live .cm-md-heading-anchor:focus-visible":
+    {
+      color: "currentColor !important",
+      opacity: "1",
+    },
   "&.cm-md-live .cm-md-heading-1": {
     fontSize:
       "calc(var(--editor-font-size, 20px) * var(--editor-heading-1-font-scale, 2.3))",

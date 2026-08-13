@@ -5,22 +5,23 @@ import {
   lstatSync,
   mkdirSync,
   mkdtempSync,
+  readFileSync,
   readdirSync,
   realpathSync,
   renameSync,
   rmSync,
   unlinkSync,
 } from "node:fs"
-import { createRequire } from "node:module"
 import os from "node:os"
 import path from "node:path"
 
 const projectRoot = path.resolve(import.meta.dirname, "..")
 const releaseDirectory = path.join(projectRoot, "release")
+const packageMetadata = JSON.parse(
+  readFileSync(path.join(projectRoot, "package.json"), "utf8")
+)
 const launchServicesTool =
   "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
-const require = createRequire(import.meta.url)
-const { extractFile } = require("@electron/asar")
 
 const platformByArgument = {
   linux: "linux",
@@ -32,18 +33,43 @@ const builderArgumentByPlatform = {
   linux: "--linux",
   win32: "--win",
 }
-const artifactGroupsByPlatform = {
-  darwin: [
-    { label: "DMG", matches: (name) => name.endsWith(".dmg") },
-    { label: "ZIP", matches: (name) => name.endsWith(".zip") },
-  ],
-  linux: [
-    { label: "AppImage", matches: (name) => name.endsWith(".AppImage") },
-    { label: "Debian package", matches: (name) => name.endsWith(".deb") },
-  ],
-  win32: [
-    { label: "NSIS installer", matches: (name) => name.endsWith(".exe") },
-  ],
+const artifactPrefix = `${packageMetadata.productName}-${packageMetadata.version}`
+const linuxArtifactArchitectures = {
+  arm: { appImage: "armv7l", debian: "armv7l" },
+  arm64: { appImage: "arm64", debian: "arm64" },
+  ia32: { appImage: "i386", debian: "i386" },
+  x64: { appImage: "x86_64", debian: "amd64" },
+}
+
+function artifactGroups(platform) {
+  if (platform === "darwin") {
+    return [
+      { label: "DMG", name: `${artifactPrefix}-${process.arch}.dmg` },
+      { label: "ZIP", name: `${artifactPrefix}-${process.arch}-mac.zip` },
+    ]
+  }
+  if (platform === "win32") {
+    return [
+      {
+        label: "NSIS installer",
+        name: `${artifactPrefix}-${process.arch}.exe`,
+      },
+    ]
+  }
+  const architectures = linuxArtifactArchitectures[process.arch]
+  if (!architectures) {
+    throw new Error(`Unsupported Linux package architecture: ${process.arch}`)
+  }
+  return [
+    {
+      label: "AppImage",
+      name: `${artifactPrefix}-${architectures.appImage}.AppImage`,
+    },
+    {
+      label: "Debian package",
+      name: `${artifactPrefix}-${architectures.debian}.deb`,
+    },
+  ]
 }
 
 function failure(label, result) {
@@ -81,7 +107,7 @@ function run(command, args, options = {}) {
 
 function npmInvocation(args) {
   const npmCli = process.env.npm_execpath
-  if (!npmCli) throw new Error("Run Local packaging through npm")
+  if (!npmCli) throw new Error("Run source packaging through npm")
   return [process.execPath, [npmCli, ...args]]
 }
 
@@ -116,7 +142,7 @@ function removeTemporaryDirectory(target) {
   const resolved = path.resolve(target)
   if (
     path.dirname(resolved) !== temporaryRoot ||
-    !path.basename(resolved).startsWith("pulse-md-local-package-")
+    !path.basename(resolved).startsWith("pulse-md-source-package-")
   ) {
     throw new Error(`Refusing unexpected temporary package path: ${target}`)
   }
@@ -128,17 +154,7 @@ function removeTemporaryDirectory(target) {
   rmSync(resolved, { recursive: true })
 }
 
-function localMetadataAt(asarPath) {
-  const stat = pathStat(asarPath)
-  if (!stat?.isFile() || stat.isSymbolicLink()) return null
-  try {
-    return JSON.parse(extractFile(asarPath, "package.json").toString("utf8"))
-  } catch {
-    return null
-  }
-}
-
-function registeredLocalMacBundles() {
+function registeredMacBundles() {
   if (process.platform !== "darwin") return new Set()
   const registrations = new Set()
   let currentPath = null
@@ -150,7 +166,7 @@ function registeredLocalMacBundles() {
     }
     if (
       currentPath &&
-      /^identifier:\s+io\.github\.mapleroyal\.pulse-md\.local$/.test(line)
+      /^identifier:\s+io\.github\.mapleroyal\.pulse-md$/.test(line)
     ) {
       registrations.add(currentPath)
     }
@@ -167,69 +183,24 @@ function canonicalExistingPath(target) {
   }
 }
 
-function unregisterLocalMacBundleIfRegistered(appBundle) {
+function unregisterMacBundleIfRegistered(appBundle) {
   const canonicalAppBundle = canonicalExistingPath(appBundle)
-  const registered = [...registeredLocalMacBundles()].some(
+  const registered = [...registeredMacBundles()].some(
     (candidate) => canonicalExistingPath(candidate) === canonicalAppBundle
   )
   if (!registered) return
   run(launchServicesTool, ["-u", appBundle], {
-    label: `unregistering generated Local app ${appBundle}`,
+    label: `unregistering generated source app ${appBundle}`,
   })
-}
-
-function removeLegacyUnpackedOutputs() {
-  const releaseStat = pathStat(releaseDirectory)
-  if (!releaseStat) return
-  requireRegularDirectory(releaseDirectory, "release directory")
-  const unpackedName =
-    /^(?:mac(?:-(?:arm64|x64|universal))?|win(?:-(?:arm64|ia32))?-unpacked|linux(?:-(?:arm64|ia32))?-unpacked)$/
-
-  for (const entry of readdirSync(releaseDirectory, { withFileTypes: true })) {
-    if (!unpackedName.test(entry.name)) continue
-    const target = path.join(releaseDirectory, entry.name)
-    const stat = pathStat(target)
-    if (!stat || stat.isSymbolicLink() || !stat.isDirectory()) {
-      throw new Error(`Refusing unexpected unpacked Local target: ${target}`)
-    }
-    const asarCandidates = entry.name.startsWith("mac")
-      ? [
-          path.join(
-            target,
-            "Pulse MD Local.app",
-            "Contents",
-            "Resources",
-            "app.asar"
-          ),
-        ]
-      : [path.join(target, "resources", "app.asar")]
-    const metadata = asarCandidates.map(localMetadataAt).find(Boolean)
-    if (
-      metadata?.pmdDistributionChannel !== "local" ||
-      metadata?.name !== "pulse-md-local" ||
-      metadata?.productName !== "Pulse MD Local"
-    ) {
-      throw new Error(
-        `Refusing to remove unverified unpacked output: ${target}`
-      )
-    }
-    if (entry.name.startsWith("mac")) {
-      unregisterLocalMacBundleIfRegistered(
-        path.join(target, "Pulse MD Local.app")
-      )
-    }
-    rmSync(target, { recursive: true })
-    console.log(`Removed obsolete runnable package output ${target}`)
-  }
 }
 
 function selectedArtifacts(outputDirectory, platform) {
   const entries = readdirSync(outputDirectory, { withFileTypes: true })
   const artifacts = []
-  for (const group of artifactGroupsByPlatform[platform]) {
+  for (const group of artifactGroups(platform)) {
     const matches = entries.filter(
       (entry) =>
-        entry.isFile() && !entry.isSymbolicLink() && group.matches(entry.name)
+        entry.isFile() && !entry.isSymbolicLink() && entry.name === group.name
     )
     if (matches.length !== 1) {
       throw new Error(
@@ -241,7 +212,7 @@ function selectedArtifacts(outputDirectory, platform) {
   return artifacts
 }
 
-function generatedLocalMacApps(outputDirectory) {
+function generatedMacApps(outputDirectory) {
   const apps = []
   const pending = [outputDirectory]
   while (pending.length > 0) {
@@ -259,39 +230,87 @@ function generatedLocalMacApps(outputDirectory) {
   return apps
 }
 
-function unregisterGeneratedLocalMacApps(outputDirectory) {
+function unregisterGeneratedMacApps(outputDirectory) {
   if (process.platform !== "darwin") return
-  for (const appBundle of generatedLocalMacApps(outputDirectory)) {
-    unregisterLocalMacBundleIfRegistered(appBundle)
+  for (const appBundle of generatedMacApps(outputDirectory)) {
+    unregisterMacBundleIfRegistered(appBundle)
   }
+}
+
+function packagedRuntimeRoot(outputDirectory, platform) {
+  if (platform === "darwin") {
+    const apps = generatedMacApps(outputDirectory).filter(
+      (candidate) => path.basename(candidate) === "Pulse MD.app"
+    )
+    if (apps.length !== 1) {
+      throw new Error(
+        `Expected one unpacked Pulse MD app, found ${apps.length}`
+      )
+    }
+    return apps[0]
+  }
+
+  const executableName = platform === "win32" ? "Pulse MD.exe" : "pulse-md"
+  const directoryPattern =
+    platform === "win32" ? /^win.*-unpacked$/ : /^linux.*-unpacked$/
+  const roots = readdirSync(outputDirectory, { withFileTypes: true })
+    .filter(
+      (entry) =>
+        !entry.isSymbolicLink() &&
+        entry.isDirectory() &&
+        directoryPattern.test(entry.name)
+    )
+    .map((entry) => path.join(outputDirectory, entry.name))
+    .filter((root) => {
+      const executable = pathStat(path.join(root, executableName))
+      return executable?.isFile() && !executable.isSymbolicLink()
+    })
+  if (roots.length !== 1) {
+    throw new Error(
+      `Expected one unpacked ${platform} Pulse MD runtime, found ${roots.length}`
+    )
+  }
+  return roots[0]
+}
+
+function verifyPackagedRuntime(outputDirectory, platform) {
+  const root = packagedRuntimeRoot(outputDirectory, platform)
+  runVisible(
+    process.execPath,
+    [path.join(projectRoot, "scripts", "test-packaged-runtime.mjs")],
+    {
+      env: { ...process.env, PMD_PACKAGED_ROOT: root },
+      label: "source packaged-runtime verification",
+    }
+  )
 }
 
 function promoteArtifacts(sources) {
   requireRegularDirectory(releaseDirectory, "release directory")
   const token = `${process.pid}-${randomUUID()}`
   const entries = sources.map((source, index) => ({
-    incoming: path.join(releaseDirectory, `.local-incoming-${token}-${index}`),
+    incoming: path.join(releaseDirectory, `.source-incoming-${token}-${index}`),
     installed: false,
     movedPrevious: false,
-    previous: path.join(releaseDirectory, `.local-previous-${token}-${index}`),
+    previous: path.join(releaseDirectory, `.source-previous-${token}-${index}`),
     source,
     target: path.join(releaseDirectory, path.basename(source)),
   }))
   if (new Set(entries.map(({ target }) => target)).size !== entries.length) {
-    throw new Error("Local artifacts resolve to duplicate output names")
+    throw new Error("Source artifacts resolve to duplicate output names")
   }
   for (const entry of entries) {
     for (const reserved of [entry.incoming, entry.previous]) {
       if (pathStat(reserved)) {
         throw new Error(
-          `Local artifact staging path already exists: ${reserved}`
+          `Source artifact staging path already exists: ${reserved}`
         )
       }
     }
     const existing = pathStat(entry.target)
     if (existing && (!existing.isFile() || existing.isSymbolicLink())) {
       throw new Error(
-        `Refusing unexpected Local artifact target: ${entry.target}`
+        `Refusing unexpected source artifact target: ${entry.target}`
       )
     }
   }
@@ -302,7 +321,7 @@ function promoteArtifacts(sources) {
       copyFileSync(entry.source, entry.incoming)
       const incomingStat = pathStat(entry.incoming)
       if (!incomingStat?.isFile() || incomingStat.isSymbolicLink()) {
-        throw new Error(`Local artifact copy is invalid: ${entry.incoming}`)
+        throw new Error(`Source artifact copy is invalid: ${entry.incoming}`)
       }
     }
     for (const entry of entries) {
@@ -352,20 +371,24 @@ function selectedPlatform() {
   }
   const requested = argument ? platformByArgument[argument] : process.platform
   if (requested !== process.platform) {
-    throw new Error(`Local ${argument} packages must be built on ${requested}`)
+    throw new Error(`Source ${argument} packages must be built on ${requested}`)
   }
   if (!(requested in builderArgumentByPlatform)) {
-    throw new Error(`Pulse MD Local packaging is unsupported on ${requested}`)
+    throw new Error(`Pulse MD packaging is unsupported on ${requested}`)
   }
   return requested
 }
 
 const platform = selectedPlatform()
 const outputDirectory = mkdtempSync(
-  path.join(os.tmpdir(), `pulse-md-local-package-${platform}-`)
+  path.join(os.tmpdir(), `pulse-md-source-package-${platform}-`)
 )
 
 try {
+  if (platform === "darwin") {
+    const [npm, npmArgs] = npmInvocation(["run", "icon:build"])
+    runVisible(npm, npmArgs, { label: "adaptive macOS icon build" })
+  }
   const [npm, npmArgs] = npmInvocation(["run", "build"])
   runVisible(npm, npmArgs, { label: "application build" })
   const [builder, builderArgs] = builderInvocation([
@@ -380,22 +403,25 @@ try {
     env: {
       ...process.env,
       ...(platform === "darwin"
-        ? { CSC_IDENTITY_AUTO_DISCOVERY: "false" }
+        ? {
+            CSC_IDENTITY_AUTO_DISCOVERY: "false",
+            PMD_ICON_COMPOSER_BUILD: "1",
+          }
         : {}),
     },
-    label: "Local electron-builder package",
+    label: "source electron-builder package",
   })
 
+  verifyPackagedRuntime(outputDirectory, platform)
   const artifacts = selectedArtifacts(outputDirectory, platform)
   mkdirSync(releaseDirectory, { recursive: true })
   requireRegularDirectory(releaseDirectory, "release directory")
-  removeLegacyUnpackedOutputs()
   const promoted = promoteArtifacts(artifacts)
-  console.log("Pulse MD Local artifacts:")
+  console.log("Pulse MD source artifacts:")
   for (const artifact of promoted) console.log(`- ${artifact}`)
 } finally {
   try {
-    unregisterGeneratedLocalMacApps(outputDirectory)
+    unregisterGeneratedMacApps(outputDirectory)
   } finally {
     removeTemporaryDirectory(outputDirectory)
   }

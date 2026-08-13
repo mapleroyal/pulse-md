@@ -42,10 +42,64 @@ const fallbackCharacterReferences: Readonly<Record<string, string>> = {
   uuml: "ü",
 }
 
+// HTML resolves numeric references in this range through the Windows-1252
+// compatibility table. Undefined entries intentionally retain their C1 code
+// point, matching the tokenizer's parse-error behavior.
+const c1CharacterReferenceReplacements: readonly (number | undefined)[] = [
+  0x20ac,
+  undefined,
+  0x201a,
+  0x0192,
+  0x201e,
+  0x2026,
+  0x2020,
+  0x2021,
+  0x02c6,
+  0x2030,
+  0x0160,
+  0x2039,
+  0x0152,
+  undefined,
+  0x017d,
+  undefined,
+  undefined,
+  0x2018,
+  0x2019,
+  0x201c,
+  0x201d,
+  0x2022,
+  0x2013,
+  0x2014,
+  0x02dc,
+  0x2122,
+  0x0161,
+  0x203a,
+  0x0153,
+  undefined,
+  0x017e,
+  0x0178,
+]
+
 let entityDecoder: HTMLTextAreaElement | null | undefined
 const characterReferenceCache = new Map<string, string>()
 const characterReferencePattern =
   /&(?:#(?:[xX][0-9A-Fa-f]{1,6}|[0-9]{1,7})|[A-Za-z][A-Za-z0-9]{1,31});/g
+
+function numericCharacterReference(codePoint: number) {
+  if (
+    !Number.isFinite(codePoint) ||
+    codePoint <= 0 ||
+    codePoint > 0x10ffff ||
+    (codePoint >= 0xd800 && codePoint <= 0xdfff)
+  ) {
+    return "\ufffd"
+  }
+  const replacement =
+    codePoint >= 0x80 && codePoint <= 0x9f
+      ? c1CharacterReferenceReplacements[codePoint - 0x80]
+      : undefined
+  return String.fromCodePoint(replacement ?? codePoint)
+}
 
 function decodeCharacterReferencesFallback(source: string) {
   return source.replace(
@@ -61,14 +115,7 @@ function decodeCharacterReferencesFallback(source: string) {
         hexadecimal ?? decimal ?? "",
         hexadecimal ? 16 : 10
       )
-      if (!Number.isFinite(value) || value <= 0 || value > 0x10ffff) {
-        return "\ufffd"
-      }
-      try {
-        return String.fromCodePoint(value)
-      } catch {
-        return "\ufffd"
-      }
+      return numericCharacterReference(value)
     }
   )
 }

@@ -337,7 +337,7 @@ const distributionIdentity = resolveDistributionIdentity(
   app.isPackaged ? undefined : developmentCheckoutIdentity(app.getAppPath())
 )
 const PRODUCT_NAME = distributionIdentity.productName
-const isOfficialDistribution = distributionIdentity.isOfficialPackage
+const isCanonicalDistribution = distributionIdentity.isCanonicalPackage
 const EXTERNAL_SCRATCH_LINK_SCHEME = distributionIdentity.scratchLinkScheme
 const PRODUCT_DESCRIPTION = "A fast, polished Markdown reader and editor."
 const PRODUCT_COPYRIGHT = "Copyright © 2026 mapleroyal"
@@ -1076,7 +1076,7 @@ protocol.registerSchemesAsPrivileged([
 ])
 
 app.setName(PRODUCT_NAME)
-if (!isOfficialDistribution && !isolatedUserDataLaunch) {
+if (!isCanonicalDistribution && !isolatedUserDataLaunch) {
   const distributionUserDataPath = path.join(
     app.getPath("appData"),
     distributionIdentity.userDataDirectoryName

@@ -1,11 +1,14 @@
 import { spawnSync } from "node:child_process"
 import { createHash } from "node:crypto"
 import {
+  closeSync,
   lstatSync,
   mkdirSync,
   mkdtempSync,
+  openSync,
   readdirSync,
   readFileSync,
+  readSync,
   realpathSync,
   renameSync,
   rmSync,
@@ -24,6 +27,7 @@ const officialProductName = "Pulse MD"
 const officialBundleIdentifier = "io.github.mapleroyal.pulse-md"
 const launchServicesTool =
   "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
+const linuxArtifactExtractionPrefix = "pulse-md-release-artifact-"
 
 function commandFailure(label, result) {
   const detail = result.error?.message || result.stderr || result.stdout
@@ -59,6 +63,17 @@ function runVisible(command, args, options = {}) {
       }`
     )
   }
+}
+
+function verifyPackagedRuntime(root, environment, label) {
+  runVisible(
+    process.execPath,
+    [path.join(projectRoot, "scripts", "test-packaged-runtime.mjs")],
+    {
+      env: { ...environment, PMD_PACKAGED_ROOT: root },
+      label,
+    }
+  )
 }
 
 function configuredGroup(environment, names) {
@@ -609,7 +624,7 @@ function submitAndStapleDmg(dmg, authorization) {
   )
 }
 
-function verifyMacZip(zip, architecture) {
+function verifyMacZip(zip, architecture, environment) {
   const temporaryDirectory = mkdtempSync(
     path.join(os.tmpdir(), "pulse-md-release-zip-")
   )
@@ -630,6 +645,11 @@ function verifyMacZip(zip, architecture) {
       )
     }
     verifyMacApp(apps[0], architecture)
+    verifyPackagedRuntime(
+      apps[0],
+      environment,
+      "extracted macOS ZIP runtime verification"
+    )
   } finally {
     for (const app of discoverAppBundles(temporaryDirectory)) {
       unregisterOfficialMacBundleIfRegistered(app)
@@ -638,7 +658,7 @@ function verifyMacZip(zip, architecture) {
   }
 }
 
-function verifyMacRelease(directory, architecture, authorization) {
+function verifyMacRelease(directory, architecture, authorization, environment) {
   const entries = releaseEntries(directory)
   const outputDirectories = entries
     .filter((entry) => entry.isDirectory() && /^mac(?:-|$)/.test(entry.name))
@@ -672,14 +692,22 @@ function verifyMacRelease(directory, architecture, authorization) {
     )
   }
   for (const dmg of dmgs) submitAndStapleDmg(dmg, authorization)
-  for (const zip of zips) verifyMacZip(zip, architecture)
+  for (const zip of zips) verifyMacZip(zip, architecture, environment)
   return [...dmgs, ...zips]
 }
 
-function verifyWindowsRelease(directory, architecture) {
+export function windowsUnpackedDirectoryName(architecture) {
+  if (!["arm64", "ia32", "x64"].includes(architecture)) {
+    throw new Error(`Unsupported Windows release architecture: ${architecture}`)
+  }
+  return architecture === "x64"
+    ? "win-unpacked"
+    : `win-${architecture}-unpacked`
+}
+
+function verifyWindowsRelease(directory, architecture, environment) {
   const entries = releaseEntries(directory)
-  const expectedUnpackedName =
-    architecture === "x64" ? "win-unpacked" : `win-${architecture}-unpacked`
+  const expectedUnpackedName = windowsUnpackedDirectoryName(architecture)
   const unpacked = entries
     .filter(
       (entry) => entry.isDirectory() && entry.name === expectedUnpackedName
@@ -719,43 +747,326 @@ function verifyWindowsRelease(directory, architecture) {
     authenticodeArguments(packageMetadata.version, signedFiles),
     { label: "Authenticode verification" }
   )
+  verifyPackagedRuntime(
+    unpacked[0],
+    environment,
+    "staged Windows runtime verification"
+  )
   return installers
 }
 
-function linuxReleaseArtifacts(directory) {
-  const versionPrefix = `${officialProductName}-${packageMetadata.version}-`
-  const artifacts = releaseEntries(directory)
-    .filter(
-      (entry) =>
-        entry.isFile() &&
-        entry.name.startsWith(versionPrefix) &&
-        (entry.name.endsWith(".AppImage") || entry.name.endsWith(".deb"))
-    )
-    .map((entry) => path.join(directory, entry.name))
-  if (
-    !artifacts.some((artifact) => artifact.endsWith(".AppImage")) ||
-    !artifacts.some((artifact) => artifact.endsWith(".deb"))
-  ) {
-    throw new Error(
-      "Official Linux release must produce both AppImage and Debian artifacts"
-    )
+const linuxArchitectures = {
+  arm: {
+    appImageArtifact: "armv7l",
+    debianArtifact: "armv7l",
+    debianPackage: "armhf",
+    elfClass: 1,
+    elfMachine: 40,
+  },
+  arm64: {
+    appImageArtifact: "arm64",
+    debianArtifact: "arm64",
+    debianPackage: "arm64",
+    elfClass: 2,
+    elfMachine: 183,
+  },
+  ia32: {
+    appImageArtifact: "i386",
+    debianArtifact: "i386",
+    debianPackage: "i386",
+    elfClass: 1,
+    elfMachine: 3,
+  },
+  x64: {
+    appImageArtifact: "x86_64",
+    debianArtifact: "amd64",
+    debianPackage: "amd64",
+    elfClass: 2,
+    elfMachine: 62,
+  },
+}
+
+function linuxArchitecture(architecture) {
+  const details = linuxArchitectures[architecture]
+  if (!details) {
+    throw new Error(`Unsupported Linux release architecture: ${architecture}`)
+  }
+  return details
+}
+
+export function linuxReleaseArtifactNames(
+  architecture,
+  version = packageMetadata.version
+) {
+  const details = linuxArchitecture(architecture)
+  const prefix = `${officialProductName}-${version}-`
+  return {
+    appImage: `${prefix}${details.appImageArtifact}.AppImage`,
+    debian: `${prefix}${details.debianArtifact}.deb`,
+  }
+}
+
+function linuxReleaseArtifacts(directory, architecture) {
+  const names = linuxReleaseArtifactNames(architecture)
+  const artifacts = [names.appImage, names.debian].map((name) =>
+    path.join(directory, name)
+  )
+  for (const artifact of artifacts) {
+    const stat = lstatIfPresent(artifact)
+    if (!stat?.isFile() || stat.isSymbolicLink()) {
+      throw new Error(`Required Linux release artifact is missing: ${artifact}`)
+    }
   }
   return artifacts
 }
 
-function verifyLinuxPackageVersion(artifacts) {
-  for (const artifact of artifacts.filter((candidate) =>
-    candidate.endsWith(".deb")
-  )) {
-    const version = run("dpkg-deb", ["--field", artifact, "Version"], {
-      label: "Debian package version check",
-    }).stdout.trim()
-    if (version !== packageMetadata.version) {
+export function validateLinuxDebianMetadata(
+  metadata,
+  architecture,
+  artifact = "Debian package"
+) {
+  const expected = {
+    Architecture: linuxArchitecture(architecture).debianPackage,
+    Package: packageMetadata.name,
+    Version: packageMetadata.version,
+  }
+  for (const [field, value] of Object.entries(expected)) {
+    if (metadata[field] !== value) {
       throw new Error(
-        `Debian package version is ${version}, expected ${packageMetadata.version}: ${artifact}`
+        `Debian package ${field} is ${metadata[field] || "missing"}, expected ${value}: ${artifact}`
       )
     }
   }
+}
+
+function verifyLinuxDebianMetadata(artifact, architecture) {
+  const metadata = {}
+  for (const field of ["Package", "Version", "Architecture"]) {
+    metadata[field] = run("dpkg-deb", ["--field", artifact, field], {
+      label: `Debian package ${field} check`,
+    }).stdout.trim()
+  }
+  validateLinuxDebianMetadata(metadata, architecture, artifact)
+}
+
+export function validateLinuxAppImageHeader(
+  header,
+  architecture,
+  artifact = "AppImage"
+) {
+  const bytes = Buffer.isBuffer(header) ? header : Buffer.from(header)
+  if (
+    bytes.length < 20 ||
+    bytes[0] !== 0x7f ||
+    bytes[1] !== 0x45 ||
+    bytes[2] !== 0x4c ||
+    bytes[3] !== 0x46
+  ) {
+    throw new Error(`AppImage does not have a valid ELF header: ${artifact}`)
+  }
+  const byteOrder = bytes[5]
+  if (byteOrder !== 1 && byteOrder !== 2) {
+    throw new Error(`AppImage has an unsupported ELF byte order: ${artifact}`)
+  }
+
+  const details = linuxArchitecture(architecture)
+  const elfClass = bytes[4]
+  const elfMachine =
+    byteOrder === 1 ? bytes.readUInt16LE(18) : bytes.readUInt16BE(18)
+  if (elfClass !== details.elfClass || elfMachine !== details.elfMachine) {
+    throw new Error(
+      `AppImage ELF architecture is class ${elfClass}, machine ${elfMachine}; expected class ${details.elfClass}, machine ${details.elfMachine}: ${artifact}`
+    )
+  }
+}
+
+function verifyLinuxAppImageArchitecture(artifact, architecture) {
+  const header = Buffer.alloc(20)
+  const descriptor = openSync(artifact, "r")
+  try {
+    const bytesRead = readSync(descriptor, header, 0, header.length, 0)
+    validateLinuxAppImageHeader(
+      header.subarray(0, bytesRead),
+      architecture,
+      artifact
+    )
+  } finally {
+    closeSync(descriptor)
+  }
+}
+
+export function linuxArtifactExtractionPlan(artifact, extractionDirectory) {
+  const absoluteArtifact = path.resolve(artifact)
+  const absoluteExtractionDirectory = path.resolve(extractionDirectory)
+  if (absoluteArtifact.endsWith(".AppImage")) {
+    return {
+      args: ["--appimage-extract"],
+      command: absoluteArtifact,
+      cwd: absoluteExtractionDirectory,
+      format: "appimage",
+    }
+  }
+  if (absoluteArtifact.endsWith(".deb")) {
+    return {
+      args: ["--extract", absoluteArtifact, absoluteExtractionDirectory],
+      command: "dpkg-deb",
+      cwd: absoluteExtractionDirectory,
+      format: "debian",
+    }
+  }
+  throw new Error(`Unsupported Linux release artifact: ${artifact}`)
+}
+
+export function linuxArtifactRuntimeRootCandidates(
+  format,
+  extractionDirectory
+) {
+  const root = path.resolve(extractionDirectory)
+  if (format === "appimage") {
+    const appImageRoot = path.join(root, "squashfs-root")
+    return [
+      appImageRoot,
+      path.join(appImageRoot, "usr", "lib", packageMetadata.name),
+    ]
+  }
+  if (format === "debian") {
+    return [
+      path.join(root, "opt", officialProductName),
+      path.join(root, "usr", "lib", packageMetadata.name),
+    ]
+  }
+  throw new Error(`Unsupported Linux release artifact format: ${format}`)
+}
+
+function isLinuxPackagedRuntimeRoot(root) {
+  const rootStat = lstatIfPresent(root)
+  const executableStat = lstatIfPresent(path.join(root, "pulse-md"))
+  const resourcesStat = lstatIfPresent(path.join(root, "resources"))
+  return Boolean(
+    rootStat?.isDirectory() &&
+    !rootStat.isSymbolicLink() &&
+    executableStat?.isFile() &&
+    !executableStat.isSymbolicLink() &&
+    (executableStat.mode & 0o111) !== 0 &&
+    resourcesStat?.isDirectory() &&
+    !resourcesStat.isSymbolicLink()
+  )
+}
+
+export function resolveLinuxArtifactRuntimeRoot(format, extractionDirectory) {
+  const candidates = linuxArtifactRuntimeRootCandidates(
+    format,
+    extractionDirectory
+  )
+  const matches = candidates.filter(isLinuxPackagedRuntimeRoot)
+  if (matches.length !== 1) {
+    throw new Error(
+      `${format} extraction must contain exactly one canonical Pulse MD runtime root; found ${matches.length}. Checked:\n${candidates
+        .map((candidate) => `- ${candidate}`)
+        .join("\n")}`
+    )
+  }
+  return matches[0]
+}
+
+function assertManagedLinuxArtifactExtraction(target) {
+  const absoluteTarget = path.resolve(target)
+  const temporaryRoot = path.resolve(os.tmpdir())
+  const relative = path.relative(temporaryRoot, absoluteTarget)
+  if (
+    path.dirname(relative) !== "." ||
+    !/^pulse-md-release-artifact-[A-Za-z0-9]{6}$/.test(relative)
+  ) {
+    throw new Error(
+      `Refusing unmanaged Linux artifact extraction path: ${target}`
+    )
+  }
+  const stat = lstatIfPresent(absoluteTarget)
+  if (stat && (!stat.isDirectory() || stat.isSymbolicLink())) {
+    throw new Error(
+      `Linux artifact extraction path is not a regular directory: ${target}`
+    )
+  }
+}
+
+function removeLinuxArtifactExtraction(target) {
+  assertManagedLinuxArtifactExtraction(target)
+  if (!lstatIfPresent(target)) return
+  rmSync(target, { recursive: true })
+  if (lstatIfPresent(target)) {
+    throw new Error(`Linux artifact extraction cleanup failed: ${target}`)
+  }
+}
+
+function withEnvironmentPrefix(prefix, value) {
+  return value ? `${prefix}:${value}` : prefix
+}
+
+function appImageRuntimeEnvironment(extractionDirectory, environment) {
+  const appDir = path.join(extractionDirectory, "squashfs-root")
+  const shareDirectory = path.join(appDir, "usr", "share")
+  return {
+    ...environment,
+    APPDIR: appDir,
+    GSETTINGS_SCHEMA_DIR: withEnvironmentPrefix(
+      path.join(shareDirectory, "glib-2.0", "schemas"),
+      environment.GSETTINGS_SCHEMA_DIR
+    ),
+    LD_LIBRARY_PATH: withEnvironmentPrefix(
+      path.join(appDir, "usr", "lib"),
+      environment.LD_LIBRARY_PATH
+    ),
+    PATH: withEnvironmentPrefix(
+      `${appDir}:${path.join(appDir, "usr", "sbin")}`,
+      environment.PATH
+    ),
+    XDG_DATA_DIRS: withEnvironmentPrefix(
+      shareDirectory,
+      environment.XDG_DATA_DIRS ||
+        "/usr/share/gnome:/usr/local/share/:/usr/share/"
+    ),
+  }
+}
+
+function verifyLinuxArtifactRuntime(artifact, environment) {
+  const extractionDirectory = mkdtempSync(
+    path.join(os.tmpdir(), linuxArtifactExtractionPrefix)
+  )
+  assertManagedLinuxArtifactExtraction(extractionDirectory)
+  try {
+    const plan = linuxArtifactExtractionPlan(artifact, extractionDirectory)
+    run(plan.command, plan.args, {
+      cwd: plan.cwd,
+      env: environment,
+      label: `${plan.format} payload extraction`,
+    })
+    const runtimeRoot = resolveLinuxArtifactRuntimeRoot(
+      plan.format,
+      extractionDirectory
+    )
+    const runtimeEnvironment =
+      plan.format === "appimage"
+        ? appImageRuntimeEnvironment(extractionDirectory, environment)
+        : { ...environment }
+
+    verifyPackagedRuntime(
+      runtimeRoot,
+      runtimeEnvironment,
+      `${plan.format} packaged runtime verification`
+    )
+  } finally {
+    removeLinuxArtifactExtraction(extractionDirectory)
+  }
+}
+
+function verifyLinuxRelease(directory, architecture, environment) {
+  const artifacts = linuxReleaseArtifacts(directory, architecture)
+  const [appImage, debian] = artifacts
+  verifyLinuxAppImageArchitecture(appImage, architecture)
+  verifyLinuxDebianMetadata(debian, architecture)
+  verifyLinuxArtifactRuntime(appImage, environment)
+  verifyLinuxArtifactRuntime(debian, environment)
+  return artifacts
 }
 
 function writeChecksums(directory, platform, architecture, artifacts) {
@@ -855,11 +1166,19 @@ async function main() {
 
     const artifacts =
       platform === "mac"
-        ? verifyMacRelease(stagingDirectory, architecture, notarization)
+        ? verifyMacRelease(
+            stagingDirectory,
+            architecture,
+            notarization,
+            childEnvironment
+          )
         : platform === "win"
-          ? verifyWindowsRelease(stagingDirectory, architecture)
-          : linuxReleaseArtifacts(stagingDirectory)
-    if (platform === "linux") verifyLinuxPackageVersion(artifacts)
+          ? verifyWindowsRelease(
+              stagingDirectory,
+              architecture,
+              childEnvironment
+            )
+          : verifyLinuxRelease(stagingDirectory, architecture, childEnvironment)
     removeUnusedUpdateMetadata(stagingDirectory)
     pruneReleaseStaging(stagingDirectory, artifacts, platform)
     writeChecksums(stagingDirectory, platform, architecture, artifacts)

@@ -477,13 +477,44 @@ class HeadingAnchorWidget extends WidgetType {
 
   toDOM(view: EditorView) {
     const ownerDocument = view.dom.ownerDocument
-    const anchor = ownerDocument.createElement("span")
+    const anchor = ownerDocument.createElement("button")
+    anchor.type = "button"
     anchor.className = "cm-md-heading-anchor"
     anchor.dataset.markdownHeadingFrom = String(this.headingFrom)
     anchor.dataset.markdownLinkTitle = "Heading link"
     anchor.setAttribute("aria-label", "Link to heading")
     anchor.setAttribute("contenteditable", "false")
-    anchor.setAttribute("role", "link")
+    const openHeadingLinkMenu = () => {
+      const bounds = anchor.getBoundingClientRect()
+      anchor.dispatchEvent(
+        new MouseEvent("contextmenu", {
+          bubbles: true,
+          button: 0,
+          cancelable: true,
+          clientX: bounds.left + bounds.width / 2,
+          clientY: bounds.top + bounds.height / 2,
+          detail: 0,
+          view: ownerDocument.defaultView ?? undefined,
+        })
+      )
+    }
+    anchor.addEventListener("click", (event) => {
+      // A programmatic/native keyboard click has no pointer detail. Pointer
+      // gestures retain their established selection/modifier behavior.
+      if (event.detail !== 0) return
+      event.preventDefault()
+      event.stopPropagation()
+      openHeadingLinkMenu()
+    })
+    anchor.addEventListener("keydown", (event) => {
+      if ((event.key !== "Enter" && event.key !== " ") || event.repeat) return
+      // CodeMirror owns editor key events and suppresses the browser's native
+      // button click, so consume these two ordinary button activations at the
+      // widget before they bubble into the editor keymap.
+      event.preventDefault()
+      event.stopPropagation()
+      openHeadingLinkMenu()
+    })
 
     const svg = ownerDocument.createElementNS(
       "http://www.w3.org/2000/svg",
@@ -2471,6 +2502,7 @@ interface BuildContext {
   state: EditorState
   ranges: Range<Decoration>[]
   seen: Set<string>
+  selection?: EditorSelection
   visible: VisibleRange
   selectionActive: boolean
   stateBackedTasks?: boolean
@@ -2719,8 +2751,8 @@ function refreshLinkReferenceDecorations(
 }
 
 function selectionTouches(context: BuildContext, from: number, to: number) {
-  const { state } = context
-  return state.selection.ranges.some((range) => {
+  const selection = context.selection ?? context.state.selection
+  return selection.ranges.some((range) => {
     if (range.empty) {
       return context.selectionActive && range.head >= from && range.head <= to
     }
@@ -4633,7 +4665,9 @@ function stablePrefixDecoration(decoration: Decoration) {
 function buildStablePrefixDecorations(
   state: EditorState,
   visibleRanges: readonly VisibleRange[],
-  tree: Tree
+  tree: Tree,
+  selection: EditorSelection,
+  selectionActive: boolean
 ) {
   const ranges: Range<Decoration>[] = []
   const seen = new Set<string>()
@@ -4668,7 +4702,8 @@ function buildStablePrefixDecorations(
       orderedListMarkerLanes,
       ranges,
       seen,
-      selectionActive: false,
+      selection,
+      selectionActive,
       state,
       stateBackedTasks: true,
       tree,
@@ -4707,14 +4742,22 @@ function refreshStablePrefixDecorations(
   decorations: DecorationSet,
   state: EditorState,
   visibleRanges: readonly VisibleRange[],
-  tree: Tree
+  tree: Tree,
+  selection: EditorSelection,
+  selectionActive: boolean
 ) {
   const retained = decorations.update({
     filter: (from, to, decoration) =>
       !stablePrefixDecoration(decoration) ||
       !rangeIntersectsVisibleRanges(from, to, visibleRanges),
   })
-  const additions = buildStablePrefixDecorations(state, visibleRanges, tree)
+  const additions = buildStablePrefixDecorations(
+    state,
+    visibleRanges,
+    tree,
+    selection,
+    selectionActive
+  )
   return additions.size === 0 ? retained : RangeSet.join([retained, additions])
 }
 
@@ -5038,6 +5081,8 @@ class LivePreviewPlugin {
   private readonly view: EditorView
   private readonly ownerWindow: Window | null
   private pointerSelecting = false
+  private pointerSelection: EditorSelection | null = null
+  private pointerSelectionActive = false
   private activePointerId: number | null = null
   private wasComposing = false
   private destroyed = false
@@ -5080,6 +5125,9 @@ class LivePreviewPlugin {
       let decorations = this.decorations
       if (update.docChanged) {
         decorations = decorations.map(update.changes)
+        if (this.pointerSelection) {
+          this.pointerSelection = this.pointerSelection.map(update.changes)
+        }
       } else if (composing && !this.wasComposing) {
         decorations = buildLivePreviewDecorations(
           update.state,
@@ -5097,7 +5145,9 @@ class LivePreviewPlugin {
           decorations,
           update.state,
           update.view.visibleRanges,
-          taskPresentation?.tree ?? completeMarkdownSyntaxTree(update.state)
+          taskPresentation?.tree ?? completeMarkdownSyntaxTree(update.state),
+          this.pointerSelection ?? update.state.selection,
+          this.pointerSelectionActive
         )
       }
       this.setDecorations(decorations)
@@ -5170,6 +5220,8 @@ class LivePreviewPlugin {
       return
     }
     this.pointerSelecting = true
+    this.pointerSelection = this.view.state.selection
+    this.pointerSelectionActive = livePreviewSelectionIsActive(this.view.state)
     this.activePointerId = event.pointerId
     try {
       this.view.contentDOM.setPointerCapture(event.pointerId)
@@ -5218,6 +5270,8 @@ class LivePreviewPlugin {
   private finishPointerSelection() {
     if (!this.pointerSelecting || this.destroyed) return
     this.pointerSelecting = false
+    this.pointerSelection = null
+    this.pointerSelectionActive = false
     const pointerId = this.activePointerId
     this.activePointerId = null
     if (

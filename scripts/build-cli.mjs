@@ -31,17 +31,6 @@ const variants = [
   {
     appExecutableName:
       process.platform === "win32"
-        ? "Pulse MD Local.exe"
-        : process.platform === "darwin"
-          ? "Pulse MD Local"
-          : "pulse-md-local",
-    cliIdentity: "pulse-md-local",
-    commandName: "pmd-local",
-    outputName: process.platform === "win32" ? "pmd-local.exe" : "pmd-local",
-  },
-  {
-    appExecutableName:
-      process.platform === "win32"
         ? "electron.exe"
         : process.platform === "darwin"
           ? "Electron"
@@ -178,6 +167,13 @@ if (
 }
 
 await mkdir(outputDirectory, { recursive: true })
+await rm(
+  path.join(
+    outputDirectory,
+    process.platform === "win32" ? "pmd-local.exe" : "pmd-local"
+  ),
+  { force: true }
+)
 
 for (const variant of variants) {
   const outputPath = path.join(outputDirectory, variant.outputName)

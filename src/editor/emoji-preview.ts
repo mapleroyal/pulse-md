@@ -203,7 +203,6 @@ export function emojiLivePreviewExtension(
     private aliases: Record<string, string> | null
     private pendingAliases: Record<string, string> | null = null
     private aliasRefreshTimer: number | null = null
-    private shortcodes: readonly EmojiShortcode[]
     private tree: Tree
     private pointerSelecting = false
     private activePointerId: number | null = null
@@ -216,19 +215,14 @@ export function emojiLivePreviewExtension(
       this.ownerWindow = view.dom.ownerDocument.defaultView
       this.aliases = loadedEmojiAliases
       this.tree = completeMarkdownSyntaxTree(view.state)
-      this.shortcodes = emojiShortcodes(
-        view.state,
-        [{ from: 0, to: view.state.doc.length }],
-        this.tree
-      )
       this.decorations = this.buildDecorations(view.state)
       view.scrollDOM.addEventListener("scroll", this.handleScroll, {
         passive: true,
       })
       if (!this.aliases) {
         // The alias table remains a deferred chunk and is loaded only when
-        // emoji expansion is enabled. Its source-sized placeholders keep the
-        // complete document geometry stable until the user stops scrolling.
+        // emoji expansion is enabled. Source-sized placeholders keep the
+        // mounted viewport stable until the user stops scrolling.
         void loadEmojiAliases()
           .then((aliases) => {
             if (this.destroyed) return
@@ -263,12 +257,7 @@ export function emojiLivePreviewExtension(
             update.changes,
             this.tree
           )
-          this.shortcodes = emojiShortcodes(
-            update.state,
-            [{ from: 0, to: update.state.doc.length }],
-            this.tree
-          )
-          this.decorations = this.buildDecorations(update.state)
+          this.decorations = this.decorations.map(update.changes)
         } else if (composing && !this.wasComposing) {
           this.decorations = this.buildDecorations(update.state)
         }
@@ -282,11 +271,6 @@ export function emojiLivePreviewExtension(
           update.changes,
           this.tree
         )
-        this.shortcodes = emojiShortcodes(
-          update.state,
-          [{ from: 0, to: update.state.doc.length }],
-          this.tree
-        )
       }
       const selectionActivityChanged =
         selectionIsActive(update.startState) !== selectionIsActive(update.state)
@@ -295,6 +279,7 @@ export function emojiLivePreviewExtension(
       )
       if (
         update.docChanged ||
+        update.viewportChanged ||
         update.selectionSet ||
         update.focusChanged ||
         selectionActivityChanged ||
@@ -344,7 +329,7 @@ export function emojiLivePreviewExtension(
     private buildDecorations(state: EditorState) {
       return emojiDecorationsForShortcodes(
         state,
-        this.shortcodes,
+        emojiShortcodes(state, this.view.visibleRanges, this.tree),
         selectionIsActive(state),
         this.aliases
       )

@@ -51,14 +51,11 @@ describe("Windows CLI endpoint identity", () => {
 
 describe("CLI endpoint channel identity", () => {
   it.runIf(process.platform !== "win32")(
-    "keeps official, Local, and development sockets distinct",
+    "keeps installed and development sockets distinct",
     () => {
       const uid = process.getuid!()
       expect(cliEndpointPath("pulse-md")).toBe(
         path.join("/tmp", `pulse-md-${uid}`, "cli-v3.sock")
-      )
-      expect(cliEndpointPath("pulse-md-local")).toBe(
-        path.join("/tmp", `pulse-md-local-${uid}`, "cli-v3.sock")
       )
       expect(cliEndpointPath("pulse-md-development-7315cb110cb8")).toBe(
         path.join(
@@ -317,6 +314,41 @@ describe.sequential("CLI server protocol", () => {
       { kind: "c", exitCode: 0, message: "second café\n" },
       { kind: "o", exitCode: 0, message: "" },
     ])
+  })
+
+  it("terminates a dispatched output stream stalled on client backpressure when the server closes", async () => {
+    let markHandlerStarted: (() => void) | undefined
+    const handlerStarted = new Promise<void>((resolve) => {
+      markHandlerStarted = resolve
+    })
+    let markHandlerSettled: (() => void) | undefined
+    const handlerSettled = new Promise<void>((resolve) => {
+      markHandlerSettled = resolve
+    })
+    server = await startCliServer(runtimeDirectory, async ({ responder }) => {
+      markHandlerStarted?.()
+      try {
+        await responder.outputChunks(
+          (async function* () {
+            yield "x".repeat(16 * 1_048_576)
+          })()
+        )
+      } finally {
+        markHandlerSettled?.()
+      }
+    })
+
+    const socket = net.createConnection(endpoint)
+    socket.on("error", () => undefined)
+    socket.pause()
+    await new Promise<void>((resolve) => socket.once("connect", resolve))
+    socket.write(encodeRequest({ cwd: runtimeDirectory }))
+    await handlerStarted
+    await new Promise<void>((resolve) => setImmediate(resolve))
+
+    await Promise.all([server.close(), handlerSettled])
+    server = null
+    socket.destroy()
   })
 
   it("spools an explicitly declared empty stdin stream", async () => {

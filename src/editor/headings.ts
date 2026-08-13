@@ -4,7 +4,10 @@ import type { EditorState, Text } from "@codemirror/state"
 import type { Parser, SyntaxNode, Tree } from "@lezer/common"
 
 import { completeMarkdownSyntaxTree } from "./complete-markdown-tree"
-import { resolveMarkdownLinkNode } from "./link-semantics"
+import {
+  decodeMarkdownCharacterReferences,
+  resolveMarkdownLinkNode,
+} from "./link-semantics"
 
 export type MarkdownOutlineHeadingLevel = 1 | 2 | 3 | 4 | 5 | 6
 
@@ -31,13 +34,6 @@ const hiddenHeadingNodeNames = new Set([
   "LinkMark",
   "StrikethroughMark",
 ])
-const commonEntities: Readonly<Record<string, string>> = {
-  amp: "&",
-  apos: "'",
-  gt: ">",
-  lt: "<",
-  quot: '"',
-}
 
 interface CachedHeadings {
   readonly headings: readonly MarkdownHeading[]
@@ -45,33 +41,6 @@ interface CachedHeadings {
 }
 
 const headingCache = new WeakMap<Text, CachedHeadings>()
-
-function decodeEntity(source: string) {
-  const body = source.slice(1, source.endsWith(";") ? -1 : undefined)
-  if (body.startsWith("#x") || body.startsWith("#X")) {
-    const codePoint = Number.parseInt(body.slice(2), 16)
-    if (Number.isInteger(codePoint) && codePoint > 0 && codePoint <= 0x10ffff) {
-      return String.fromCodePoint(codePoint)
-    }
-  } else if (body.startsWith("#")) {
-    const codePoint = Number.parseInt(body.slice(1), 10)
-    if (Number.isInteger(codePoint) && codePoint > 0 && codePoint <= 0x10ffff) {
-      return String.fromCodePoint(codePoint)
-    }
-  } else if (commonEntities[body]) {
-    return commonEntities[body]
-  }
-
-  // The renderer has a complete HTML entity decoder. Keeping the small
-  // fallback above makes this helper deterministic in node-based tests.
-  const ownerDocument = globalThis.document
-  if (ownerDocument) {
-    const element = ownerDocument.createElement("textarea")
-    element.innerHTML = source
-    return element.value
-  }
-  return source
-}
 
 function collectHeadingReplacements(
   state: EditorState,
@@ -104,7 +73,9 @@ function collectHeadingReplacements(
       replacements.push({
         from: child.from,
         to: child.to,
-        value: decodeEntity(state.sliceDoc(child.from, child.to)),
+        value: decodeMarkdownCharacterReferences(
+          state.sliceDoc(child.from, child.to)
+        ),
       })
       continue
     }

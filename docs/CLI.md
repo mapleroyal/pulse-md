@@ -5,22 +5,21 @@ necessary, talks directly to an already-running copy, forwards standard input
 without placing document contents in process arguments, reports errors to the
 terminal, and returns only after the requested editor has keyboard focus.
 
-The three application identities use separate commands and endpoints:
+The two application identities use separate commands and endpoints:
 
-| App                         | Command                      | Purpose                                 |
-| --------------------------- | ---------------------------- | --------------------------------------- |
-| Official Pulse MD           | `pmd`                        | Installed or distributed production app |
-| Self-built Pulse MD Local   | `pmd-local`                  | Isolated personal/community package     |
-| Pulse MD Development source | `npm run cli:dev -- <args…>` | Isolated source-development run         |
+| App                           | Command                      | Purpose                                      |
+| ----------------------------- | ---------------------------- | -------------------------------------------- |
+| Packaged Pulse MD             | `pmd`                        | Source, direct-download, or storefront build |
+| Pulse MD Development checkout | `npm run cli:dev -- <args…>` | Isolated checkout-development run            |
 
 On macOS and Linux, install a packaged app's command from **Install Command
-Line Tool…** in that app. The official app installs `pmd`; Pulse MD Local
-installs `pmd-local`. Their paths and app data remain separate. The respective
-Windows installer adds its helper to `PATH`; open a new terminal afterward.
+Line Tool…** in that app. Every packaged build installs `pmd` and uses the same
+application data. The all-users Windows installer adds the helper to the
+machine-wide `PATH`; open a new terminal afterward.
 
-Examples below use `pmd`. Substitute `pmd-local` for a Local package, or prefix
-development arguments with `npm run cli:dev --`, to use the same interface
-against that identity. Do not rename one helper to another identity's command.
+Examples below use `pmd`. Prefix development arguments with
+`npm run cli:dev --` to use the same interface against the isolated Development
+identity. Do not rename one helper to the other identity's command.
 
 Use `pmd --help`, `pmd COMMAND --help`, or
 `pmd help [COMMAND [SUBCOMMAND]]` for terminal help. `pmd --version` prints the
@@ -164,14 +163,13 @@ stable identity as `scratchId`, for example:
 ]
 ```
 
-Canonical Markdown links use the UUID. Official packages use and register
-`pulse-md://scratch/019fe216-2b96-7511-8cf4-a35483924181#next-actions`; Local
-packages use and register the separate `pulse-md-local://scratch/…` scheme.
-Source Development uses `pulse-md-development://scratch/…` internally but does
-not register a global handler. Each scheme resolves only against its matching
-app data, and settings import rebinds included scratch links to the destination
-channel. The link does not expose the private backing path and remains valid
-after a filename or title change.
+Canonical Markdown links use the UUID. Every packaged build uses and registers
+`pulse-md://scratch/019fe216-2b96-7511-8cf4-a35483924181#next-actions`.
+Checkout Development uses `pulse-md-development://scratch/…` internally but
+does not register a global handler. Each scheme resolves only against its
+matching app data, and settings import rebinds included scratch links to the
+destination identity. The link does not expose the private backing path and
+remains valid after a filename or title change.
 
 Export writes to standard output when the destination is omitted or `-`. A
 scratch must be closed before export or deletion so pending auto-save work
@@ -295,9 +293,8 @@ Some programs require `EDITOR` to contain only an executable path rather than a
 command plus arguments. Configure those programs directly or use a small
 wrapper that executes `pmd --wait "$@"`.
 
-For a Local installation, use `pmd-local --wait` in these integrations. The
-development npm command is intended for repository work rather than a durable
-global editor configuration.
+The development npm command is intended for repository work rather than a
+durable global editor configuration.
 
 ## Output and exit status
 

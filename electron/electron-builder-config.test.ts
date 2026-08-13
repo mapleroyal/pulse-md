@@ -198,54 +198,52 @@ describe("electron-builder configuration", () => {
       name: "Pulse MD Scratch Link",
       schemes: ["pulse-md"],
     })
-    expect(configuration.extraMetadata?.pmdDistributionChannel).toBe("official")
+    expect(configuration.extraMetadata?.pmdDistributionChannel).toBe(
+      "canonical"
+    )
   })
 
-  it("keeps locally built packages isolated from the official installation", () => {
+  it("keeps source packages on the canonical product identity", () => {
     const configuration = localBuilderConfiguration()
 
     expect(configuration).toMatchObject({
-      appId: "io.github.mapleroyal.pulse-md.local",
+      appId: "io.github.mapleroyal.pulse-md",
       extraMetadata: {
-        desktopName: "pulse-md-local.desktop",
-        name: "pulse-md-local",
-        pmdDistributionChannel: "local",
-        productName: "Pulse MD Local",
+        pmdDistributionChannel: "canonical",
       },
-      fileAssociations: [],
-      productName: "Pulse MD Local",
+      productName: "Pulse MD",
       protocols: [
         {
-          name: "Pulse MD Local Scratch Link",
-          schemes: ["pulse-md-local"],
+          name: "Pulse MD Scratch Link",
+          schemes: ["pulse-md"],
         },
       ],
       nsis: {
-        include: "build/installer-local.nsh",
-        perMachine: false,
+        include: "build/installer.nsh",
+        perMachine: true,
         runAfterFinish: false,
       },
     })
-    expect(configuration.mac?.fileAssociations).toEqual([])
     expect(configuration.mac?.identity).toBe("-")
+    expect(configuration.mac?.icon).toBe("build/pulse-md.icon")
     expect(configuration.mac?.extraResources).toEqual([
       {
         from: "dist-native/macos-window-blur.node",
         to: "native/macos-window-blur.node",
       },
       {
-        from: "dist-native/darwin/bin/pmd-local",
-        to: "bin/pmd-local",
+        from: "dist-native/darwin/bin/pmd",
+        to: "bin/pmd",
       },
     ])
     expect(configuration.mac?.binaries).toEqual([
       "Contents/Resources/native/macos-window-blur.node",
-      "Contents/Resources/bin/pmd-local",
+      "Contents/Resources/bin/pmd",
     ])
     expect(configuration.win?.extraResources).toEqual([
       {
-        from: "dist-native/win32/bin/pmd-local.exe",
-        to: "bin/pmd-local.exe",
+        from: "dist-native/win32/bin/pmd.exe",
+        to: "bin/pmd.exe",
       },
     ])
     expect(configuration.linux?.extraResources).toEqual([
@@ -254,16 +252,16 @@ describe("electron-builder configuration", () => {
         to: "icons/pulse-md.png",
       },
       {
-        from: "dist-native/linux/bin/pmd-local",
-        to: "bin/pmd-local",
+        from: "dist-native/linux/bin/pmd",
+        to: "bin/pmd",
       },
     ])
-    expect(configuration.linux?.executableName).toBe("pulse-md-local")
-    expect(configuration.deb?.packageName).toBe("pulse-md-local")
+    expect(configuration.linux?.executableName).toBe("pulse-md")
+    expect(configuration.deb?.packageName).toBe("pulse-md")
     expect(configuration.linux?.desktop?.entry).toMatchObject({
-      Name: "Pulse MD Local",
-      StartupWMClass: "pulse-md-local",
+      Name: "Pulse MD",
+      StartupWMClass: "pulse-md",
     })
-    expect(JSON.stringify(configuration)).not.toContain('"to":"bin/pmd"')
+    expect(JSON.stringify(configuration)).not.toContain("pmd-local")
   })
 })

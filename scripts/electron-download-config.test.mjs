@@ -5,9 +5,9 @@ import { createRequire } from "node:module"
 import { test } from "node:test"
 
 const require = createRequire(import.meta.url)
-const { createElectronFrameworkSupport } = require(
-  "app-builder-lib/out/electron/ElectronFramework"
-)
+const {
+  createElectronFrameworkSupport,
+} = require("app-builder-lib/out/electron/ElectronFramework")
 const { Platform } = require("app-builder-lib")
 const builderRequire = createRequire(
   require.resolve("app-builder-lib/out/util/electronGet")
@@ -59,7 +59,7 @@ async function captureEffectiveDownload(configuration, platformName, arch) {
   return captured
 }
 
-test("official and Local builds pass pinned checksums to @electron/get", async () => {
+test("release and source builds pass pinned checksums to @electron/get", async () => {
   for (const configPath of [
     "../electron-builder.config.cjs",
     "../electron-builder.local.cjs",

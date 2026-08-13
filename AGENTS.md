@@ -17,8 +17,8 @@ Repository architecture and UI implementation conventions live in `ARCHITECTURE.
 
 # Delivery Verification
 
-- After the final code changes and before wrapping up an implementation task, run `npm run install:local` and complete any platform-specific install instruction it emits. Keep exactly one isolated **Pulse MD Local** copy at the stable platform location, then verify the relevant behavior in that installed copy. Development-server and project-directory Electron checks are useful while iterating, but they do not replace installed-build verification.
-- On macOS, use the explicit maintainer installed-candidate lane (`npm run install:mac:dev`) when a change needs verification with Pulse MD's production identity or installed integrations. That command creates a non-distributable ad-hoc-signed candidate, replaces `/Applications/Pulse MD.app`, removes duplicate production-identifier bundles from managed locations, and checks Launch Services registration. Do not distribute its output. The ordinary Local package remains separate from this lane.
+- After the final code changes and before wrapping up an implementation task, run `npm run install:local` and complete any platform-specific install instruction it emits. Keep exactly one canonical **Pulse MD** copy at the stable platform location, then verify the relevant behavior in that installed copy. Development-server and project-directory Electron checks are useful while iterating, but they do not replace installed-build verification.
+- On macOS, use the explicit maintainer installed-candidate lane (`npm run install:mac:dev`) when a change needs stricter verification of installed integrations or Launch Services registration. That command creates a non-distributable ad-hoc-signed candidate and replaces the same canonical `/Applications/Pulse MD.app`; it does not create a second product identity. Do not distribute its output.
 - If the current environment cannot package or install the target app, state that limitation explicitly when handing off the work.
 
 ## Troubleshooting & Problem-Solving

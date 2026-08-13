@@ -16,11 +16,18 @@ import {
   electronBuilderArguments,
   hasWindowsSigningCredentials,
   isUnusedUpdateMetadata,
+  linuxArtifactExtractionPlan,
+  linuxArtifactRuntimeRootCandidates,
+  linuxReleaseArtifactNames,
   notarizationAuthorization,
   parseDeveloperIdIdentities,
   pruneReleaseStaging,
   releaseOutputNames,
+  resolveLinuxArtifactRuntimeRoot,
   resolveMacSigningEnvironment,
+  validateLinuxAppImageHeader,
+  validateLinuxDebianMetadata,
+  windowsUnpackedDirectoryName,
 } from "./build-release.mjs"
 
 test("all release builders explicitly disable publication", () => {
@@ -129,6 +136,16 @@ test("Windows Authenticode verification receives every file path", () => {
   assert.deepEqual(args.slice(-files.length), files)
 })
 
+test("Windows runtime verification targets the exact builder unpacked root", () => {
+  assert.equal(windowsUnpackedDirectoryName("x64"), "win-unpacked")
+  assert.equal(windowsUnpackedDirectoryName("arm64"), "win-arm64-unpacked")
+  assert.equal(windowsUnpackedDirectoryName("ia32"), "win-ia32-unpacked")
+  assert.throws(
+    () => windowsUnpackedDirectoryName("arm"),
+    /Unsupported Windows release architecture/
+  )
+})
+
 test("unused auto-update metadata is excluded from manual releases", () => {
   for (const filename of [
     "artifact.dmg.blockmap",
@@ -158,4 +175,121 @@ test("official outputs are unique per platform architecture", () => {
     checksumName: "SHA256SUMS-macos-x64",
     directoryName: "official-macos-x64-1.0.0",
   })
+})
+
+test("Linux release artifact names follow each package format's architecture", () => {
+  assert.deepEqual(linuxReleaseArtifactNames("x64", "1.0.0"), {
+    appImage: "Pulse MD-1.0.0-x86_64.AppImage",
+    debian: "Pulse MD-1.0.0-amd64.deb",
+  })
+  assert.deepEqual(linuxReleaseArtifactNames("arm64", "1.0.0"), {
+    appImage: "Pulse MD-1.0.0-arm64.AppImage",
+    debian: "Pulse MD-1.0.0-arm64.deb",
+  })
+})
+
+test("Linux release artifacts extract into their canonical payload layouts", () => {
+  const artifactDirectory = path.join(os.tmpdir(), "pmd-release-artifacts")
+  const extractionDirectory = path.join(os.tmpdir(), "pmd-release-extraction")
+  const appImage = path.join(artifactDirectory, "Pulse MD.AppImage")
+  const debian = path.join(artifactDirectory, "Pulse MD.deb")
+
+  assert.deepEqual(linuxArtifactExtractionPlan(appImage, extractionDirectory), {
+    args: ["--appimage-extract"],
+    command: path.resolve(appImage),
+    cwd: path.resolve(extractionDirectory),
+    format: "appimage",
+  })
+  assert.deepEqual(linuxArtifactExtractionPlan(debian, extractionDirectory), {
+    args: [
+      "--extract",
+      path.resolve(debian),
+      path.resolve(extractionDirectory),
+    ],
+    command: "dpkg-deb",
+    cwd: path.resolve(extractionDirectory),
+    format: "debian",
+  })
+  assert.deepEqual(
+    linuxArtifactRuntimeRootCandidates("appimage", extractionDirectory),
+    [
+      path.join(extractionDirectory, "squashfs-root"),
+      path.join(extractionDirectory, "squashfs-root", "usr", "lib", "pulse-md"),
+    ]
+  )
+  assert.deepEqual(
+    linuxArtifactRuntimeRootCandidates("debian", extractionDirectory),
+    [
+      path.join(extractionDirectory, "opt", "Pulse MD"),
+      path.join(extractionDirectory, "usr", "lib", "pulse-md"),
+    ]
+  )
+  assert.throws(
+    () =>
+      linuxArtifactExtractionPlan(
+        path.join(artifactDirectory, "Pulse MD.tar.gz"),
+        extractionDirectory
+      ),
+    /Unsupported Linux release artifact/
+  )
+})
+
+test("Linux payload resolution requires exactly one canonical runtime root", (t) => {
+  const extractionDirectory = mkdtempSync(
+    path.join(os.tmpdir(), "pmd-linux-payload-")
+  )
+  t.after(() => rmSync(extractionDirectory, { recursive: true, force: true }))
+  const [appImageRoot, nestedRoot] = linuxArtifactRuntimeRootCandidates(
+    "appimage",
+    extractionDirectory
+  )
+
+  assert.throws(
+    () => resolveLinuxArtifactRuntimeRoot("appimage", extractionDirectory),
+    /found 0/
+  )
+  mkdirSync(path.join(appImageRoot, "resources"), { recursive: true })
+  writeFileSync(path.join(appImageRoot, "pulse-md"), "fixture", {
+    mode: 0o755,
+  })
+  assert.equal(
+    resolveLinuxArtifactRuntimeRoot("appimage", extractionDirectory),
+    appImageRoot
+  )
+
+  mkdirSync(path.join(nestedRoot, "resources"), { recursive: true })
+  writeFileSync(path.join(nestedRoot, "pulse-md"), "fixture", { mode: 0o755 })
+  assert.throws(
+    () => resolveLinuxArtifactRuntimeRoot("appimage", extractionDirectory),
+    /found 2/
+  )
+})
+
+test("Linux release validation checks Debian and AppImage architectures", () => {
+  validateLinuxDebianMetadata(
+    { Architecture: "amd64", Package: "pulse-md", Version: "1.0.0" },
+    "x64",
+    "fixture.deb"
+  )
+  assert.throws(
+    () =>
+      validateLinuxDebianMetadata(
+        { Architecture: "arm64", Package: "pulse-md", Version: "1.0.0" },
+        "x64",
+        "fixture.deb"
+      ),
+    /Architecture is arm64, expected amd64/
+  )
+
+  const x64Header = Buffer.alloc(20)
+  x64Header.set([0x7f, 0x45, 0x4c, 0x46, 2, 1])
+  x64Header.writeUInt16LE(62, 18)
+  validateLinuxAppImageHeader(x64Header, "x64", "fixture.AppImage")
+
+  const arm64Header = Buffer.from(x64Header)
+  arm64Header.writeUInt16LE(183, 18)
+  assert.throws(
+    () => validateLinuxAppImageHeader(arm64Header, "x64", "fixture.AppImage"),
+    /machine 183; expected class 2, machine 62/
+  )
 })

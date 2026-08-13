@@ -27,12 +27,6 @@ const helperPath = path.join(
   process.platform,
   "bin/pmd"
 )
-const localHelperPath = path.join(
-  projectRoot,
-  "dist-native",
-  process.platform,
-  "bin/pmd-local"
-)
 const platformSupported =
   process.platform === "darwin" || process.platform === "linux"
 const cliTest = platformSupported
@@ -246,20 +240,6 @@ cliTest("rejects a non-absolute development endpoint", async () => {
       /PMD_CLI_ENDPOINT must be an absolute Unix socket path/
     )
   }
-})
-
-cliTest("the Local helper identifies itself in validation errors", async () => {
-  const invocation = runHelper([], {
-    cwd: projectRoot,
-    env: {
-      PMD_APP_EXECUTABLE: "/bin/false",
-      PMD_CLI_ENDPOINT: "relative/cli-v3.sock",
-    },
-    helper: localHelperPath,
-  })
-  const result = await invocation.result
-  assert.equal(result.code, 1)
-  assert.match(result.stderr, /^pmd-local: PMD_CLI_ENDPOINT /)
 })
 
 cliTest("rejects an insecure development endpoint parent", async () => {

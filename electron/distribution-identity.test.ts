@@ -3,10 +3,9 @@ import { describe, expect, it } from "vitest"
 import {
   DEVELOPMENT_PRODUCT_NAME,
   distributionShouldStartCliServer,
-  LOCAL_PRODUCT_NAME,
-  LOCAL_USER_DATA_DIRECTORY_NAME,
-  OFFICIAL_PRODUCT_NAME,
+  PRODUCT_NAME,
   resolveDistributionIdentity,
+  USER_DATA_DIRECTORY_NAME,
 } from "./distribution-identity"
 import { developmentCheckoutIdentity } from "../scripts/development-checkout-identity.mjs"
 
@@ -24,7 +23,7 @@ describe("distribution identity", () => {
       cliCommandName: "pmd-dev",
       cliIdentity: DEVELOPMENT_CHECKOUT.cliIdentity,
       isDevelopment: true,
-      isOfficialPackage: false,
+      isCanonicalPackage: false,
       productName: DEVELOPMENT_PRODUCT_NAME,
       scratchLinkScheme: "pulse-md-development",
       userDataDirectoryName: DEVELOPMENT_CHECKOUT.userDataDirectoryName,
@@ -35,7 +34,7 @@ describe("distribution identity", () => {
     expect(DEVELOPMENT_CHECKOUT.userDataDirectoryName).toContain(
       DEVELOPMENT_CHECKOUT.checkoutHash
     )
-    expect(DEVELOPMENT_PRODUCT_NAME).not.toBe(OFFICIAL_PRODUCT_NAME)
+    expect(DEVELOPMENT_PRODUCT_NAME).not.toBe(PRODUCT_NAME)
   })
 
   it("fails closed when source development has no checkout identity", () => {
@@ -45,25 +44,15 @@ describe("distribution identity", () => {
   })
 
   it("uses explicit package metadata rather than a display-name heuristic", () => {
-    expect(resolveDistributionIdentity(true, "official")).toEqual({
-      channel: "official",
+    expect(resolveDistributionIdentity(true, "canonical")).toEqual({
+      channel: "canonical",
       cliCommandName: "pmd",
       cliIdentity: "pulse-md",
       isDevelopment: false,
-      isOfficialPackage: true,
-      productName: OFFICIAL_PRODUCT_NAME,
+      isCanonicalPackage: true,
+      productName: PRODUCT_NAME,
       scratchLinkScheme: "pulse-md",
-      userDataDirectoryName: OFFICIAL_PRODUCT_NAME,
-    })
-    expect(resolveDistributionIdentity(true, "local")).toEqual({
-      channel: "local",
-      cliCommandName: "pmd-local",
-      cliIdentity: "pulse-md-local",
-      isDevelopment: false,
-      isOfficialPackage: false,
-      productName: LOCAL_PRODUCT_NAME,
-      scratchLinkScheme: "pulse-md-local",
-      userDataDirectoryName: LOCAL_USER_DATA_DIRECTORY_NAME,
+      userDataDirectoryName: USER_DATA_DIRECTORY_NAME,
     })
   })
 
@@ -71,10 +60,9 @@ describe("distribution identity", () => {
     expect(() => resolveDistributionIdentity(true)).toThrow(
       /pmdDistributionChannel/
     )
-    expect(() => resolveDistributionIdentity(true, "Pulse MD Local")).toThrow(
+    expect(() => resolveDistributionIdentity(true, "local")).toThrow(
       /pmdDistributionChannel/
     )
-    expect(LOCAL_USER_DATA_DIRECTORY_NAME).not.toBe(OFFICIAL_PRODUCT_NAME)
   })
 
   it("starts each identity's CLI server except for isolated test launches", () => {

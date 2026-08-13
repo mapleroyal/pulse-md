@@ -1,54 +1,36 @@
 import type { ScratchLinkScheme } from "../src/shared/scratch-links"
 import type { DevelopmentCheckoutIdentity } from "../scripts/development-checkout-identity.mjs"
 
-export const OFFICIAL_PRODUCT_NAME = "Pulse MD"
-export const LOCAL_PRODUCT_NAME = "Pulse MD Local"
+export const PRODUCT_NAME = "Pulse MD"
 export const DEVELOPMENT_PRODUCT_NAME = "Pulse MD Development"
 
-export const OFFICIAL_USER_DATA_DIRECTORY_NAME = OFFICIAL_PRODUCT_NAME
-export const LOCAL_USER_DATA_DIRECTORY_NAME = LOCAL_PRODUCT_NAME
+export const USER_DATA_DIRECTORY_NAME = PRODUCT_NAME
 
-export type PackagedDistributionChannel = "official" | "local"
+export type PackagedDistributionChannel = "canonical"
 export type DistributionChannel = PackagedDistributionChannel | "development"
 
-export type CliIdentity =
-  "pulse-md" | "pulse-md-local" | `pulse-md-development-${string}`
+export type CliIdentity = "pulse-md" | `pulse-md-development-${string}`
 
 export interface DistributionIdentity {
   channel: DistributionChannel
-  cliCommandName: "pmd" | "pmd-local" | "pmd-dev"
+  cliCommandName: "pmd" | "pmd-dev"
   cliIdentity: CliIdentity
   isDevelopment: boolean
-  isOfficialPackage: boolean
+  isCanonicalPackage: boolean
   productName: string
   scratchLinkScheme: ScratchLinkScheme
   userDataDirectoryName: string
 }
 
-const PACKAGED_IDENTITIES: Record<
-  PackagedDistributionChannel,
-  DistributionIdentity
-> = {
-  official: {
-    channel: "official",
-    cliCommandName: "pmd",
-    cliIdentity: "pulse-md",
-    isDevelopment: false,
-    isOfficialPackage: true,
-    productName: OFFICIAL_PRODUCT_NAME,
-    scratchLinkScheme: "pulse-md",
-    userDataDirectoryName: OFFICIAL_USER_DATA_DIRECTORY_NAME,
-  },
-  local: {
-    channel: "local",
-    cliCommandName: "pmd-local",
-    cliIdentity: "pulse-md-local",
-    isDevelopment: false,
-    isOfficialPackage: false,
-    productName: LOCAL_PRODUCT_NAME,
-    scratchLinkScheme: "pulse-md-local",
-    userDataDirectoryName: LOCAL_USER_DATA_DIRECTORY_NAME,
-  },
+const PACKAGED_IDENTITY: DistributionIdentity = {
+  channel: "canonical",
+  cliCommandName: "pmd",
+  cliIdentity: "pulse-md",
+  isDevelopment: false,
+  isCanonicalPackage: true,
+  productName: PRODUCT_NAME,
+  scratchLinkScheme: "pulse-md",
+  userDataDirectoryName: USER_DATA_DIRECTORY_NAME,
 }
 
 /**
@@ -72,15 +54,13 @@ export function resolveDistributionIdentity(
       cliCommandName: "pmd-dev",
       cliIdentity: developmentCheckout.cliIdentity,
       isDevelopment: true,
-      isOfficialPackage: false,
+      isCanonicalPackage: false,
       productName: DEVELOPMENT_PRODUCT_NAME,
       scratchLinkScheme: "pulse-md-development",
       userDataDirectoryName: developmentCheckout.userDataDirectoryName,
     }
   }
-  if (packagedChannel === "official" || packagedChannel === "local") {
-    return PACKAGED_IDENTITIES[packagedChannel]
-  }
+  if (packagedChannel === "canonical") return PACKAGED_IDENTITY
   throw new TypeError(
     "Packaged Pulse MD is missing a valid pmdDistributionChannel"
   )

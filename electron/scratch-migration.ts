@@ -127,7 +127,7 @@ export function rewriteLegacyScratchMarkdownLinks(
 
 /**
  * Rebinds only canonical standalone-scratch URLs. This is used when a settings
- * archive moves scratch Markdown between the Official, Local, and Development
+ * archive moves scratch Markdown between the installed and source-development
  * data channels; unrelated URLs and malformed Markdown remain byte-exact.
  */
 export function rewriteCanonicalScratchMarkdownLinkSchemes(

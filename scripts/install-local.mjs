@@ -19,9 +19,9 @@ const projectRoot = path.resolve(import.meta.dirname, "..")
 const packageMetadata = JSON.parse(
   readFileSync(path.join(projectRoot, "package.json"), "utf8")
 )
-const macInstalledApp = "/Applications/Pulse MD Local.app"
-const localBundleIdentifier = "io.github.mapleroyal.pulse-md.local"
-const localProductName = "Pulse MD Local"
+const macInstalledApp = "/Applications/Pulse MD.app"
+const bundleIdentifier = "io.github.mapleroyal.pulse-md"
+const productName = "Pulse MD"
 const releaseDirectory = path.join(projectRoot, "release")
 const require = createRequire(import.meta.url)
 const { extractFile } = require("@electron/asar")
@@ -62,7 +62,7 @@ function runVisible(command, args, options = {}) {
 function npmInvocation(args) {
   const npmCli = process.env.npm_execpath
   if (!npmCli) {
-    throw new Error("Run Local installation through `npm run install:local`")
+    throw new Error("Run installation through `npm run install:local`")
   }
   return [process.execPath, [npmCli, ...args]]
 }
@@ -93,6 +93,13 @@ function requireRegularDirectory(target, description) {
   }
 }
 
+function requireRegularFile(target, description) {
+  const stat = pathStat(target)
+  if (!stat || stat.isSymbolicLink() || !stat.isFile()) {
+    throw new Error(`${description} is not a regular file: ${target}`)
+  }
+}
+
 function plistValue(appBundle, key) {
   return run("/usr/bin/plutil", [
     "-extract",
@@ -109,34 +116,57 @@ function validateMacBundle(
   {
     canonicalName = true,
     currentVersion = true,
-    requireLocalHelper = true,
+    requireAdaptiveIcon = true,
+    requireHelper = true,
   } = {}
 ) {
-  requireRegularDirectory(appBundle, "Pulse MD Local app bundle")
-  if (canonicalName && path.basename(appBundle) !== `${localProductName}.app`) {
-    throw new Error(`Unexpected Local app bundle name: ${appBundle}`)
+  requireRegularDirectory(appBundle, "Pulse MD app bundle")
+  if (canonicalName && path.basename(appBundle) !== `${productName}.app`) {
+    throw new Error(`Unexpected app bundle name: ${appBundle}`)
   }
-  if (plistValue(appBundle, "CFBundleIdentifier") !== localBundleIdentifier) {
-    throw new Error(`Unexpected Local bundle identifier: ${appBundle}`)
+  if (plistValue(appBundle, "CFBundleIdentifier") !== bundleIdentifier) {
+    throw new Error(`Unexpected bundle identifier: ${appBundle}`)
   }
   if (
     currentVersion &&
     plistValue(appBundle, "CFBundleShortVersionString") !==
       packageMetadata.version
   ) {
-    throw new Error(`Unexpected Local app version: ${appBundle}`)
+    throw new Error(`Unexpected app version: ${appBundle}`)
   }
   const requiredExecutables = [
-    path.join(appBundle, "Contents", "MacOS", localProductName),
-    ...(requireLocalHelper
-      ? [path.join(appBundle, "Contents", "Resources", "bin", "pmd-local")]
+    path.join(appBundle, "Contents", "MacOS", productName),
+    ...(requireHelper
+      ? [path.join(appBundle, "Contents", "Resources", "bin", "pmd")]
       : []),
   ]
   for (const required of requiredExecutables) {
-    const stat = pathStat(required)
-    if (!stat?.isFile() || stat.isSymbolicLink()) {
-      throw new Error(`Required Local executable is missing: ${required}`)
+    requireRegularFile(required, "Required executable")
+  }
+  if (requireAdaptiveIcon) {
+    if (plistValue(appBundle, "CFBundleIconName") !== "Icon") {
+      throw new Error(
+        `Packaged app does not declare its adaptive icon: ${appBundle}`
+      )
     }
+    const configuredIconFile = plistValue(appBundle, "CFBundleIconFile")
+    if (!configuredIconFile) {
+      throw new Error(
+        `Packaged app does not declare its fallback icon: ${appBundle}`
+      )
+    }
+    const fallbackIconName = configuredIconFile.endsWith(".icns")
+      ? configuredIconFile
+      : `${configuredIconFile}.icns`
+    const resources = path.join(appBundle, "Contents", "Resources")
+    requireRegularFile(
+      path.join(resources, "Assets.car"),
+      "Icon Composer asset catalog"
+    )
+    requireRegularFile(
+      path.join(resources, fallbackIconName),
+      "Legacy icon fallback"
+    )
   }
   run("/usr/bin/codesign", [
     "--verify",
@@ -148,7 +178,7 @@ function validateMacBundle(
 }
 
 function discoverAppBundles(root) {
-  requireRegularDirectory(root, "Local build output")
+  requireRegularDirectory(root, "package build output")
   const apps = []
   const pending = [root]
   while (pending.length > 0) {
@@ -163,29 +193,27 @@ function discoverAppBundles(root) {
   return apps
 }
 
-function assertLocalIsNotRunning() {
+function assertPulseMdIsNotRunning() {
   const processes = run("/bin/ps", ["-axo", "pid=,command="])
     .stdout.split("\n")
     .map((line) => line.trim())
-    .filter((line) => /\/Contents\/MacOS\/Pulse MD Local(?:\s|$)/.test(line))
+    .filter((line) => /\/Contents\/MacOS\/Pulse MD(?:\s|$)/.test(line))
   if (processes.length > 0) {
-    throw new Error(
-      `Quit Pulse MD Local before installing:\n${processes.join("\n")}`
-    )
+    throw new Error(`Quit Pulse MD before installing:\n${processes.join("\n")}`)
   }
 }
 
-async function waitForLocalToStop() {
+async function waitForPulseMdToStop() {
   const deadline = Date.now() + 10_000
   while (Date.now() < deadline) {
     try {
-      assertLocalIsNotRunning()
+      assertPulseMdIsNotRunning()
       return
     } catch {
       await new Promise((resolve) => setTimeout(resolve, 25))
     }
   }
-  assertLocalIsNotRunning()
+  assertPulseMdIsNotRunning()
 }
 
 function verifyPackagedRuntime(appBundle) {
@@ -196,14 +224,8 @@ function verifyPackagedRuntime(appBundle) {
   })
 }
 
-function verifyLocalCli(appBundle) {
-  const helper = path.join(
-    appBundle,
-    "Contents",
-    "Resources",
-    "bin",
-    "pmd-local"
-  )
+function verifyDefaultCli(appBundle) {
+  const helper = path.join(appBundle, "Contents", "Resources", "bin", "pmd")
   const cleanEnvironment = Object.fromEntries(
     Object.entries(process.env).filter(
       ([name]) => !["PMD_APP_EXECUTABLE", "PMD_CLI_ENDPOINT"].includes(name)
@@ -211,24 +233,22 @@ function verifyLocalCli(appBundle) {
   )
   const result = run(helper, ["doctor"], {
     env: cleanEnvironment,
-    label: "installed pmd-local doctor",
+    label: "installed pmd doctor",
   })
-  if (
-    !result.stdout.includes(`${localProductName} ${packageMetadata.version}`)
-  ) {
-    throw new Error(`pmd-local reached the wrong app:\n${result.stdout}`)
+  if (!result.stdout.includes(`${productName} ${packageMetadata.version}`)) {
+    throw new Error(`pmd reached the wrong app:\n${result.stdout}`)
   }
-  if (!result.stdout.includes("pulse-md-local-")) {
-    throw new Error(`pmd-local reported the wrong endpoint:\n${result.stdout}`)
+  if (!result.stdout.includes("pulse-md-")) {
+    throw new Error(`pmd reported the wrong endpoint:\n${result.stdout}`)
   }
   const expectedExecutable = path.join(
     appBundle,
     "Contents",
     "MacOS",
-    localProductName
+    productName
   )
   if (!result.stdout.includes(`Application: ${expectedExecutable}\n`)) {
-    throw new Error(`pmd-local launched another app:\n${result.stdout}`)
+    throw new Error(`pmd launched another app:\n${result.stdout}`)
   }
 }
 
@@ -252,36 +272,32 @@ function macBundleIdentifier(appBundle) {
   }
 }
 
-function validateLocalBundleOwnership(appBundle) {
-  validateLocalBundleShell(appBundle)
+function validateBundleOwnership(appBundle) {
+  validateBundleShell(appBundle)
   const metadata = JSON.parse(
     extractFile(
       path.join(appBundle, "Contents", "Resources", "app.asar"),
       "package.json"
     ).toString("utf8")
   )
-  const currentLocalMetadata =
-    metadata.pmdDistributionChannel === "local" &&
-    metadata.name === "pulse-md-local" &&
-    metadata.productName === localProductName
-  const preIdentityLocalMetadata =
-    metadata.pmdDistributionChannel === undefined &&
+  const canonicalMetadata =
+    metadata.pmdDistributionChannel === "canonical" &&
     metadata.name === "pulse-md" &&
-    metadata.productName === "Pulse MD"
-  if (!currentLocalMetadata && !preIdentityLocalMetadata) {
-    throw new Error(`Refusing unverified Local app bundle: ${appBundle}`)
+    metadata.productName === productName
+  if (!canonicalMetadata) {
+    throw new Error(`Refusing unverified Pulse MD app bundle: ${appBundle}`)
   }
 }
 
-function validateLocalBundleShell(appBundle) {
-  requireRegularDirectory(appBundle, "Pulse MD Local app bundle")
-  if (macBundleIdentifier(appBundle) !== localBundleIdentifier) {
-    throw new Error(`Refusing non-Local app bundle: ${appBundle}`)
+function validateBundleShell(appBundle) {
+  requireRegularDirectory(appBundle, "Pulse MD app bundle")
+  if (macBundleIdentifier(appBundle) !== bundleIdentifier) {
+    throw new Error(`Refusing non-Pulse MD app bundle: ${appBundle}`)
   }
-  const executable = path.join(appBundle, "Contents", "MacOS", localProductName)
+  const executable = path.join(appBundle, "Contents", "MacOS", productName)
   const executableStat = pathStat(executable)
   if (!executableStat?.isFile() || executableStat.isSymbolicLink()) {
-    throw new Error(`Local app executable is missing: ${executable}`)
+    throw new Error(`Pulse MD executable is missing: ${executable}`)
   }
 }
 
@@ -301,17 +317,20 @@ function registeredSetHasPath(registrations, target) {
   )
 }
 
-function unregisterLocalBundleIfRegistered(launchServicesTool, target) {
+function unregisterBundleIfRegistered(launchServicesTool, target) {
   if (
-    !registeredSetHasPath(registeredLocalMacBundles(launchServicesTool), target)
+    !registeredSetHasPath(
+      registeredPulseMdMacBundles(launchServicesTool),
+      target
+    )
   )
     return
   run(launchServicesTool, ["-u", target], {
-    label: `unregistering Pulse MD Local bundle ${target}`,
+    label: `unregistering Pulse MD bundle ${target}`,
   })
 }
 
-function localMacBundlesUnder(root, maximumDepth) {
+function pulseMdMacBundlesUnder(root, maximumDepth) {
   const bundles = []
   const pending = [{ depth: 0, target: root }]
   while (pending.length > 0) {
@@ -319,7 +338,7 @@ function localMacBundlesUnder(root, maximumDepth) {
     const stat = pathStat(target)
     if (!stat || stat.isSymbolicLink() || !stat.isDirectory()) continue
     if (target.endsWith(".app")) {
-      if (macBundleIdentifier(target) === localBundleIdentifier) {
+      if (macBundleIdentifier(target) === bundleIdentifier) {
         bundles.push(target)
       }
       continue
@@ -333,7 +352,7 @@ function localMacBundlesUnder(root, maximumDepth) {
   return bundles
 }
 
-function registeredLocalMacBundles(launchServicesTool) {
+function registeredPulseMdMacBundles(launchServicesTool) {
   const registrations = new Set()
   let currentPath = null
   for (const line of run(launchServicesTool, ["-dump"]).stdout.split("\n")) {
@@ -344,7 +363,7 @@ function registeredLocalMacBundles(launchServicesTool) {
     }
     if (
       currentPath &&
-      /^identifier:\s+io\.github\.mapleroyal\.pulse-md\.local$/.test(line)
+      /^identifier:\s+io\.github\.mapleroyal\.pulse-md$/.test(line)
     ) {
       registrations.add(currentPath)
     }
@@ -352,16 +371,18 @@ function registeredLocalMacBundles(launchServicesTool) {
   return registrations
 }
 
-function cleanManagedLocalMacDuplicates(launchServicesTool, managedRoot) {
+function cleanManagedMacDuplicates(launchServicesTool, managedRoot) {
   const roots = [
     { depth: 5, path: releaseDirectory },
     { depth: 4, path: managedRoot },
     { depth: 7, path: path.join(os.homedir(), ".Trash") },
   ]
   const discovered = new Set(
-    roots.flatMap(({ depth, path: root }) => localMacBundlesUnder(root, depth))
+    roots.flatMap(({ depth, path: root }) =>
+      pulseMdMacBundlesUnder(root, depth)
+    )
   )
-  const registered = registeredLocalMacBundles(launchServicesTool)
+  const registered = registeredPulseMdMacBundles(launchServicesTool)
   const candidates = [...new Set([...discovered, ...registered])]
     .filter(
       (target) => canonicalPath(target) !== canonicalPath(macInstalledApp)
@@ -385,42 +406,27 @@ function cleanManagedLocalMacDuplicates(launchServicesTool, managedRoot) {
       })
       if (!managed) {
         const resolvedTarget = canonicalPath(target)
-        const legacyTemporaryLocal =
-          /^\/private\/tmp\/pmd-local-build\.[A-Za-z0-9]+\/[^/]+\/Pulse MD Local\.app$/.test(
-            resolvedTarget
-          )
         if (
-          resolvedTarget.startsWith(
-            `${canonicalPath(os.tmpdir())}${path.sep}`
-          ) ||
-          legacyTemporaryLocal
+          resolvedTarget.startsWith(`${canonicalPath(os.tmpdir())}${path.sep}`)
         ) {
           // Stale package-verification bundles are never deleted outside the
-          // bounded managed roots. Their exact Local shell is enough to
+          // bounded managed roots. Their exact Pulse MD shell is enough to
           // safely remove only the Launch Services registration.
-          validateLocalBundleShell(target)
+          validateBundleShell(target)
           if (registered.has(target)) {
             run(launchServicesTool, ["-u", target], {
-              label: `unregistering temporary Pulse MD Local bundle ${target}`,
+              label: `unregistering temporary Pulse MD bundle ${target}`,
             })
-          }
-          if (legacyTemporaryLocal) {
-            // These are known pre-wrapper build directories created by this
-            // repository's earlier packaged-runtime checks. Remove only the
-            // exact app bundle after validating both its outer identity and
-            // embedded Local metadata shape.
-            validateLocalBundleOwnership(target)
-            rmSync(target, { recursive: true })
           }
           continue
         }
-        throw new Error(`Unmanaged Pulse MD Local duplicate remains: ${target}`)
+        throw new Error(`Unmanaged Pulse MD duplicate remains: ${target}`)
       }
-      validateLocalBundleOwnership(target)
+      validateBundleOwnership(target)
     }
     if (registered.has(target)) {
       run(launchServicesTool, ["-u", target], {
-        label: `unregistering duplicate Pulse MD Local bundle ${target}`,
+        label: `unregistering duplicate Pulse MD bundle ${target}`,
       })
     }
     if (stat) rmSync(target, { recursive: true })
@@ -442,9 +448,8 @@ function defaultApplicationForUrl(url) {
   ]).stdout.trim()
 }
 
-async function waitForLocalProtocolRegistration() {
-  const address =
-    "pulse-md-local://scratch/11111111-1111-4111-8111-111111111111"
+async function waitForProtocolRegistration() {
+  const address = "pulse-md://scratch/11111111-1111-4111-8111-111111111111"
   const deadline = Date.now() + 10_000
   let resolved = ""
   while (Date.now() < deadline) {
@@ -454,19 +459,19 @@ async function waitForLocalProtocolRegistration() {
   }
   throw new Error(
     resolved
-      ? `pulse-md-local URLs resolve to ${resolved}, expected ${macInstalledApp}`
-      : "pulse-md-local URLs do not resolve to the installed Local app"
+      ? `pulse-md URLs resolve to ${resolved}, expected ${macInstalledApp}`
+      : "pulse-md URLs do not resolve to the installed app"
   )
 }
 
-function assertSoleLocalRegistration(launchServicesTool) {
-  const registrations = [...registeredLocalMacBundles(launchServicesTool)]
+function assertSoleRegistration(launchServicesTool) {
+  const registrations = [...registeredPulseMdMacBundles(launchServicesTool)]
   const duplicates = registrations.filter(
     (target) => canonicalPath(target) !== canonicalPath(macInstalledApp)
   )
   if (duplicates.length > 0) {
     throw new Error(
-      `Stale Pulse MD Local registrations remain:\n${duplicates.join("\n")}`
+      `Stale Pulse MD registrations remain:\n${duplicates.join("\n")}`
     )
   }
   if (
@@ -474,19 +479,16 @@ function assertSoleLocalRegistration(launchServicesTool) {
       (target) => canonicalPath(target) === canonicalPath(macInstalledApp)
     )
   ) {
-    throw new Error(`Pulse MD Local is not registered at ${macInstalledApp}`)
+    throw new Error(`Pulse MD is not registered at ${macInstalledApp}`)
   }
 }
 
 function installMacCandidate(candidate, token) {
   const applications = path.dirname(macInstalledApp)
-  const incoming = path.join(
-    applications,
-    `.Pulse MD Local.incoming-${token}.app`
-  )
-  const previous = path.join(applications, `.Pulse MD Local.previous-${token}`)
+  const incoming = path.join(applications, `.Pulse MD.incoming-${token}.app`)
+  const previous = path.join(applications, `.Pulse MD.previous-${token}`)
   if (pathStat(incoming) || pathStat(previous)) {
-    throw new Error("A Local install staging path already exists")
+    throw new Error("An install staging path already exists")
   }
 
   const existing = pathStat(macInstalledApp)
@@ -494,14 +496,15 @@ function installMacCandidate(candidate, token) {
   let installedIncoming = false
   try {
     run("/usr/bin/ditto", [candidate, incoming], {
-      label: "copying Pulse MD Local into Applications",
+      label: "copying Pulse MD into Applications",
     })
     validateMacBundle(incoming, { canonicalName: false })
     if (existing) {
       try {
         validateMacBundle(macInstalledApp, {
           currentVersion: false,
-          requireLocalHelper: false,
+          requireAdaptiveIcon: false,
+          requireHelper: false,
         })
       } catch (error) {
         throw new Error(
@@ -531,7 +534,11 @@ function installMacCandidate(candidate, token) {
   }
 }
 
-function buildLocalTo(outputDirectory) {
+function buildPackageTo(outputDirectory) {
+  if (process.platform === "darwin") {
+    const [npm, npmArgs] = npmInvocation(["run", "icon:build"])
+    runVisible(npm, npmArgs, { label: "adaptive macOS icon build" })
+  }
   const [npm, npmArgs] = npmInvocation(["run", "build"])
   runVisible(npm, npmArgs, { label: "application build" })
   const platformArgument = {
@@ -541,7 +548,7 @@ function buildLocalTo(outputDirectory) {
   }[process.platform]
   if (!platformArgument) {
     throw new Error(
-      `Pulse MD Local installation is unsupported on ${process.platform}`
+      `Pulse MD installation is unsupported on ${process.platform}`
     )
   }
   const [builder, builderArgs] = builderInvocation([
@@ -557,25 +564,28 @@ function buildLocalTo(outputDirectory) {
     env: {
       ...process.env,
       ...(process.platform === "darwin"
-        ? { CSC_IDENTITY_AUTO_DISCOVERY: "false" }
+        ? {
+            CSC_IDENTITY_AUTO_DISCOVERY: "false",
+            PMD_ICON_COMPOSER_BUILD: "1",
+          }
         : {}),
     },
-    label: "Local electron-builder package",
+    label: "Pulse MD electron-builder package",
   })
 }
 
 async function installMac() {
   const applications = path.dirname(macInstalledApp)
   requireRegularDirectory(applications, "Applications directory")
-  assertLocalIsNotRunning()
+  assertPulseMdIsNotRunning()
   const managedRoot = path.join(
     os.homedir(),
     "Library",
     "Application Support",
-    "Pulse MD Local Build Tests"
+    "Pulse MD Build Tests"
   )
   mkdirSync(managedRoot, { recursive: true, mode: 0o700 })
-  requireRegularDirectory(managedRoot, "Local build-test directory")
+  requireRegularDirectory(managedRoot, "build-test directory")
   const stagingDirectory = mkdtempSync(path.join(managedRoot, "install-"))
   const token = `${process.pid}-${randomUUID()}`
   let previous = null
@@ -584,38 +594,36 @@ async function installMac() {
   try {
     const launchServicesTool =
       "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
-    cleanManagedLocalMacDuplicates(launchServicesTool, managedRoot)
-    buildLocalTo(stagingDirectory)
+    cleanManagedMacDuplicates(launchServicesTool, managedRoot)
+    buildPackageTo(stagingDirectory)
     const candidates = discoverAppBundles(stagingDirectory)
     if (candidates.length !== 1) {
-      throw new Error(
-        `Expected one Local app candidate, found ${candidates.length}`
-      )
+      throw new Error(`Expected one app candidate, found ${candidates.length}`)
     }
     validateMacBundle(candidates[0])
     try {
       verifyPackagedRuntime(candidates[0])
     } finally {
-      unregisterLocalBundleIfRegistered(launchServicesTool, candidates[0])
+      unregisterBundleIfRegistered(launchServicesTool, candidates[0])
     }
-    assertLocalIsNotRunning()
+    assertPulseMdIsNotRunning()
 
     const installation = installMacCandidate(candidates[0], token)
     previous = installation.previous
     installed = true
     verifyPackagedRuntime(macInstalledApp)
-    verifyLocalCli(macInstalledApp)
-    await waitForLocalToStop()
+    verifyDefaultCli(macInstalledApp)
+    await waitForPulseMdToStop()
 
     removeManagedDirectory(stagingDirectory, managedRoot)
     if (previous) {
-      unregisterLocalBundleIfRegistered(launchServicesTool, previous)
+      unregisterBundleIfRegistered(launchServicesTool, previous)
     }
     run(launchServicesTool, ["-f", macInstalledApp], {
-      label: "registering Pulse MD Local",
+      label: "registering Pulse MD",
     })
-    await waitForLocalProtocolRegistration()
-    assertSoleLocalRegistration(launchServicesTool)
+    await waitForProtocolRegistration()
+    assertSoleRegistration(launchServicesTool)
     installed = false
     if (previous) {
       removeManagedDirectory(previous, applications)
@@ -624,16 +632,16 @@ async function installMac() {
     console.log(`Installed and verified ${macInstalledApp}`)
   } catch (error) {
     if (installed && pathStat(macInstalledApp)) {
-      validateLocalBundleShell(macInstalledApp)
+      validateBundleShell(macInstalledApp)
       removeManagedDirectory(macInstalledApp, applications)
     }
     if (previous && pathStat(previous) && !pathStat(macInstalledApp)) {
-      validateLocalBundleShell(previous)
+      validateBundleShell(previous)
       renameSync(previous, macInstalledApp)
       run(
         "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister",
         ["-f", macInstalledApp],
-        { label: "restoring the previous Local registration" }
+        { label: "restoring the previous Pulse MD registration" }
       )
     }
     throw error
@@ -644,76 +652,74 @@ async function installMac() {
   }
 }
 
-function windowsLocalProcessPaths() {
+function windowsProcessPaths() {
   const script = [
     "$ErrorActionPreference = 'Stop'",
-    "$items = Get-CimInstance Win32_Process -Filter \"Name = 'Pulse MD Local.exe'\"",
+    "$items = Get-CimInstance Win32_Process -Filter \"Name = 'Pulse MD.exe'\"",
     "$items | ForEach-Object { if ($_.ExecutablePath) { $_.ExecutablePath } }",
   ].join("; ")
   return run(
     "powershell.exe",
     ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", script],
-    { label: "checking running Pulse MD Local processes" }
+    { label: "checking running Pulse MD processes" }
   )
     .stdout.split(/\r?\n/)
     .map((line) => line.trim())
     .filter(Boolean)
 }
 
-function assertWindowsLocalIsNotRunning() {
-  const processes = windowsLocalProcessPaths()
+function assertWindowsPulseMdIsNotRunning() {
+  const processes = windowsProcessPaths()
   if (processes.length > 0) {
-    throw new Error(
-      `Quit Pulse MD Local before installing:\n${processes.join("\n")}`
-    )
+    throw new Error(`Quit Pulse MD before installing:\n${processes.join("\n")}`)
   }
 }
 
-async function waitForWindowsLocalToStop() {
+async function waitForWindowsPulseMdToStop() {
   const deadline = Date.now() + 10_000
   while (Date.now() < deadline) {
     try {
-      assertWindowsLocalIsNotRunning()
+      assertWindowsPulseMdIsNotRunning()
       return
     } catch {
       await new Promise((resolve) => setTimeout(resolve, 25))
     }
   }
-  assertWindowsLocalIsNotRunning()
+  assertWindowsPulseMdIsNotRunning()
 }
 
-function windowsLocalInstallLocations() {
+function windowsInstallLocations() {
   const script = [
     "$ErrorActionPreference = 'Stop'",
-    "$root = 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*'",
-    "Get-ItemProperty -Path $root -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName -eq 'Pulse MD Local' } | ForEach-Object { if ($_.InstallLocation) { $_.InstallLocation } }",
+    "$root = 'HKLM:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*'",
+    "Get-ItemProperty -Path $root -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName -eq 'Pulse MD' } | ForEach-Object { if ($_.InstallLocation) { $_.InstallLocation } }",
   ].join("; ")
   return run(
     "powershell.exe",
     ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", script],
-    { label: "locating the Pulse MD Local installation" }
+    { label: "locating the Pulse MD installation" }
   )
     .stdout.split(/\r?\n/)
     .map((line) => line.trim())
     .filter(Boolean)
 }
 
-function assertWindowsUserPathContains(expectedDirectory) {
-  const script = "[Environment]::GetEnvironmentVariable('Path', 'User')"
-  const userPath = run(
+function assertWindowsMachinePathContains(expectedDirectory) {
+  const script = "[Environment]::GetEnvironmentVariable('Path', 'Machine')"
+  const machinePath = run(
     "powershell.exe",
     ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", script],
-    { label: "reading the Windows user PATH" }
+    { label: "reading the Windows machine PATH" }
   ).stdout.trim()
   const normalizedExpected = path.resolve(expectedDirectory).toLowerCase()
-  const containsExpected = userPath
+  const containsExpected = machinePath
     .split(";")
     .map((entry) => entry.trim().replace(/^"|"$/g, ""))
     .filter(Boolean)
     .some((entry) => path.resolve(entry).toLowerCase() === normalizedExpected)
   if (!containsExpected) {
     throw new Error(
-      `The Windows user PATH does not contain ${expectedDirectory}`
+      `The Windows machine PATH does not contain ${expectedDirectory}`
     )
   }
 }
@@ -722,14 +728,14 @@ function promoteFileAtomically(source, target) {
   const parent = path.dirname(target)
   requireRegularDirectory(parent, "artifact output directory")
   const token = `${process.pid}-${randomUUID()}`
-  const incoming = path.join(parent, `.local-incoming-${token}`)
-  const previous = path.join(parent, `.local-previous-${token}`)
+  const incoming = path.join(parent, `.install-incoming-${token}`)
+  const previous = path.join(parent, `.install-previous-${token}`)
   const existing = pathStat(target)
   if (existing && (!existing.isFile() || existing.isSymbolicLink())) {
-    throw new Error(`Refusing unexpected Local artifact target: ${target}`)
+    throw new Error(`Refusing unexpected artifact target: ${target}`)
   }
   if (pathStat(incoming) || pathStat(previous)) {
-    throw new Error("A Local artifact staging path already exists")
+    throw new Error("An artifact staging path already exists")
   }
   let movedPrevious = false
   let installedIncoming = false
@@ -754,56 +760,51 @@ function promoteFileAtomically(source, target) {
 
 async function installPlatformPackage() {
   const temporaryDirectory = mkdtempSync(
-    path.join(os.tmpdir(), `pulse-md-local-install-${process.platform}-`)
+    path.join(os.tmpdir(), `pulse-md-install-${process.platform}-`)
   )
   try {
-    buildLocalTo(temporaryDirectory)
+    buildPackageTo(temporaryDirectory)
     if (process.platform === "win32") {
-      assertWindowsLocalIsNotRunning()
+      assertWindowsPulseMdIsNotRunning()
       const installers = readdirSync(temporaryDirectory)
         .filter((name) => name.toLowerCase().endsWith(".exe"))
         .map((name) => path.join(temporaryDirectory, name))
       if (installers.length !== 1) {
         throw new Error(
-          `Expected one Local NSIS installer, found ${installers.length}`
+          `Expected one NSIS installer, found ${installers.length}`
         )
       }
-      runVisible(installers[0], [], { label: "Pulse MD Local installer" })
+      runVisible(installers[0], [], { label: "Pulse MD installer" })
       const localAppData = process.env.LOCALAPPDATA
       if (!localAppData) {
-        throw new Error("LOCALAPPDATA is unavailable after Local installation")
+        throw new Error("LOCALAPPDATA is unavailable after installation")
       }
       const programFilesRoot =
         process.env["ProgramFiles"] || path.join(localAppData, "Programs")
       const candidateRoots = [
-        ...windowsLocalInstallLocations(),
-        path.join(localAppData, "Programs", "pulse-md-local"),
-        path.join(localAppData, "Programs", "Pulse MD Local"),
-        path.join(programFilesRoot, "pulse-md-local"),
-        path.join(programFilesRoot, "Pulse MD Local"),
+        ...windowsInstallLocations(),
+        path.join(localAppData, "Programs", "pulse-md"),
+        path.join(localAppData, "Programs", productName),
+        path.join(programFilesRoot, "pulse-md"),
+        path.join(programFilesRoot, productName),
       ]
       const installationRoot = candidateRoots.find((candidate) =>
-        pathStat(path.join(candidate, "Pulse MD Local.exe"))?.isFile()
+        pathStat(path.join(candidate, `${productName}.exe`))?.isFile()
       )
       if (!installationRoot) {
         throw new Error(
-          `Cannot locate the installed Pulse MD Local app under ${candidateRoots.join(", ")}`
+          `Cannot locate the installed Pulse MD app under ${candidateRoots.join(", ")}`
         )
       }
       const installedExecutable = path.join(
         installationRoot,
-        "Pulse MD Local.exe"
+        `${productName}.exe`
       )
-      const helper = path.join(
-        installationRoot,
-        "resources",
-        "bin",
-        "pmd-local.exe"
-      )
+      const helper = path.join(installationRoot, "resources", "bin", "pmd.exe")
       for (const required of [installedExecutable, helper]) {
         const stat = pathStat(required)
         if (!stat?.isFile() || stat.isSymbolicLink()) {
-          throw new Error(`Installed Local executable is missing: ${required}`)
+          throw new Error(`Installed executable is missing: ${required}`)
         }
       }
       const doctor = run(helper, ["doctor"], {
@@ -813,30 +814,26 @@ async function installPlatformPackage() {
               !["PMD_APP_EXECUTABLE", "PMD_CLI_ENDPOINT"].includes(name)
           )
         ),
-        label: "installed pmd-local doctor",
+        label: "installed pmd doctor",
       })
       if (
-        !doctor.stdout.includes(
-          `${localProductName} ${packageMetadata.version}`
-        )
+        !doctor.stdout.includes(`${productName} ${packageMetadata.version}`)
       ) {
-        throw new Error(`pmd-local reached the wrong app:\n${doctor.stdout}`)
+        throw new Error(`pmd reached the wrong app:\n${doctor.stdout}`)
       }
       if (
         !doctor.stdout.includes(`Application: ${installedExecutable}\r\n`) &&
         !doctor.stdout.includes(`Application: ${installedExecutable}\n`)
       ) {
-        throw new Error(`pmd-local launched another app:\n${doctor.stdout}`)
+        throw new Error(`pmd launched another app:\n${doctor.stdout}`)
       }
-      if (!doctor.stdout.includes("Endpoint: \\\\.\\pipe\\pulse-md-local-")) {
-        throw new Error(
-          `pmd-local reported the wrong endpoint:\n${doctor.stdout}`
-        )
+      if (!doctor.stdout.includes("Endpoint: \\\\.\\pipe\\pulse-md-")) {
+        throw new Error(`pmd reported the wrong endpoint:\n${doctor.stdout}`)
       }
-      await waitForWindowsLocalToStop()
-      assertWindowsUserPathContains(path.dirname(helper))
+      await waitForWindowsPulseMdToStop()
+      assertWindowsMachinePathContains(path.dirname(helper))
       console.log(
-        "Installed and verified Pulse MD Local with its per-user NSIS installer"
+        "Installed and verified Pulse MD with its all-users NSIS installer"
       )
       return
     }
@@ -845,9 +842,7 @@ async function installPlatformPackage() {
         .filter((name) => name.endsWith(".deb"))
         .map((name) => path.join(temporaryDirectory, name))
       if (debs.length !== 1) {
-        throw new Error(
-          `Expected one Local Debian package, found ${debs.length}`
-        )
+        throw new Error(`Expected one Debian package, found ${debs.length}`)
       }
       mkdirSync(releaseDirectory, { recursive: true })
       requireRegularDirectory(releaseDirectory, "release directory")
@@ -857,7 +852,7 @@ async function installPlatformPackage() {
       console.log(
         `Install it with: sudo apt install '${stableDeb.replaceAll("'", "'\\''")}'`
       )
-      console.log("Then verify it with: pmd-local doctor")
+      console.log("Then verify it with: pmd doctor")
       return
     }
   } finally {
@@ -869,12 +864,12 @@ async function installPlatformPackage() {
 
 if (process.platform === "darwin") {
   installMac().catch((error) => {
-    console.error(`Local installation failed: ${error.message}`)
+    console.error(`Installation failed: ${error.message}`)
     process.exitCode = 1
   })
 } else {
   installPlatformPackage().catch((error) => {
-    console.error(`Local installation failed: ${error.message}`)
+    console.error(`Installation failed: ${error.message}`)
     process.exitCode = 1
   })
 }

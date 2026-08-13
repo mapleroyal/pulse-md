@@ -64,8 +64,8 @@ Packages are written to `release/`. The command selects DMG/ZIP on macOS, NSIS
 on Windows, and AppImage/DEB on Linux. It does not upload anything and does not
 require storefront credentials or code-signing credentials.
 
-Windows and Linux are best-effort build targets until their packages complete
-installed-app verification on those operating systems.
+Windows and Linux packages must be built and installed on their respective
+operating systems before they are distributed.
 
 Use Node.js 24 LTS when possible (Node.js 22.13 or newer is supported). Native
 toolchain prerequisites and platform-specific commands are in
@@ -73,11 +73,11 @@ toolchain prerequisites and platform-specific commands are in
 
 ## Command line
 
-Official direct-download builds use the native `pmd` helper. Self-built
-**Pulse MD Local** packages provide an isolated `pmd-local` helper, and source
-development uses `npm run cli:dev --`. Each command talks only to its matching
-app identity, so Local and Development CLI workflows can coexist with an
-official installation. Installation details are in the
+Every packaged build uses the **Pulse MD** identity and native `pmd` helper,
+whether it was built from source, downloaded directly, or eventually obtained
+from a platform storefront. Keep only one packaged copy installed. Checkout
+development remains isolated as **Pulse MD Development** and uses
+`npm run cli:dev --`. Installation details are in the
 [build guide](docs/BUILDING.md).
 
 ```sh

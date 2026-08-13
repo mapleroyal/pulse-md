@@ -6,16 +6,16 @@ not supported, and this repository deliberately has no hosted build pipeline.
 Install [Node.js](https://nodejs.org/) 24 LTS when possible (22.13 or newer is
 supported), then install the native prerequisites for the host:
 
-- **macOS:** Xcode Command Line Tools. Xcode 26 or newer is required only to
-  rebuild the Icon Composer source or make an official package.
+- **macOS:** Xcode 26 or newer. Every macOS package compiles the checked-in
+  Icon Composer document so the installed icon follows the system appearance.
 - **Windows:** Visual Studio 2022 Build Tools with **Desktop development with
   C++**.
 - **Linux:** a C compiler available as `cc` (`build-essential` or the
   distribution equivalent).
 
-## Personal and community build
+## Source and community build
 
-Use the isolated Local channel for a noncommercial build from a clone or fork:
+Build the canonical Pulse MD package from a clone or fork:
 
 ```sh
 git clone https://github.com/mapleroyal/pulse-md.git
@@ -27,25 +27,26 @@ npm run package
 The command selects the host platform and writes installable artifacts to
 `release/`: DMG and ZIP on macOS, an NSIS installer on Windows, and AppImage
 and Debian packages on Linux. It neither uploads anything nor requires signing
-or storefront credentials.
+or storefront credentials. Before promoting the artifacts, it exercises the
+unpacked package's metadata, fuses, bundled resources, CLI, and a focused
+packaged Electron workflow.
 
-The resulting **Pulse MD Local** app has its own product and application
-identity, user data, single-instance/CLI endpoint, and `pmd-local` helper. It
-does not claim the official app's file associations or `pulse-md` URL scheme;
-Local scratch links use the separate `pulse-md-local` scheme. It can therefore
-coexist with an official installation. The JavaScript dependency
+Every packaged build uses the same **Pulse MD** product identity, `pmd` helper,
+user data, single-instance endpoint, file associations, and `pulse-md` scratch
+link scheme. This includes source/community builds, signed direct downloads,
+and future platform-store builds. They are alternate sources for one installed
+application, not applications that should coexist. The JavaScript dependency
 graph is pinned by `package-lock.json`, but builds are not promised to be
 bit-for-bit reproducible across toolchains.
 
-Keep only one installed copy of Pulse MD Local. Copies with the same Local
-identity can compete for launch and CLI requests even when an official app is
-unaffected:
+Keep only one installed copy of Pulse MD. Runnable copies with the same
+identity can compete for launch, link, file-association, and CLI requests:
 
-- On macOS, quit Local, replace the stable
-  `/Applications/Pulse MD Local.app`, and eject its DMG before launching it.
-  Do not retain runnable Local app bundles in Downloads, Trash, staging, or an
+- On macOS, quit Pulse MD, replace the stable
+  `/Applications/Pulse MD.app`, and eject its DMG before launching it. Do not
+  retain runnable Pulse MD app bundles in Downloads, Trash, staging, or an
   unpacked ZIP; retaining the DMG or ZIP itself is safe.
-- On Windows, upgrade by running the new per-user NSIS installer rather than
+- On Windows, upgrade by running the new all-users NSIS installer rather than
   choosing another install location.
 - On Linux, choose one installed Debian package or one AppImage at a stable
   path and replace the old copy when rebuilding.
@@ -56,25 +57,25 @@ For ordinary project delivery, use the same-OS installed verification wrapper:
 npm run install:local
 ```
 
-On macOS it builds the Local package, replaces
-`/Applications/Pulse MD Local.app`, cleans stale Local registrations and
-managed runnable copies, and verifies the installed app. On Windows it builds
-and runs the per-user NSIS installer. On Linux it builds the Debian package and
-prints the exact package-manager command for the user to review and run; it
-does not invoke `sudo` itself. Windows and Linux must be verified on their
-respective operating systems.
+On macOS it compiles the adaptive icon, builds the canonical package, replaces
+`/Applications/Pulse MD.app`, cleans stale canonical registrations and managed
+runnable copies, and verifies the installed app. On Windows it builds and runs
+the all-users NSIS installer so normal file associations are installed. On
+Linux it builds the Debian package and prints the exact package-manager command
+for the user to review and run; it does not invoke `sudo` itself. Windows and
+Linux must be verified on their respective operating systems.
 
-Packaged Local builds provide their isolated CLI as `pmd-local`. On macOS and
-Linux, use **Install Command Line Tool…** in Pulse MD Local; the Windows Local
-installer adds its command to the user's `PATH`. Open a new terminal if needed,
-then verify the resolved identity with:
+Every packaged build provides the CLI as `pmd`. On macOS and Linux, use
+**Install Command Line Tool…** in Pulse MD; the Windows installer adds its
+command to the machine-wide `PATH`. Open a new terminal if needed, then verify
+it:
 
 ```sh
-pmd-local doctor
-pmd-local notes.md
+pmd doctor
+pmd notes.md
 ```
 
-See the [CLI reference](CLI.md) for all commands and the identity differences.
+See the [CLI reference](CLI.md) for all commands.
 
 ## Development run
 
@@ -84,8 +85,8 @@ npm run dev
 ```
 
 Development runs use **Pulse MD Development**, with state and a CLI endpoint
-separate from both packaged identities. While developing, send commands to
-that instance with:
+separate from the packaged identity. While developing, send commands to that
+checkout-scoped instance with:
 
 ```sh
 npm run cli:dev -- doctor
@@ -101,25 +102,26 @@ npm run check:full  # the above plus Electron end-to-end tests
 
 ## Maintainer installed candidate on macOS
 
-Use this lane only when the project owner needs to exercise the production
-identity and installed integrations without creating a distributable release:
+Use this macOS-specific lane when the project owner needs the stricter
+installed-integration and Launch Services audit without creating a
+distributable release:
 
 ```sh
 npm run install:mac:dev
 ```
 
-The command builds an ad-hoc-signed, explicitly non-distributable candidate,
-replaces `/Applications/Pulse MD.app`, removes validated duplicate
-production-identifier bundles from managed locations, and checks Launch
-Services registration. It intentionally occupies the official app's identity;
-quit Pulse MD first and do not distribute its output.
+The command compiles the adaptive icon, builds an ad-hoc-signed, explicitly
+non-distributable candidate, replaces `/Applications/Pulse MD.app`, removes
+validated duplicate canonical-identifier bundles from managed locations, and
+checks Launch Services registration. Quit Pulse MD first and do not distribute
+its output.
 
 After installation, verify relevant Finder/file-association, `pulse-md`, and
-`pmd` behavior against `/Applications/Pulse MD.app`. This installed-candidate
-lane is separate from `npm run install:local`, which is used for ordinary
-delivery checks.
+`pmd` behavior against `/Applications/Pulse MD.app`. This command and
+`npm run install:local` deliberately converge on the same installed app; the
+maintainer lane does not create or preserve a second product identity.
 
-## Official distribution builds
+## Signed direct-distribution builds
 
 The direct-distribution commands run only on their matching operating system,
 never publish automatically, stage output in a fresh directory, validate it,
@@ -144,12 +146,12 @@ npm run build:linux
   intentionally chosen baseline and test every distribution and architecture
   you intend to claim.
 
-Each successful official build verifies its staged runnable package, removes
-that duplicate installation candidate, and retains only distributable
-artifacts plus SHA-256 checksums. Before distributing an artifact, run
+Each successful direct-distribution build verifies the contents of its
+distributable artifacts, removes duplicate staging candidates, and retains only
+the artifacts plus SHA-256 checksums. Before distributing an artifact, run
 `npm run check:full` and test the actual install, upgrade, integrations, and
-uninstall on a clean machine. Store-specific packages are separate future
-work and are not produced by these commands.
+uninstall on a clean machine. Store-specific packages are separate future work
+and are not produced by these commands.
 
 `private: true` in `package.json` prevents accidental npm publication. It does
 not change the source license in [LICENSE](../LICENSE).
@@ -161,6 +163,6 @@ not change the source license in [LICENSE](../LICENSE).
 - A native compiler error usually means a platform prerequisite is missing.
 - `release/`, `dist/`, `dist-electron/`, and `dist-native/` are generated and
   ignored by Git.
-- An official macOS or Windows build that lacks release credentials is expected
+- A signed macOS or Windows build that lacks release credentials is expected
   to fail; use `npm run package` for a locally ad-hoc-signed macOS build or the
-  platform's ordinary unsigned Local package elsewhere.
+  platform's ordinary unsigned source package elsewhere.

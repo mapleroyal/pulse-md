@@ -565,10 +565,10 @@ describe("formatCliHelp standalone scratches", () => {
   })
 
   it("renders an isolated command name throughout help", () => {
-    expect(formatCliHelp("general", "pmd-local")).toContain(
-      "pmd-local profile delete ID"
+    expect(formatCliHelp("general", "pmd-custom")).toContain(
+      "pmd-custom profile delete ID"
     )
-    expect(formatCliHelp("general", "pmd-local")).not.toMatch(
+    expect(formatCliHelp("general", "pmd-custom")).not.toMatch(
       /(^|\s)pmd(?=\s|$)/
     )
   })

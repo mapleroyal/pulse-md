@@ -939,6 +939,19 @@ test("held drags keep virtualized ordinary and task prefixes projected", async (
     const taskLength = await lineLength(fixture.page, taskLineNumber)
     const target = await caretPoint(fixture.page, taskLineNumber, taskLength)
     await fixture.page.mouse.move(target.x, target.y, { steps: 12 })
+    // Exercise a viewport refresh after the selection has expanded. Without
+    // the pointer-down presentation snapshot, the remounted marker is rebuilt
+    // from the moving selection and incorrectly reveals its source.
+    await scroller.evaluate(
+      (element) =>
+        new Promise<void>((resolve) => {
+          element.scrollTop = 0
+          requestAnimationFrame(() => {
+            element.scrollTop = element.scrollHeight
+            requestAnimationFrame(() => resolve())
+          })
+        })
+    )
     await settleSelectionLayer(fixture.page)
     const whileDown = await caretSnapshot(fixture.page)
     expect(whileDown.line).toBe(taskLineNumber)

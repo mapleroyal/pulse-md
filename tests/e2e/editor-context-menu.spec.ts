@@ -224,7 +224,7 @@ test("heading anchors reveal on hover and expose a copyable fragment link", asyn
     const heading = page
       .locator(".cm-line.cm-md-heading")
       .filter({ hasText: headingText })
-    const anchor = heading.getByRole("link", { name: "Link to heading" })
+    const anchor = heading.getByRole("button", { name: "Link to heading" })
     await heading.waitFor()
     await expect(anchor).toHaveCount(1)
     await expect
@@ -298,6 +298,17 @@ test("heading anchors reveal on hover and expose a copyable fragment link", asyn
       menu.getByRole("menuitem", { name: "Open Link" })
     ).toBeVisible()
     await expect(editorMenu(page)).not.toBeVisible()
+    await page.keyboard.press("Escape")
+    await expect(menu).not.toBeVisible()
+
+    await anchor.focus()
+    await expect
+      .poll(() =>
+        anchor.evaluate((element) => Number(getComputedStyle(element).opacity))
+      )
+      .toBeGreaterThan(0.75)
+    await page.keyboard.press("Enter")
+    await expect(menu).toBeVisible()
     await page.keyboard.press("Escape")
     await expect(menu).not.toBeVisible()
 

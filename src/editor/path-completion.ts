@@ -11,7 +11,12 @@ import {
 } from "@codemirror/autocomplete"
 import { syntaxTree } from "@codemirror/language"
 import { Prec, type Extension } from "@codemirror/state"
-import { EditorView, keymap, ViewPlugin } from "@codemirror/view"
+import {
+  EditorView,
+  keymap,
+  ViewPlugin,
+  type ViewUpdate,
+} from "@codemirror/view"
 
 import type { PathCompletionEntry } from "../shared/contracts"
 
@@ -154,27 +159,23 @@ const pathCompletionPopupSelector =
 
 const pathCompletionInteraction = ViewPlugin.fromClass(
   class {
-    private readonly observer: MutationObserver
     private readonly view: EditorView
-    private scheduled = false
 
     constructor(view: EditorView) {
       this.view = view
-      const ownerWindow = view.dom.ownerDocument.defaultView
-      const Observer = ownerWindow?.MutationObserver ?? MutationObserver
-      this.observer = new Observer(() => this.scheduleInsetCorrection())
-      this.observer.observe(view.dom, {
-        attributeFilter: ["aria-selected"],
-        attributes: true,
-        childList: true,
-        subtree: true,
-      })
       view.dom.addEventListener("pointermove", this.handlePointerMove, true)
-      this.scheduleInsetCorrection()
+      if (completionStatus(view.state) === "active") {
+        this.scheduleInsetCorrection()
+      }
+    }
+
+    update(update: ViewUpdate) {
+      if (completionStatus(update.state) === "active") {
+        this.scheduleInsetCorrection()
+      }
     }
 
     destroy() {
-      this.observer.disconnect()
       this.view.dom.removeEventListener(
         "pointermove",
         this.handlePointerMove,
@@ -201,39 +202,48 @@ const pathCompletionInteraction = ViewPlugin.fromClass(
     }
 
     private scheduleInsetCorrection() {
-      if (this.scheduled) return
-      this.scheduled = true
-      queueMicrotask(() => {
-        this.scheduled = false
-        if (!this.view.dom.isConnected) return
-        this.ensureSelectedInset()
-      })
+      this.view.requestMeasure(this.selectedInsetMeasure)
     }
 
-    private ensureSelectedInset() {
-      const popup = this.view.dom.querySelector<HTMLElement>(
-        pathCompletionPopupSelector
-      )
-      const list = popup?.querySelector<HTMLElement>(":scope > ul")
-      const selected = list?.querySelector<HTMLElement>(
-        ':scope > li[aria-selected="true"]'
-      )
-      if (!list || !selected || list.offsetHeight === 0) return
+    private readonly selectedInsetMeasure = {
+      key: this,
+      read: (view: EditorView) => {
+        if (completionStatus(view.state) !== "active") return null
+        const popup = view.dom.querySelector<HTMLElement>(
+          pathCompletionPopupSelector
+        )
+        const list = popup?.querySelector<HTMLElement>(":scope > ul")
+        const selected = list?.querySelector<HTMLElement>(
+          ':scope > li[aria-selected="true"]'
+        )
+        if (!list || !selected || list.offsetHeight === 0) return null
 
-      const listBounds = list.getBoundingClientRect()
-      const selectedBounds = selected.getBoundingClientRect()
-      const scaleY = listBounds.height / list.offsetHeight || 1
-      const style = getComputedStyle(list)
-      const topInset = (Number.parseFloat(style.paddingTop) || 0) * scaleY
-      const bottomInset = (Number.parseFloat(style.paddingBottom) || 0) * scaleY
-      const desiredTop = listBounds.top + topInset
-      const desiredBottom = listBounds.bottom - bottomInset
-
-      if (selectedBounds.top < desiredTop - 0.5) {
-        list.scrollTop -= (desiredTop - selectedBounds.top) / scaleY
-      } else if (selectedBounds.bottom > desiredBottom + 0.5) {
-        list.scrollTop += (selectedBounds.bottom - desiredBottom) / scaleY
-      }
+        const ownerWindow = list.ownerDocument.defaultView
+        if (!ownerWindow) return null
+        const listBounds = list.getBoundingClientRect()
+        const selectedBounds = selected.getBoundingClientRect()
+        const scaleY = listBounds.height / list.offsetHeight || 1
+        const style = ownerWindow.getComputedStyle(list)
+        const topInset = (Number.parseFloat(style.paddingTop) || 0) * scaleY
+        const bottomInset =
+          (Number.parseFloat(style.paddingBottom) || 0) * scaleY
+        const desiredTop = listBounds.top + topInset
+        const desiredBottom = listBounds.bottom - bottomInset
+        let delta = 0
+        if (selectedBounds.top < desiredTop - 0.5) {
+          delta = -(desiredTop - selectedBounds.top) / scaleY
+        } else if (selectedBounds.bottom > desiredBottom + 0.5) {
+          delta = (selectedBounds.bottom - desiredBottom) / scaleY
+        }
+        return delta === 0 ? null : { list, scrollTop: list.scrollTop + delta }
+      },
+      write: (
+        measurement: { list: HTMLElement; scrollTop: number } | null,
+        view: EditorView
+      ) => {
+        if (!measurement || !view.dom.contains(measurement.list)) return
+        measurement.list.scrollTop = measurement.scrollTop
+      },
     }
   }
 )

@@ -435,7 +435,10 @@ async function receiveRequest(
   }
 
   const shutdown = () => {
-    if (dispatchStarted) return
+    if (dispatchStarted) {
+      socket.destroy()
+      return
+    }
     failed = true
     const pendingCleanup = drainingFailure?.cleanup
     drainingFailure = null

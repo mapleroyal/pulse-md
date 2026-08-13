@@ -3,7 +3,6 @@ import { isScratchIdentifier } from "./scratch-identifiers"
 
 export const SCRATCH_LINK_SCHEMES = [
   "pulse-md",
-  "pulse-md-local",
   "pulse-md-development",
 ] as const
 export type ScratchLinkScheme = (typeof SCRATCH_LINK_SCHEMES)[number]

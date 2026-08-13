@@ -97,7 +97,7 @@ export function parseLaunchIntent(
       !argument.startsWith("-")
   )
   const scratchArguments = arguments_.filter((argument) =>
-    /^pulse-md(?:-local|-development)?:/i.test(argument)
+    /^pulse-md(?:-development)?:/i.test(argument)
   )
   if (scratchArguments.length > 0) {
     if (arguments_.length !== 1 || scratchArguments.length !== 1) {

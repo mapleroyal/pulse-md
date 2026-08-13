@@ -53,6 +53,61 @@ async function activateWindow(page: Page) {
   await page.locator("body").focus()
 }
 
+async function deactivateNativeWindow(app: ElectronApplication) {
+  await app.evaluate(async ({ app: electronApp, BrowserWindow }) => {
+    const window = BrowserWindow.getAllWindows()[0]
+    if (!window) throw new Error("The document window is unavailable")
+
+    await new Promise<void>((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        reject(new Error("The document window did not deactivate"))
+      }, 5_000)
+      const finish = () => {
+        clearTimeout(timeout)
+        window.removeListener("blur", finish)
+        resolve()
+      }
+
+      window.once("blur", finish)
+      if (process.platform === "darwin") electronApp.hide()
+      else window.minimize()
+      setImmediate(() => {
+        if (!window.isFocused()) finish()
+      })
+    })
+  })
+}
+
+async function focusNativeWindow(app: ElectronApplication) {
+  await app.evaluate(async ({ app: electronApp, BrowserWindow }) => {
+    const window = BrowserWindow.getAllWindows()[0]
+    if (!window) throw new Error("The document window is unavailable")
+
+    await new Promise<void>((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        reject(new Error("The document window did not activate"))
+      }, 5_000)
+      const finish = () => {
+        clearTimeout(timeout)
+        window.removeListener("focus", finish)
+        resolve()
+      }
+
+      window.once("focus", finish)
+      if (process.platform === "darwin") {
+        electronApp.show()
+        electronApp.focus({ steal: true })
+      }
+      window.restore()
+      window.show()
+      window.focus()
+      setImmediate(() => {
+        if (window.isFocused()) finish()
+      })
+    })
+  })
+}
+
 function settingsSelect(page: Page, label: string) {
   return page.getByRole("combobox", { name: label, exact: true })
 }
@@ -5154,13 +5209,7 @@ test("selection and search colors follow window activation rather than editor fo
     const page = await app.firstWindow()
     const editor = page.locator(".cm-editor")
     await editor.waitFor()
-    await app.evaluate(({ app: electronApp, BrowserWindow }) => {
-      if (process.platform === "darwin") electronApp.show()
-      const window = BrowserWindow.getAllWindows()[0]
-      window?.restore()
-      window?.show()
-      window?.focus()
-    })
+    await focusNativeWindow(app)
     await activateWindow(page)
     await expect
       .poll(() =>
@@ -5170,12 +5219,6 @@ test("selection and search colors follow window activation rather than editor fo
         )
       )
       .toBe(true)
-    await app.evaluate(({ BrowserWindow }) => {
-      BrowserWindow.getAllWindows()[0]?.webContents.send(
-        "pulse-md:window-activation-changed",
-        true
-      )
-    })
     await expect(editor).not.toHaveClass(/cm-window-inactive/)
     const paragraph = page.locator(".cm-line", { hasText: "This paragraph" })
     await clickVisibleText(page, paragraph)
@@ -5229,43 +5272,10 @@ test("selection and search colors follow window activation rather than editor fo
     await expect(editor).not.toHaveClass(/cm-window-inactive/)
     await expect(page.locator(".cm-app-selectionBackground")).toHaveCount(0)
 
-    if (process.platform === "darwin") {
-      await app.evaluate(({ app: electronApp }) => electronApp.hide())
-    } else {
-      await app.evaluate(({ BrowserWindow }) => {
-        BrowserWindow.getAllWindows()[0]?.minimize()
-      })
-    }
-    await app.evaluate(({ BrowserWindow }) => {
-      BrowserWindow.getAllWindows()[0]?.webContents.send(
-        "pulse-md:window-activation-changed",
-        false
-      )
-    })
+    await deactivateNativeWindow(app)
     await expect(editor).toHaveClass(/cm-window-inactive/)
 
-    await app.evaluate(({ app: electronApp, BrowserWindow }) => {
-      if (process.platform === "darwin") electronApp.show()
-      const window = BrowserWindow.getAllWindows()[0]
-      window?.restore()
-      window?.show()
-      window?.focus()
-    })
-    await activateWindow(page)
-    await expect
-      .poll(() =>
-        app.evaluate(
-          ({ BrowserWindow }) =>
-            BrowserWindow.getAllWindows()[0]?.isFocused() ?? false
-        )
-      )
-      .toBe(true)
-    await app.evaluate(({ BrowserWindow }) => {
-      BrowserWindow.getAllWindows()[0]?.webContents.send(
-        "pulse-md:window-activation-changed",
-        true
-      )
-    })
+    await focusNativeWindow(app)
     await expect(editor).not.toHaveClass(/cm-window-inactive/)
     await cancelTypographySettings(page)
     await expect(selectionLayer).toHaveCSS(

@@ -24,8 +24,8 @@ describe("scratch links", () => {
       scheme: "pulse-md",
     })
 
-    expect(scratchLinkAddress(scratch, null, "pulse-md-local")).toBe(
-      `pulse-md-local://scratch/${scratchId}`
+    expect(scratchLinkAddress(scratch, null, "pulse-md-development")).toBe(
+      `pulse-md-development://scratch/${scratchId}`
     )
     expect(
       parseScratchLinkAddress(`pulse-md-development://scratch/${scratchId}`)

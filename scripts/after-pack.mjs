@@ -4,6 +4,8 @@ import { copyFile, lstat, readFile } from "node:fs/promises"
 import path from "node:path"
 import { promisify } from "node:util"
 
+import { assertAdaptiveMacIconAssetInfo } from "./macos-icon-assets.mjs"
+
 const execFileAsync = promisify(execFile)
 
 async function requireRegularFile(filePath, description) {
@@ -40,6 +42,23 @@ async function sha256(filePath) {
     .digest("hex")
 }
 
+async function verifyAdaptiveIconAssetCatalog(assetCatalog) {
+  const { stdout } = await execFileAsync(
+    "/usr/bin/assetutil",
+    ["--info", assetCatalog],
+    { maxBuffer: 64 * 1024 * 1024 }
+  )
+  let assetInfo
+  try {
+    assetInfo = JSON.parse(stdout)
+  } catch (error) {
+    throw new Error(`Icon Composer asset metadata is not valid JSON`, {
+      cause: error,
+    })
+  }
+  assertAdaptiveMacIconAssetInfo(assetInfo, assetCatalog)
+}
+
 export default async function afterPack(context) {
   if (context.electronPlatformName !== "darwin") return
 
@@ -67,6 +86,7 @@ export default async function afterPack(context) {
 
   await requireRegularFile(sourceIcon, "Legacy icon fallback")
   await requireRegularFile(assetCatalog, "Icon Composer asset catalog")
+  await verifyAdaptiveIconAssetCatalog(assetCatalog)
   if ((await plistValue(infoPlist, "CFBundleIconName")) !== "Icon") {
     throw new Error(
       `Packaged app does not declare CFBundleIconName=Icon: ${infoPlist}`
