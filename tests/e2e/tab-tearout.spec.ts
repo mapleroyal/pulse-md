@@ -780,24 +780,11 @@ test("an internal drop claim survives source drag-end while export is pending", 
     })
 
     const dragToken = await beginUntrackedTabDrag(source)
-    await existingTarget.evaluate((token) => {
-      const header = document.querySelector<HTMLElement>(".top-chrome")
-      if (!header) throw new Error("Target chrome is unavailable")
-      const transfer = new DataTransfer()
-      transfer.effectAllowed = "move"
-      transfer.setData("application/x-pulse-md-tab", token)
-      for (const type of ["dragenter", "dragover", "drop"]) {
-        header.dispatchEvent(
-          new DragEvent(type, {
-            bubbles: true,
-            cancelable: true,
-            clientX: 200,
-            clientY: 20,
-            dataTransfer: transfer,
-          })
-        )
-      }
-    }, dragToken)
+    await dispatchTabDrag(existingTarget, dragToken, [
+      "dragenter",
+      "dragover",
+      "drop",
+    ])
     await source.evaluate((token) => {
       window.pulseMd.endTabDrag({
         cancelled: false,

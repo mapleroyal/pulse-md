@@ -34,10 +34,37 @@
   Pop $0
 !macroend
 
+!macro removePmdFileAssociation extension
+  ReadRegStr $R6 SHCTX "Software\Classes\.${extension}" ""
+  ${If} $R6 == "PulseMD.Markdown"
+    DeleteRegValue SHCTX "Software\Classes\.${extension}" ""
+  ${EndIf}
+  DeleteRegValue SHCTX "Software\Classes\.${extension}\OpenWithProgids" "PulseMD.Markdown"
+  DeleteRegKey /ifempty SHCTX "Software\Classes\.${extension}\OpenWithProgids"
+  DeleteRegKey /ifempty SHCTX "Software\Classes\.${extension}"
+!macroend
+
 !macro customInstall
   !insertmacro updatePmdCliPath "Add"
+  # electron-builder does not quote $appExe in its generated file-association
+  # command. Replace it after the generated association macro has run.
+  WriteRegStr SHCTX "Software\Classes\PulseMD.Markdown\shell\open\command" "" '$\"$appExe$\" $\"%1$\"'
+  WriteRegStr SHCTX "Software\Classes\pulse-md" "" "URL:Pulse MD Scratch Link"
+  WriteRegStr SHCTX "Software\Classes\pulse-md" "URL Protocol" ""
+  WriteRegStr SHCTX "Software\Classes\pulse-md\DefaultIcon" "" '$\"$appExe$\",0'
+  WriteRegStr SHCTX "Software\Classes\pulse-md\shell\open\command" "" '$\"$appExe$\" $\"%1$\"'
 !macroend
 
 !macro customUnInstall
   !insertmacro updatePmdCliPath "Remove"
+  Push $R6
+  # Clear a default only when it still points at our ProgID. Always remove our
+  # OpenWithProgids value, then prune only empty extension keys.
+  !insertmacro removePmdFileAssociation "md"
+  !insertmacro removePmdFileAssociation "markdown"
+  !insertmacro removePmdFileAssociation "mdown"
+  !insertmacro removePmdFileAssociation "mkd"
+  DeleteRegKey SHCTX "Software\Classes\PulseMD.Markdown"
+  DeleteRegKey SHCTX "Software\Classes\pulse-md"
+  Pop $R6
 !macroend

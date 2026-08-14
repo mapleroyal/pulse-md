@@ -3,12 +3,14 @@ import { createRequire } from "node:module"
 
 import { describe, expect, it } from "vitest"
 
+import { WINDOWS_APP_USER_MODEL_ID } from "./distribution-identity"
 import {
   COMMON_TEXT_DOCUMENT_EXTENSIONS,
   MARKDOWN_DOCUMENT_EXTENSIONS,
 } from "../src/shared/document-kind"
 
 interface FileAssociation {
+  description?: string
   ext: string[]
   name?: string
   rank?: string
@@ -49,7 +51,12 @@ interface BuilderConfiguration {
     icon?: string
     identity?: string | null
   }
-  nsis?: { include?: string; perMachine?: boolean; runAfterFinish?: boolean }
+  nsis?: {
+    guid?: string
+    include?: string
+    perMachine?: boolean
+    runAfterFinish?: boolean
+  }
   productName?: string
   win?: { extraResources?: ExtraResource[]; icon?: string; signExts?: string[] }
 }
@@ -133,19 +140,75 @@ describe("electron-builder configuration", () => {
   it("keeps Markdown global and adds alternate text/code editing on macOS", async () => {
     const configuration = await builderConfiguration()
     const markdown = configuration.fileAssociations?.find(
-      ({ name }) => name === "Markdown document"
+      ({ name }) => name === "PulseMD.Markdown"
     )
     const macText = configuration.mac?.fileAssociations?.find(
       ({ name }) => name === "Plain text and code document"
     )
 
     expect(markdown?.ext).toEqual([...MARKDOWN_DOCUMENT_EXTENSIONS])
+    expect(markdown?.description).toBe("Markdown document")
     expect(markdown?.role).toBe("Editor")
     expect(macText).toMatchObject({
       rank: "Alternate",
       role: "Editor",
     })
     expect(macText?.ext).toEqual([...COMMON_TEXT_DOCUMENT_EXTENSIONS])
+  })
+
+  it("owns and safely removes its Windows shell registrations", async () => {
+    const configuration = await builderConfiguration()
+    const markdown = configuration.fileAssociations?.find(
+      ({ name }) => name === "PulseMD.Markdown"
+    )
+    const installerInclude = await readFile(
+      new URL("../build/installer.nsh", import.meta.url),
+      "utf8"
+    )
+
+    expect(configuration.nsis?.guid).toBe(
+      "102e1616-3f19-5f08-a24a-3a30fb60faaa"
+    )
+    expect(configuration.appId).toBe(WINDOWS_APP_USER_MODEL_ID)
+    expect(markdown).toMatchObject({
+      description: "Markdown document",
+      name: "PulseMD.Markdown",
+    })
+    expect(
+      configuration.fileAssociations?.map(({ name }) => name)
+    ).not.toContain("Markdown document")
+    expect(installerInclude).toContain(
+      'WriteRegStr SHCTX "Software\\Classes\\PulseMD.Markdown\\shell\\open\\command" "" \'$\\"$appExe$\\" $\\"%1$\\"\''
+    )
+    expect(installerInclude).toContain(
+      'WriteRegStr SHCTX "Software\\Classes\\pulse-md\\shell\\open\\command" "" \'$\\"$appExe$\\" $\\"%1$\\"\''
+    )
+    expect(installerInclude).not.toContain(
+      'DeleteRegKey SHCTX "Software\\Classes\\Markdown document"'
+    )
+
+    const cleanedExtensions = [
+      ...installerInclude.matchAll(
+        /!insertmacro removePmdFileAssociation "([^"]+)"/g
+      ),
+    ].map((match) => match[1])
+    expect(cleanedExtensions).toEqual(markdown?.ext)
+    expect(installerInclude).toContain(
+      'ReadRegStr $R6 SHCTX "Software\\Classes\\.${extension}" ""'
+    )
+    expect(installerInclude).toContain('${If} $R6 == "PulseMD.Markdown"')
+    expect(installerInclude).toContain(
+      'DeleteRegValue SHCTX "Software\\Classes\\.${extension}" ""'
+    )
+    expect(installerInclude).toContain(
+      'DeleteRegValue SHCTX "Software\\Classes\\.${extension}\\OpenWithProgids" "PulseMD.Markdown"'
+    )
+    expect(installerInclude).toContain(
+      'DeleteRegKey /ifempty SHCTX "Software\\Classes\\.${extension}"'
+    )
+    expect(installerInclude).toContain(
+      'DeleteRegKey SHCTX "Software\\Classes\\PulseMD.Markdown"'
+    )
   })
 
   it("verifies Electron downloads from the package's pinned checksums", () => {
@@ -207,7 +270,7 @@ describe("electron-builder configuration", () => {
     const configuration = localBuilderConfiguration()
 
     expect(configuration).toMatchObject({
-      appId: "io.github.mapleroyal.pulse-md",
+      appId: WINDOWS_APP_USER_MODEL_ID,
       extraMetadata: {
         pmdDistributionChannel: "canonical",
       },
@@ -219,6 +282,7 @@ describe("electron-builder configuration", () => {
         },
       ],
       nsis: {
+        guid: "102e1616-3f19-5f08-a24a-3a30fb60faaa",
         include: "build/installer.nsh",
         perMachine: true,
         runAfterFinish: false,

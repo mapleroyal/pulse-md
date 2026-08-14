@@ -97,12 +97,16 @@ describe("parseLaunchIntent", () => {
   it("decodes file URLs and preserves argument order", () => {
     const firstPath = path.join(workingDirectory, "first file.md")
     const secondPath = path.join(workingDirectory, "second.md")
+    const mixedCaseFileUrl = pathToFileURL(firstPath).href.replace(
+      /^file:/u,
+      "FiLe:"
+    )
 
     expect(
       parseLaunchIntent(
         [
           executablePath,
-          pathToFileURL(firstPath).href,
+          mixedCaseFileUrl,
           path.relative(workingDirectory, secondPath),
         ],
         { isPackaged: true, workingDirectory }

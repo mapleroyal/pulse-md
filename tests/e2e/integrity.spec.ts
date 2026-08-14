@@ -368,7 +368,9 @@ test("a native zoom write failure reverts visibly and can be retried", async () 
     const notice = page.getByRole("alert").filter({
       hasText: "The zoom change could not be saved and was reverted.",
     })
-    await expect(notice).toBeVisible()
+    // Windows retries sharing-style atomic rename failures for about 5.1s
+    // before surfacing the durable-write error to the renderer.
+    await expect(notice).toBeVisible({ timeout: 8_000 })
     await expect
       .poll(() =>
         app.evaluate(({ BrowserWindow }) =>

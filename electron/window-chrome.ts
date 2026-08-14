@@ -15,6 +15,24 @@ interface SizeLike {
   height: number
 }
 
+export type CliWindowDisplaySelection = "active-window" | "cursor" | null
+
+export function cliWindowDisplaySelection(
+  platform: NodeJS.Platform,
+  placement: "active-window" | "mouse",
+  activeWindowIsOnConnectedDisplay: boolean
+): CliWindowDisplaySelection {
+  if (placement === "mouse") return "cursor"
+  if (platform !== "darwin") return null
+  return activeWindowIsOnConnectedDisplay ? "active-window" : "cursor"
+}
+
+export function minimizeWindowAccelerator(
+  platform: NodeJS.Platform
+): "Cmd+M" | undefined {
+  return platform === "darwin" ? "Cmd+M" : undefined
+}
+
 export function centeredWindowPosition(
   workArea: RectangleLike,
   windowSize: SizeLike

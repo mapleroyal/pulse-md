@@ -4,6 +4,10 @@ import path from "node:path"
 import { fileURLToPath } from "node:url"
 
 import { developmentCheckoutIdentity } from "./development-checkout-identity.mjs"
+import {
+  windowsMsvcArchitecture,
+  windowsMsvcComponent,
+} from "./windows-msvc.mjs"
 
 const projectRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -67,11 +71,12 @@ function run(command, args, options = {}) {
   })
 }
 
-function capture(command, args) {
+function capture(command, args, options = {}) {
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, {
       cwd: projectRoot,
       stdio: ["ignore", "pipe", "pipe"],
+      ...options,
     })
     const stdout = []
     const stderr = []
@@ -122,7 +127,7 @@ async function windowsCompiler() {
       "-products",
       "*",
       "-requires",
-      "Microsoft.VisualStudio.Component.VC.Tools.x86.x64",
+      windowsMsvcComponent(process.arch),
       "-property",
       "installationPath",
       "-utf8",
@@ -139,14 +144,20 @@ async function windowsCompiler() {
     "Build",
     "vcvarsall.bat"
   )
-  const architecture =
-    { arm64: "arm64", ia32: "x86", x64: "x64" }[process.arch] || "x64"
-  const environmentOutput = await capture("cmd.exe", [
-    "/d",
-    "/s",
-    "/c",
-    `chcp 65001 >nul && call "${vcvars}" ${architecture} >nul && set`,
-  ])
+  const architecture = windowsMsvcArchitecture(process.arch)
+  const environmentOutput = await capture(
+    "cmd.exe",
+    [
+      "/d",
+      "/s",
+      "/c",
+      `chcp 65001 >nul && call "${vcvars}" ${architecture} >nul && set`,
+    ],
+    // Node's normal Windows argv escaping turns the quotes around vcvarsall
+    // into literal backslashes for cmd.exe. This is a complete, trusted cmd
+    // command assembled only from vswhere output and a fixed architecture.
+    { windowsVerbatimArguments: true }
+  )
   const env = { ...process.env }
   for (const line of environmentOutput.split(/\r?\n/)) {
     const separator = line.indexOf("=")
@@ -203,9 +214,9 @@ for (const variant of variants) {
           "/utf-8",
           "/DUNICODE",
           "/D_UNICODE",
-          `/DPMD_CLI_IDENTITY_W=L\\"${variant.cliIdentity}\\"`,
-          `/DPMD_COMMAND_NAME=\\"${variant.commandName}\\"`,
-          `/DPMD_APP_EXECUTABLE_NAME_W=L\\"${variant.appExecutableName}\\"`,
+          `/DPMD_CLI_IDENTITY_W=L"${variant.cliIdentity}"`,
+          `/DPMD_COMMAND_NAME="${variant.commandName}"`,
+          `/DPMD_APP_EXECUTABLE_NAME_W=L"${variant.appExecutableName}"`,
           sourcePath,
           `/Fo${temporaryObjectPath}`,
           `/Fe${temporaryPath}`,

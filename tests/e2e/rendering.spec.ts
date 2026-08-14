@@ -1068,6 +1068,7 @@ test("rendering chrome, lists, and fenced-code controls stay structural", async 
     await codeBlock.evaluate((element) => {
       element.scrollLeft = 0
     })
+    await firstCodeLine.click({ position: { x: 70, y: 8 } })
 
     await page.mouse.move(dragBlockBox!.x + 70, dragY)
     await page.mouse.down()
@@ -1305,7 +1306,12 @@ test("rendering chrome, lists, and fenced-code controls stay structural", async 
 
     await copyCode.click()
     await expect
-      .poll(() => app.evaluate(({ clipboard }) => clipboard.readText()))
+      .poll(async () =>
+        (await app.evaluate(({ clipboard }) => clipboard.readText())).replace(
+          /\r\n/g,
+          "\n"
+        )
+      )
       .toBe(`${longCode}\nsecond();`)
     await expect(copyTooltip).toHaveText("Copied code")
     const copiedTooltipBox = await copyTooltip.boundingBox()
@@ -1565,7 +1571,12 @@ test("rendering chrome, lists, and fenced-code controls stay structural", async 
 
     await indentedCopy.click()
     await expect
-      .poll(() => app.evaluate(({ clipboard }) => clipboard.readText()))
+      .poll(async () =>
+        (await app.evaluate(({ clipboard }) => clipboard.readText())).replace(
+          /\r\n/g,
+          "\n"
+        )
+      )
       .toBe(`${longIndentedCode}\n  indentedSecond();`)
     await indentedCode.hover()
     await indentedWrap.click()

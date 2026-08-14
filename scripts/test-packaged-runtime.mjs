@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process"
 import { createRequire } from "node:module"
-import { access, mkdtemp, readFile, readdir, rm } from "node:fs/promises"
+import { access, mkdir, mkdtemp, readFile, readdir, rm } from "node:fs/promises"
 import os from "node:os"
 import net from "node:net"
 import path from "node:path"
@@ -695,12 +695,29 @@ async function verifyDefaultPackagedCliIdentity(
     ...process.env,
     APPDATA: path.join(temporaryDirectory, "AppData", "Roaming"),
     HOME: temporaryDirectory,
+    LOCALAPPDATA: path.join(temporaryDirectory, "AppData", "Local"),
     USERPROFILE: temporaryDirectory,
     XDG_CONFIG_HOME: path.join(temporaryDirectory, ".config"),
   }
   delete environment.PMD_APP_EXECUTABLE
   delete environment.PMD_CLI_ENDPOINT
   const endpoint = defaultCliEndpoint(cliIdentity, environment)
+  await Promise.all([
+    mkdir(environment.APPDATA, { recursive: true }),
+    mkdir(environment.LOCALAPPDATA, { recursive: true }),
+  ])
+
+  const expectedUserDataDirectory =
+    process.platform === "win32"
+      ? path.join(environment.APPDATA, expectedProductName)
+      : process.platform === "darwin"
+        ? path.join(
+            environment.HOME,
+            "Library",
+            "Application Support",
+            expectedProductName
+          )
+        : path.join(environment.XDG_CONFIG_HOME, expectedProductName)
 
   try {
     if (await endpointIsLive(endpoint)) {
@@ -731,12 +748,10 @@ async function verifyDefaultPackagedCliIdentity(
       value("Application") !== executable ||
       value("Packaged") !== "yes" ||
       value("Endpoint") !== endpoint ||
-      !profileDirectory ||
-      path.basename(profileDirectory) !== "cli-profiles" ||
-      path.basename(path.dirname(profileDirectory)) !== expectedProductName ||
-      !scratchDirectory ||
-      path.basename(scratchDirectory) !== "scratch" ||
-      path.basename(path.dirname(scratchDirectory)) !== expectedProductName
+      path.resolve(profileDirectory ?? "") !==
+        path.resolve(expectedUserDataDirectory, "cli-profiles") ||
+      path.resolve(scratchDirectory ?? "") !==
+        path.resolve(expectedUserDataDirectory, "scratch")
     ) {
       throw new Error(
         `Default packaged runtime identity is wrong:\n${doctor.stdout}`

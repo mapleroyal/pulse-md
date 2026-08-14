@@ -1,4 +1,5 @@
 import { lstat, mkdtemp, readFile, readdir, rm, unlink } from "node:fs/promises"
+import { randomUUID } from "node:crypto"
 import net from "node:net"
 import os from "node:os"
 import path from "node:path"
@@ -179,7 +180,10 @@ describe.sequential("CLI server protocol", () => {
     runtimeDirectory = await mkdtemp(
       path.join(os.tmpdir(), "pmd-cli-server-test-")
     )
-    endpoint = path.join(runtimeDirectory, "isolated-cli.sock")
+    endpoint =
+      process.platform === "win32"
+        ? `\\\\.\\pipe\\pmd-cli-server-test-${process.pid}-${randomUUID()}`
+        : path.join(runtimeDirectory, "isolated-cli.sock")
     vi.stubEnv("PMD_CLI_ENDPOINT", endpoint)
     server = null
   })
@@ -198,12 +202,16 @@ describe.sequential("CLI server protocol", () => {
 
     expect(cliEndpointPath()).toBe(endpoint)
     expect(server.endpoint).toBe(endpoint)
-    expect((await lstat(endpoint)).isSocket()).toBe(true)
-    expect((await lstat(endpoint)).mode & 0o777).toBe(0o600)
+    if (process.platform !== "win32") {
+      expect((await lstat(endpoint)).isSocket()).toBe(true)
+      expect((await lstat(endpoint)).mode & 0o777).toBe(0o600)
+    }
 
     await server.close()
     server = null
-    await expect(lstat(endpoint)).rejects.toMatchObject({ code: "ENOENT" })
+    if (process.platform !== "win32") {
+      await expect(lstat(endpoint)).rejects.toMatchObject({ code: "ENOENT" })
+    }
   })
 
   it("closes an accepted socket that has not dispatched a complete request", async () => {
@@ -220,13 +228,17 @@ describe.sequential("CLI server protocol", () => {
     await closed
 
     expect(handler).not.toHaveBeenCalled()
-    await expect(lstat(endpoint)).rejects.toMatchObject({ code: "ENOENT" })
+    if (process.platform !== "win32") {
+      await expect(lstat(endpoint)).rejects.toMatchObject({ code: "ENOENT" })
+    }
   })
 
   it("rejects a relative configured endpoint", () => {
     vi.stubEnv("PMD_CLI_ENDPOINT", "relative-cli.sock")
     expect(() => cliEndpointPath()).toThrow(
-      "PMD_CLI_ENDPOINT must be an absolute socket path"
+      process.platform === "win32"
+        ? "PMD_CLI_ENDPOINT must name a local Windows pipe"
+        : "PMD_CLI_ENDPOINT must be an absolute socket path"
     )
   })
 
@@ -388,6 +400,30 @@ describe.sequential("CLI server protocol", () => {
     })
 
     expect(request.readBigUInt64BE(STDIN_LENGTH_OFFSET)).toBe(declaredLength)
+    if (process.platform === "win32") {
+      // Named pipes do not have the recoverable write-side half-close used by
+      // Unix sockets: ending the client also makes the server reply
+      // unobservable. Keep the pipe open and prove the high uint32 is honored:
+      // a truncated 32-bit decode would dispatch after the single byte.
+      const socket = net.createConnection(endpoint)
+      socket.on("error", () => undefined)
+      await new Promise<void>((resolve) => socket.once("connect", resolve))
+      socket.write(request)
+      await expect
+        .poll(async () => (await readdir(runtimeDirectory)).length)
+        .toBe(1)
+      await new Promise<void>((resolve) => setImmediate(resolve))
+      expect(handler).not.toHaveBeenCalled()
+      const closed = new Promise<void>((resolve) =>
+        socket.once("close", resolve)
+      )
+      socket.destroy()
+      await closed
+      await expect
+        .poll(async () => (await readdir(runtimeDirectory)).length)
+        .toBe(0)
+      return
+    }
     expect(await exchange(endpoint, request)).toEqual({
       kind: "e",
       exitCode: 1,
@@ -422,15 +458,33 @@ describe.sequential("CLI server protocol", () => {
       stdin: Buffer.from("ab"),
     })
 
-    expect(await exchange(endpoint, request)).toEqual({
-      kind: "e",
-      exitCode: 1,
-      message: "The CLI request is incomplete\n",
-    })
+    if (process.platform === "win32") {
+      // Closing a named-pipe client is a full disconnect, so there is no peer
+      // left to observe the Unix-style incomplete-request response. Exercise
+      // the equivalent disconnect path and require the same spool cleanup.
+      const socket = net.createConnection(endpoint)
+      socket.on("error", () => undefined)
+      await new Promise<void>((resolve) => socket.once("connect", resolve))
+      socket.write(request)
+      await expect
+        .poll(async () => (await readdir(runtimeDirectory)).length)
+        .toBe(1)
+      const closed = new Promise<void>((resolve) =>
+        socket.once("close", resolve)
+      )
+      socket.destroy()
+      await closed
+    } else {
+      expect(await exchange(endpoint, request)).toEqual({
+        kind: "e",
+        exitCode: 1,
+        message: "The CLI request is incomplete\n",
+      })
+    }
     expect(handler).not.toHaveBeenCalled()
-    await expect(readdir(runtimeDirectory)).resolves.toEqual([
-      "isolated-cli.sock",
-    ])
+    await expect
+      .poll(async () => await readdir(runtimeDirectory))
+      .toEqual(process.platform === "win32" ? [] : ["isolated-cli.sock"])
   })
 
   it("drains a large framed stdin before reporting a spool failure", async () => {
@@ -495,7 +549,7 @@ describe.sequential("CLI server protocol", () => {
     )
     await expect
       .poll(async () => (await readdir(runtimeDirectory)).length)
-      .toBe(2)
+      .toBe(process.platform === "win32" ? 1 : 2)
 
     await server.close()
     server = null

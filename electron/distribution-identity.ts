@@ -3,6 +3,7 @@ import type { DevelopmentCheckoutIdentity } from "../scripts/development-checkou
 
 export const PRODUCT_NAME = "Pulse MD"
 export const DEVELOPMENT_PRODUCT_NAME = "Pulse MD Development"
+export const WINDOWS_APP_USER_MODEL_ID = "io.github.mapleroyal.pulse-md"
 
 export const USER_DATA_DIRECTORY_NAME = PRODUCT_NAME
 

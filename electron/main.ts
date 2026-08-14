@@ -16,7 +16,6 @@ import {
   readFile,
   readlink,
   realpath,
-  rename,
   stat,
   symlink,
   unlink,
@@ -225,7 +224,7 @@ import {
   modeForAtomicReplacement,
   preserveExistingFileMode,
 } from "./file-permissions"
-import { syncParentDirectory } from "./file-durability"
+import { renameReplacingFile, syncParentDirectory } from "./file-durability"
 import { reconcileAtomicWriteAfterRename } from "./atomic-write-reconciliation"
 import {
   addRecentDocumentPath,
@@ -310,8 +309,10 @@ import {
   type ProfileTab,
 } from "./profile-schema"
 import {
+  cliWindowDisplaySelection,
   centeredWindowPosition,
   macWindowButtonPosition,
+  minimizeWindowAccelerator,
   rectanglesIntersect,
   shouldPrepareTabTearOut,
   tabTearOutWindowPosition,
@@ -320,6 +321,7 @@ import {
 import {
   distributionShouldStartCliServer,
   resolveDistributionIdentity,
+  WINDOWS_APP_USER_MODEL_ID,
 } from "./distribution-identity"
 import { developmentCheckoutIdentity } from "../scripts/development-checkout-identity.mjs"
 
@@ -1075,6 +1077,9 @@ protocol.registerSchemesAsPrivileged([
   },
 ])
 
+if (process.platform === "win32" && app.isPackaged) {
+  app.setAppUserModelId(WINDOWS_APP_USER_MODEL_ID)
+}
 app.setName(PRODUCT_NAME)
 if (!isCanonicalDistribution && !isolatedUserDataLaunch) {
   const distributionUserDataPath = path.join(
@@ -2393,6 +2398,10 @@ async function canonicalizeSavePath(filePath: string): Promise<string> {
   }
 }
 
+const atomicWriteReplacementCancelled = new Error(
+  "The save target changed before a replacement retry"
+)
+
 async function atomicWrite(
   filePath: string,
   data: string | Buffer,
@@ -2453,7 +2462,15 @@ async function atomicWrite(
       await unlink(temporaryPath).catch(() => undefined)
       return null
     }
-    await rename(temporaryPath, filePath)
+    await renameReplacingFile(temporaryPath, filePath, {
+      beforeRetryAttempt: finalValidation
+        ? async () => {
+            if (!(await finalValidation())) {
+              throw atomicWriteReplacementCancelled
+            }
+          }
+        : undefined,
+    })
     await syncParentDirectory(filePath)
     return await reconcileAtomicWriteAfterRename({
       acceptStableExpectedBytesAfterReplacementMismatch:
@@ -2480,6 +2497,7 @@ async function atomicWrite(
   } catch (error) {
     if (handle) await handle.close().catch(() => undefined)
     await unlink(temporaryPath).catch(() => undefined)
+    if (error === atomicWriteReplacementCancelled) return null
     throw error
   }
 }
@@ -5905,7 +5923,11 @@ function createApplicationMenu(): Menu {
     label: "Window",
     role: "windowMenu",
     submenu: [
-      { label: "Minimize", role: "minimize", accelerator: "CmdOrCtrl+M" },
+      {
+        label: "Minimize",
+        role: "minimize",
+        accelerator: minimizeWindowAccelerator(process.platform),
+      },
       ...(process.platform === "darwin"
         ? ([
             { type: "separator" },
@@ -8983,7 +9005,6 @@ function cliWindowPosition(
   placement: CliWindowPlacement,
   activeWindowBounds: CliActiveWindowBounds | null
 ) {
-  if (process.platform !== "darwin") return undefined
   const activeWindowIsOnConnectedDisplay =
     activeWindowBounds !== null &&
     screen
@@ -8991,9 +9012,15 @@ function cliWindowPosition(
       .some((display) =>
         rectanglesIntersect(activeWindowBounds, display.bounds)
       )
+  const displaySelection = cliWindowDisplaySelection(
+    process.platform,
+    placement,
+    activeWindowIsOnConnectedDisplay
+  )
+  if (displaySelection === null) return undefined
   const display =
-    placement === "active-window" && activeWindowIsOnConnectedDisplay
-      ? screen.getDisplayMatching(activeWindowBounds)
+    displaySelection === "active-window"
+      ? screen.getDisplayMatching(activeWindowBounds!)
       : screen.getDisplayNearestPoint(screen.getCursorScreenPoint())
   return centeredWindowPosition(display.workArea, windowSize)
 }

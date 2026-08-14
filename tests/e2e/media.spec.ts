@@ -211,11 +211,12 @@ test("switching file tabs resolves relative images with the incoming document pa
       ? path.join(secondDirectory, "pixel.png")
       : path.join(firstDirectory, "pixel.png")
     const incomingUrl = `pulse-md-image://local/${encodeURIComponent(
-      incomingImagePath
+      incomingImagePath.replace(/\\/g, "/")
     )}`
 
     await incomingTab.click()
     await expect(image).toHaveAttribute("src", incomingUrl)
+    await expect(image).toHaveJSProperty("naturalWidth", 1)
     await expect
       .poll(() =>
         app.evaluate(

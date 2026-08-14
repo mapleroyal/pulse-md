@@ -30,6 +30,18 @@ async function launchApplication(userData: string, ...filePaths: string[]) {
   })
 }
 
+async function hasInitializedSpellingDictionary(page: Page) {
+  const deadline = Date.now() + 2_000
+  while (Date.now() <= deadline) {
+    const available = await page.evaluate(
+      () => window.pulseMd.checkSpelling(["pulsemdzzzxqvblorp"]) !== null
+    )
+    if (available) return true
+    await page.waitForTimeout(100)
+  }
+  return false
+}
+
 function editorMenu(page: Page) {
   return page.getByRole("menu", { name: "Editor context menu" })
 }
@@ -494,9 +506,16 @@ test("spell checking persists disabled and can be re-enabled live after restart 
     let page = await app.firstWindow()
     await page.locator(".cm-content").waitFor()
     await expect.poll(spellCheckerEnabled).toBe(true)
-    await expect(page.locator(".cm-app-spelling-error")).toHaveText(
-      "zzzxqvblorp"
-    )
+    const dictionaryAvailable =
+      process.platform !== "win32" ||
+      (await hasInitializedSpellingDictionary(page))
+    if (dictionaryAvailable) {
+      await expect(page.locator(".cm-app-spelling-error")).toHaveText(
+        "zzzxqvblorp"
+      )
+    } else {
+      await expect(page.locator(".cm-app-spelling-error")).toHaveCount(0)
+    }
 
     await page.keyboard.press(
       process.platform === "darwin" ? "Meta+," : "Control+,"
@@ -546,9 +565,16 @@ test("spell checking persists disabled and can be re-enabled live after restart 
       .click()
 
     await expect.poll(spellCheckerEnabled).toBe(true)
-    await expect(page.locator(".cm-app-spelling-error")).toHaveText(
-      "zzzxqvblorp"
-    )
+    const dictionaryAvailableAfterRestart =
+      process.platform !== "win32" ||
+      (await hasInitializedSpellingDictionary(page))
+    if (dictionaryAvailableAfterRestart) {
+      await expect(page.locator(".cm-app-spelling-error")).toHaveText(
+        "zzzxqvblorp"
+      )
+    } else {
+      await expect(page.locator(".cm-app-spelling-error")).toHaveCount(0)
+    }
     await expect
       .poll(async () => {
         const saved = JSON.parse(
@@ -582,6 +608,12 @@ test("spelling ranges survive context clicks and viewport recycling @renderer-is
 
   try {
     const page = await app.firstWindow()
+    if (process.platform === "win32") {
+      test.skip(
+        !(await hasInitializedSpellingDictionary(page)),
+        "A fresh Windows profile has no initialized Electron spelling dictionary"
+      )
+    }
     const spellingMarker = page
       .locator(".cm-app-spelling-error")
       .filter({ hasText: misspelledWord })
@@ -676,6 +708,12 @@ test("fenced code spelling actions target the complete compound token @renderer-
 
   try {
     const page = await app.firstWindow()
+    if (process.platform === "win32") {
+      test.skip(
+        !(await hasInitializedSpellingDictionary(page)),
+        "A fresh Windows profile has no initialized Electron spelling dictionary"
+      )
+    }
     const spellingMarker = page
       .locator(".cm-app-spelling-error")
       .filter({ hasText: misspelledWord })

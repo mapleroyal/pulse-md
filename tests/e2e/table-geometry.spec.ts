@@ -20,6 +20,7 @@ const tableDemoFixturePath = path.join(
   projectRoot,
   "tests/e2e/fixtures/table-demo.md"
 )
+const selectAllKey = process.platform === "darwin" ? "Meta+a" : "Control+a"
 
 const wideTableLines = [
   "| Phase | Items in phase | Cumulative item | Rate / hour | Seconds per item | Phase duration | Cumulative time | Cumulative units |",
@@ -321,7 +322,9 @@ async function selectionAppearanceState(page: Page) {
         }
       }
     )
-    const table = document.querySelector<HTMLElement>(".cm-md-table-scroll")
+    const table = Array.from(
+      document.querySelectorAll<HTMLElement>(".cm-md-table-scroll")
+    ).find((candidate) => candidate.querySelector(".cm-md-table-line"))
     const rows = table
       ? Array.from(table.querySelectorAll<HTMLElement>(".cm-md-table-line"))
       : []
@@ -842,7 +845,9 @@ test("wide tables keep keyboard selection and caret geometry stable", async () =
 })
 
 test("table row boundaries and upward selection stay deterministic in table-demo", async () => {
-  test.slow()
+  // The intentionally repeated, frame-settled selection sweeps take about 85s
+  // on Windows, before accounting for parallel-worker contention.
+  test.setTimeout(150_000)
 
   const userData = await mkdtemp(
     path.join(os.tmpdir(), "pulse-md-table-demo-navigation-e2e-")
@@ -2044,7 +2049,7 @@ test("table cells support empty-cell carets, multi-click selection, select-all, 
     ).toBe("alpha bravo")
 
     await firstCell.click({ position: { x: 65, y: 20 } })
-    await page.keyboard.press("Meta+a")
+    await page.keyboard.press(selectAllKey)
     await settleGeometry(page)
     expect(
       await page.evaluate(() => {

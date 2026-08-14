@@ -20,6 +20,8 @@ const projectRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
   "../.."
 )
+const multiSelectionModifier =
+  process.platform === "darwin" ? "Meta" : "Control"
 const imageFixture =
   '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="20"><rect width="32" height="20" fill="#4c7096"/></svg>'
 
@@ -386,6 +388,9 @@ test("opaque preview gestures defer source selection and preserve rendered drags
     await page.keyboard.press("Escape")
     await expect(displayMath).toHaveCount(1)
 
+    // Keep this gesture distinct from the preceding synthetic drag so
+    // Chromium reports a single-click drag rather than a double-click drag.
+    await page.waitForTimeout(500)
     const inclusionDefinitionBounds = await definitionLine.boundingBox()
     const inclusionMathBounds = await displayMath.boundingBox()
     if (!inclusionDefinitionBounds || !inclusionMathBounds) {
@@ -402,9 +407,23 @@ test("opaque preview gestures defer source selection and preserve rendered drags
       { steps: 5 }
     )
     await page.mouse.up()
-    await expect.poll(selectionSnapshot).toMatchObject({
-      head: document.indexOf("x^2") + "x^2".length,
-    })
+    // Chromium publishes its ordinary continuous drag selection at mouseup.
+    // The semantic boundary replaces it with disjoint source ranges on the
+    // following animation frame, and both states have the same head position.
+    await expect
+      .poll(async () => {
+        const selection = await selectionSnapshot()
+        return {
+          head: selection.head,
+          rangeCount: selection.ranges.length,
+          source: selection.source,
+        }
+      })
+      .toEqual({
+        head: document.indexOf("x^2") + "x^2".length,
+        rangeCount: 2,
+        source: "x^2",
+      })
     const crossMathSelection = await selectionSnapshot()
     expect(crossMathSelection.ranges).toHaveLength(2)
     expect(crossMathSelection.source).toBe("x^2")
@@ -1147,7 +1166,10 @@ test("opaque preview gestures defer source selection and preserve rendered drags
       if (!view) throw new Error("CodeMirror view is unavailable")
       view.dispatch({ selection: { anchor: position } })
     }, shiftAnchor)
-    await opening.click({ modifiers: ["Meta"], position: { x: 4, y: 8 } })
+    await opening.click({
+      modifiers: [multiSelectionModifier],
+      position: { x: 4, y: 8 },
+    })
     await expect.poll(selectionSnapshot).toMatchObject({
       empty: true,
       head: ordinaryOpeningFrom + "```ts".length,

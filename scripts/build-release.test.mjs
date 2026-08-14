@@ -1,6 +1,7 @@
 import assert from "node:assert/strict"
 import {
   existsSync,
+  lstatSync,
   mkdtempSync,
   mkdirSync,
   readFileSync,
@@ -243,26 +244,37 @@ test("Linux payload resolution requires exactly one canonical runtime root", (t)
     "appimage",
     extractionDirectory
   )
+  const executableFixtures = new Set()
+  const fixturePathStat = (target) => {
+    let stat
+    try {
+      stat = lstatSync(target)
+    } catch (error) {
+      if (error?.code === "ENOENT") return null
+      throw error
+    }
+    if (executableFixtures.has(path.resolve(target))) stat.mode |= 0o111
+    else stat.mode &= ~0o111
+    return stat
+  }
+  const resolveFixture = () =>
+    resolveLinuxArtifactRuntimeRoot("appimage", extractionDirectory, {
+      pathStat: fixturePathStat,
+    })
 
-  assert.throws(
-    () => resolveLinuxArtifactRuntimeRoot("appimage", extractionDirectory),
-    /found 0/
-  )
+  assert.throws(resolveFixture, /found 0/)
   mkdirSync(path.join(appImageRoot, "resources"), { recursive: true })
-  writeFileSync(path.join(appImageRoot, "pulse-md"), "fixture", {
-    mode: 0o755,
-  })
-  assert.equal(
-    resolveLinuxArtifactRuntimeRoot("appimage", extractionDirectory),
-    appImageRoot
-  )
+  const appImageExecutable = path.join(appImageRoot, "pulse-md")
+  writeFileSync(appImageExecutable, "fixture")
+  assert.throws(resolveFixture, /found 0/)
+  executableFixtures.add(path.resolve(appImageExecutable))
+  assert.equal(resolveFixture(), appImageRoot)
 
   mkdirSync(path.join(nestedRoot, "resources"), { recursive: true })
-  writeFileSync(path.join(nestedRoot, "pulse-md"), "fixture", { mode: 0o755 })
-  assert.throws(
-    () => resolveLinuxArtifactRuntimeRoot("appimage", extractionDirectory),
-    /found 2/
-  )
+  const nestedExecutable = path.join(nestedRoot, "pulse-md")
+  writeFileSync(nestedExecutable, "fixture")
+  executableFixtures.add(path.resolve(nestedExecutable))
+  assert.throws(resolveFixture, /found 2/)
 })
 
 test("Linux release validation checks Debian and AppImage architectures", () => {

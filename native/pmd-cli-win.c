@@ -670,7 +670,8 @@ static wchar_t *app_executable(void) {
 }
 
 static int launch_app(const wchar_t *app_path) {
-  static const wchar_t argument[] = L" --pmd-cli-server";
+  static const wchar_t argument[] =
+      L" --pmd-cli-server --disable-error-dialogs";
   size_t path_length = wcslen(app_path);
   size_t command_length = path_length +
                           (sizeof(argument) / sizeof(wchar_t) - 1U) + 2U;
@@ -858,6 +859,9 @@ static int spool_standard_input(HANDLE *spool_out, uint64_t *length_out) {
     DWORD received = 0;
     if (!ReadFile(input, buffer, (DWORD)sizeof(buffer), &received, NULL)) {
       DWORD error_code = GetLastError();
+      if (error_code == ERROR_BROKEN_PIPE) {
+        break;
+      }
       CloseHandle(spool);
       if (InterlockedCompareExchange(&interrupted, 0, 0) == 0) {
         report_windows_error("cannot read standard input", error_code);

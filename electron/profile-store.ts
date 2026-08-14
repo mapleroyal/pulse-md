@@ -6,13 +6,12 @@ import {
   open,
   readdir,
   realpath,
-  rename,
   stat,
   unlink,
 } from "node:fs/promises"
 import path from "node:path"
 
-import { syncParentDirectory } from "./file-durability"
+import { renameReplacingFile, syncParentDirectory } from "./file-durability"
 import {
   isProfileIdentifier,
   normalizeProfileSchema,
@@ -279,7 +278,7 @@ async function atomicWriteText(
     await handle.sync()
     await handle.close()
     handle = null
-    await rename(temporaryPath, filePath)
+    await renameReplacingFile(temporaryPath, filePath)
     await syncParentDirectory(filePath)
   } catch (error) {
     await handle?.close().catch(() => undefined)

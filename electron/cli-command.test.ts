@@ -137,6 +137,18 @@ describe("parseCliCommand open", () => {
     })
   })
 
+  it.each(["FILE:", "FiLe:"])(
+    "accepts the case-insensitive %s URL scheme",
+    (scheme) => {
+      const filePath = path.join(workingDirectory, "mixed scheme.md")
+      const fileUrl = pathToFileURL(filePath).href.replace(/^file:/u, scheme)
+
+      expect(parse([fileUrl])).toMatchObject({
+        sources: [{ kind: "file", filePath }],
+      })
+    }
+  )
+
   it("supports every tabs visibility and editor mode value", () => {
     for (const tabVisibility of [
       "inherit",

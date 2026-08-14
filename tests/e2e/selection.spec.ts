@@ -383,14 +383,24 @@ test("rendered table ranges copy, cut, and keep their context menu", async () =>
     await app.evaluate(({ clipboard }) => clipboard.clear())
     await page.keyboard.press(`${primary}+C`)
     await expect
-      .poll(() => app.evaluate(({ clipboard }) => clipboard.readText()))
+      .poll(async () =>
+        (await app.evaluate(({ clipboard }) => clipboard.readText())).replace(
+          /\r\n/g,
+          "\n"
+        )
+      )
       .toBe(clipboardText)
     await expect(selectedCells).toHaveCount(6)
 
     await app.evaluate(({ clipboard }) => clipboard.clear())
     await page.keyboard.press(`${primary}+X`)
     await expect
-      .poll(() => app.evaluate(({ clipboard }) => clipboard.readText()))
+      .poll(async () =>
+        (await app.evaluate(({ clipboard }) => clipboard.readText())).replace(
+          /\r\n/g,
+          "\n"
+        )
+      )
       .toBe(clipboardText)
     await expect(headerCells).toHaveText(["Column A", "", ""])
     await expect(page.locator(".cm-editor")).not.toHaveClass(
@@ -439,7 +449,12 @@ test("rendered table ranges copy, cut, and keep their context menu", async () =>
     await cut.click()
 
     await expect
-      .poll(() => app.evaluate(({ clipboard }) => clipboard.readText()))
+      .poll(async () =>
+        (await app.evaluate(({ clipboard }) => clipboard.readText())).replace(
+          /\r\n/g,
+          "\n"
+        )
+      )
       .toBe(clipboardText)
     await expect(page.locator(".cm-md-table-cell-selected")).toHaveCount(0)
     await expect(headerCells).toHaveText(["Column A", "", ""])

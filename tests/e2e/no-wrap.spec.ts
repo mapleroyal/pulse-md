@@ -20,7 +20,8 @@ const projectRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
   "../.."
 )
-const commandModifier = process.platform === "darwin" ? "Meta" : "Control"
+const selectToLineEndKey =
+  process.platform === "darwin" ? "Meta+Shift+ArrowRight" : "Shift+End"
 const imageSource =
   '![Embedded](<data:image/svg+xml,%3Csvg%20xmlns=%22http://www.w3.org/2000/svg%22%20width=%223000%22%20height=%22300%22%3E%3Crect%20width=%223000%22%20height=%22300%22%20fill=%22%232563eb%22/%3E%3C/svg%3E> "Embedded image")'
 const yamlValue = "WideYamlValue".repeat(160)
@@ -484,7 +485,7 @@ test("no-wrap gives YAML one keyboard-aware horizontal surface", async () => {
       })
     }, yamlValue)
     await settleGeometry(page)
-    await page.keyboard.press(`${commandModifier}+Shift+ArrowRight`)
+    await page.keyboard.press(selectToLineEndKey)
     await settleGeometry(page)
 
     const yamlSelectionGeometry = () =>
@@ -597,7 +598,7 @@ test("no-wrap keeps callout keyboard selection visible", async () => {
     expect(caret.lineText).toContain("A callout body")
     expect(caret.lineOffset).toBeLessThan(5)
 
-    await page.keyboard.press(`${commandModifier}+Shift+ArrowRight`)
+    await page.keyboard.press(selectToLineEndKey)
     await settleGeometry(page)
     await expect(callout).toBeVisible()
 

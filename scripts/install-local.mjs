@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process"
-import { randomUUID } from "node:crypto"
+import { createHash, randomUUID } from "node:crypto"
 import {
   copyFileSync,
   lstatSync,
@@ -14,6 +14,20 @@ import {
 import { createRequire } from "node:module"
 import os from "node:os"
 import path from "node:path"
+
+import {
+  parseWindowsInstallInventory,
+  parseWindowsPathInventory,
+  parseWindowsShellInventory,
+  requireCanonicalWindowsCliPath,
+  requireCanonicalWindowsInstallation,
+  requireCanonicalWindowsShellRegistrations,
+  windowsInstallerIdentity,
+  windowsInstallerInvocation,
+  windowsInstallInventoryInvocation,
+  windowsPathInventoryInvocation,
+  windowsShellInventoryInvocation,
+} from "./windows-installer-launch.mjs"
 
 const projectRoot = path.resolve(import.meta.dirname, "..")
 const packageMetadata = JSON.parse(
@@ -97,6 +111,20 @@ function requireRegularFile(target, description) {
   const stat = pathStat(target)
   if (!stat || stat.isSymbolicLink() || !stat.isFile()) {
     throw new Error(`${description} is not a regular file: ${target}`)
+  }
+}
+
+function fileSha256(target, description) {
+  requireRegularFile(target, description)
+  return createHash("sha256").update(readFileSync(target)).digest("hex")
+}
+
+function assertMatchingFile(source, installed, description) {
+  if (
+    fileSha256(source, `Packaged ${description}`) !==
+    fileSha256(installed, `Installed ${description}`)
+  ) {
+    throw new Error(`Installed ${description} does not match ${source}`)
   }
 }
 
@@ -216,11 +244,11 @@ async function waitForPulseMdToStop() {
   assertPulseMdIsNotRunning()
 }
 
-function verifyPackagedRuntime(appBundle) {
+function verifyPackagedRuntime(packagedRoot) {
   const [npm, args] = npmInvocation(["run", "test:packaged"])
   runVisible(npm, args, {
-    env: { ...process.env, PMD_PACKAGED_ROOT: appBundle },
-    label: `packaged verification for ${appBundle}`,
+    env: { ...process.env, PMD_PACKAGED_ROOT: packagedRoot },
+    label: `packaged verification for ${packagedRoot}`,
   })
 }
 
@@ -688,40 +716,60 @@ async function waitForWindowsPulseMdToStop() {
   assertWindowsPulseMdIsNotRunning()
 }
 
-function windowsInstallLocations() {
-  const script = [
-    "$ErrorActionPreference = 'Stop'",
-    "$root = 'HKLM:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*'",
-    "Get-ItemProperty -Path $root -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName -eq 'Pulse MD' } | ForEach-Object { if ($_.InstallLocation) { $_.InstallLocation } }",
-  ].join("; ")
-  return run(
-    "powershell.exe",
-    ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", script],
-    { label: "locating the Pulse MD installation" }
+function windowsInstallation(identity) {
+  const invocation = windowsInstallInventoryInvocation({ identity })
+  const result = run(invocation.command, invocation.args, {
+    env: invocation.env,
+    label: "inventorying Pulse MD installations",
+  })
+  return requireCanonicalWindowsInstallation(
+    parseWindowsInstallInventory(result.stdout),
+    identity
   )
-    .stdout.split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(Boolean)
 }
 
-function assertWindowsMachinePathContains(expectedDirectory) {
-  const script = "[Environment]::GetEnvironmentVariable('Path', 'Machine')"
-  const machinePath = run(
-    "powershell.exe",
-    ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", script],
-    { label: "reading the Windows machine PATH" }
-  ).stdout.trim()
-  const normalizedExpected = path.resolve(expectedDirectory).toLowerCase()
-  const containsExpected = machinePath
-    .split(";")
-    .map((entry) => entry.trim().replace(/^"|"$/g, ""))
-    .filter(Boolean)
-    .some((entry) => path.resolve(entry).toLowerCase() === normalizedExpected)
-  if (!containsExpected) {
+function assertCanonicalWindowsPath(expectedDirectory) {
+  const invocation = windowsPathInventoryInvocation()
+  const result = run(invocation.command, invocation.args, {
+    env: invocation.env,
+    label: "inventorying the Windows PATH",
+  })
+  requireCanonicalWindowsCliPath(
+    parseWindowsPathInventory(result.stdout),
+    expectedDirectory
+  )
+}
+
+function assertCanonicalWindowsShell(installationRoot, identity) {
+  const invocation = windowsShellInventoryInvocation({ identity })
+  const result = run(invocation.command, invocation.args, {
+    env: invocation.env,
+    label: "inventorying Windows shell registrations",
+  })
+  requireCanonicalWindowsShellRegistrations(
+    parseWindowsShellInventory(result.stdout),
+    installationRoot,
+    identity
+  )
+}
+
+function windowsPackagedRuntimeRoot(outputDirectory) {
+  requireRegularDirectory(outputDirectory, "package build output")
+  const roots = readdirSync(outputDirectory, { withFileTypes: true })
+    .filter(
+      (entry) =>
+        !entry.isSymbolicLink() &&
+        entry.isDirectory() &&
+        /^win.*-unpacked$/.test(entry.name)
+    )
+    .map((entry) => path.join(outputDirectory, entry.name))
+    .filter((root) => pathStat(path.join(root, `${productName}.exe`))?.isFile())
+  if (roots.length !== 1) {
     throw new Error(
-      `The Windows machine PATH does not contain ${expectedDirectory}`
+      `Expected one unpacked Windows Pulse MD runtime, found ${roots.length}`
     )
   }
+  return roots[0]
 }
 
 function promoteFileAtomically(source, target) {
@@ -766,6 +814,9 @@ async function installPlatformPackage() {
     buildPackageTo(temporaryDirectory)
     if (process.platform === "win32") {
       assertWindowsPulseMdIsNotRunning()
+      const packagedRoot = windowsPackagedRuntimeRoot(temporaryDirectory)
+      verifyPackagedRuntime(packagedRoot)
+      assertWindowsPulseMdIsNotRunning()
       const installers = readdirSync(temporaryDirectory)
         .filter((name) => name.toLowerCase().endsWith(".exe"))
         .map((name) => path.join(temporaryDirectory, name))
@@ -774,39 +825,36 @@ async function installPlatformPackage() {
           `Expected one NSIS installer, found ${installers.length}`
         )
       }
-      runVisible(installers[0], [], { label: "Pulse MD installer" })
-      const localAppData = process.env.LOCALAPPDATA
-      if (!localAppData) {
-        throw new Error("LOCALAPPDATA is unavailable after installation")
-      }
-      const programFilesRoot =
-        process.env["ProgramFiles"] || path.join(localAppData, "Programs")
-      const candidateRoots = [
-        ...windowsInstallLocations(),
-        path.join(localAppData, "Programs", "pulse-md"),
-        path.join(localAppData, "Programs", productName),
-        path.join(programFilesRoot, "pulse-md"),
-        path.join(programFilesRoot, productName),
-      ]
-      const installationRoot = candidateRoots.find((candidate) =>
-        pathStat(path.join(candidate, `${productName}.exe`))?.isFile()
-      )
-      if (!installationRoot) {
-        throw new Error(
-          `Cannot locate the installed Pulse MD app under ${candidateRoots.join(", ")}`
-        )
-      }
+      const installerInvocation = windowsInstallerInvocation(installers[0])
+      runVisible(installerInvocation.command, installerInvocation.args, {
+        env: installerInvocation.env,
+        label: "Pulse MD installer",
+      })
+      const identity = windowsInstallerIdentity()
+      const { installationRoot } = windowsInstallation(identity)
       const installedExecutable = path.join(
         installationRoot,
         `${productName}.exe`
       )
       const helper = path.join(installationRoot, "resources", "bin", "pmd.exe")
-      for (const required of [installedExecutable, helper]) {
+      const installedAsar = path.join(installationRoot, "resources", "app.asar")
+      for (const required of [installedExecutable, helper, installedAsar]) {
         const stat = pathStat(required)
         if (!stat?.isFile() || stat.isSymbolicLink()) {
           throw new Error(`Installed executable is missing: ${required}`)
         }
       }
+      assertMatchingFile(
+        path.join(packagedRoot, "resources", "app.asar"),
+        installedAsar,
+        "app.asar"
+      )
+      assertMatchingFile(
+        path.join(packagedRoot, "resources", "bin", "pmd.exe"),
+        helper,
+        "pmd.exe"
+      )
+      verifyPackagedRuntime(installationRoot)
       const doctor = run(helper, ["doctor"], {
         env: Object.fromEntries(
           Object.entries(process.env).filter(
@@ -831,7 +879,8 @@ async function installPlatformPackage() {
         throw new Error(`pmd reported the wrong endpoint:\n${doctor.stdout}`)
       }
       await waitForWindowsPulseMdToStop()
-      assertWindowsMachinePathContains(path.dirname(helper))
+      assertCanonicalWindowsPath(path.dirname(helper))
+      assertCanonicalWindowsShell(installationRoot, identity)
       console.log(
         "Installed and verified Pulse MD with its all-users NSIS installer"
       )

@@ -70,7 +70,7 @@ async function deactivateNativeWindow(app: ElectronApplication) {
 
       window.once("blur", finish)
       if (process.platform === "darwin") electronApp.hide()
-      else window.minimize()
+      else window.hide()
       setImmediate(() => {
         if (!window.isFocused()) finish()
       })
@@ -1703,11 +1703,16 @@ test("document-start navigation keeps the caret below the overlaid top chrome @r
     await expect(editor).toHaveClass(/cm-md-caret-hidden/)
     await expect(content).not.toBeFocused()
     const scroller = page.locator(".cm-scroller")
-    await scroller.evaluate((element) => {
-      element.scrollTop = element.scrollHeight
-    })
     await expect
-      .poll(() => scroller.evaluate((element) => element.scrollTop))
+      .poll(() =>
+        scroller.evaluate(async (element) => {
+          element.scrollTop = element.scrollHeight
+          await new Promise<void>((resolve) => {
+            requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
+          })
+          return element.scrollTop
+        })
+      )
       .toBeGreaterThan(0)
 
     await page.keyboard.press("Escape")
@@ -1927,7 +1932,7 @@ test("pinch gestures visually zoom and pan without changing layout zoom", async 
     const before = await visualViewport(page)
     const pageZoomBefore = await pageZoom()
     await synthesizeGesture("Input.synthesizePinchGesture", {
-      gestureSourceType: "touch",
+      gestureSourceType: "default",
       relativeSpeed: 1_200,
       scaleFactor: 10,
       x: before.layoutWidth / 2,
@@ -1945,7 +1950,7 @@ test("pinch gestures visually zoom and pan without changing layout zoom", async 
     expect(await pageZoom()).toBeCloseTo(pageZoomBefore, 5)
 
     await synthesizeGesture("Input.synthesizeScrollGesture", {
-      gestureSourceType: "touch",
+      gestureSourceType: "default",
       speed: 800,
       x: zoomed.width / 2,
       xDistance: 30,
@@ -5112,6 +5117,7 @@ test("a final tab can move transactionally into an existing window", async () =>
     const target = app.windows().find((candidate) => candidate !== source)
     if (!target) throw new Error("Target window was not created")
     await target.locator(".cm-editor").waitFor()
+    await target.locator(".top-chrome .document-tab").waitFor()
     await expect(target.locator(".cm-content")).toBeFocused()
     await expect
       .poll(() =>
@@ -6429,10 +6435,12 @@ test("large outlines keep a bounded virtual window across full-list navigation @
     const outline = page.locator('[data-slot="popover-content"]')
     const list = outline.locator('[data-slot="command-list"]')
     const items = outline.locator('[data-slot="command-item"]')
+    const outlineSearch = outline.getByPlaceholder("Go to heading…")
     const selected = outline.locator(
       '[data-slot="command-item"][data-selected="true"]'
     )
     await expect(outline).toBeVisible()
+    await expect(outlineSearch).toBeFocused()
     await expect(items).toHaveCount(48)
 
     await page.keyboard.press("End")
@@ -6445,10 +6453,10 @@ test("large outlines keep a bounded virtual window across full-list navigation @
     await expect(selected).toContainText("Heading 599")
     await page.keyboard.press("Home")
     await expect(selected).toContainText("Heading 1")
-    if (process.platform === "darwin") {
-      await page.keyboard.press("Meta+ArrowDown")
-      await expect(selected).toContainText("Heading 600")
-    }
+    await page.keyboard.press(
+      process.platform === "darwin" ? "Meta+ArrowDown" : "End"
+    )
+    await expect(selected).toContainText("Heading 600")
 
     await list.evaluate((element) => {
       element.scrollTop = element.scrollHeight * 0.6
@@ -6465,7 +6473,6 @@ test("large outlines keep a bounded virtual window across full-list navigation @
       .toBeGreaterThan(200)
     await expect(items).toHaveCount(48)
 
-    const outlineSearch = outline.getByPlaceholder("Go to heading…")
     await outlineSearch.pressSequentially("Heading 417")
     await expect(outlineSearch).toHaveValue("Heading 417")
     await expect(items).toHaveCount(1)
@@ -6557,9 +6564,11 @@ test("outline, heading links, heading shortcuts, and tab shortcuts share navigat
     const laterOutlineItem = outline.getByRole("option", {
       name: "Heading level 2: Later Heading",
     })
+    const outlineSearch = outline.getByPlaceholder("Go to heading…")
     const itemBackground = (item: Locator) =>
       item.evaluate((element) => getComputedStyle(element).backgroundColor)
 
+    await expect(outlineSearch).toBeFocused()
     await page.keyboard.press("End")
     await expect(selectedOutlineItem).toContainText("Later Heading")
     await expect(laterOutlineItem).toHaveAttribute("aria-selected", "true")
@@ -6574,7 +6583,6 @@ test("outline, heading links, heading shortcuts, and tab shortcuts share navigat
     }
     await expect(selectedOutlineItem).toContainText("Intro")
 
-    const outlineSearch = outline.getByPlaceholder("Go to heading…")
     await outlineSearch.fill("target")
     await page.keyboard.press(`${primary}+A`)
     await expect(outlineSearch).toHaveJSProperty("selectionStart", 0)
@@ -6808,7 +6816,7 @@ test("outline, heading links, heading shortcuts, and tab shortcuts share navigat
 
     await page.keyboard.press(`${primary}+T`)
     await expect(page.getByRole("tab")).toHaveCount(3)
-    const absoluteDestination = `${pathToFileURL(linkedDocument).pathname}?ignored=1#other-section`
+    const absoluteDestination = `${pathToFileURL(linkedDocument).href}?ignored=1#other-section`
     await page.locator(".cm-content").click()
     await page.keyboard.insertText(`[Open absolute](<${absoluteDestination}>)`)
     await page.keyboard.press("Escape")

@@ -129,7 +129,9 @@ async function openWindowProfiles(page: Page) {
 
 async function chooseOption(trigger: Locator, name: string) {
   await trigger.click()
-  const popup = trigger.page().locator('[data-slot="select-content"]:visible')
+  const popup = trigger
+    .page()
+    .locator('[data-slot="select-content"][data-open]')
   await expect(popup).toBeVisible()
   await popup.getByRole("option", { name, exact: true }).click()
 }
@@ -847,7 +849,7 @@ test("profile temporary tabs use their fallback title and save an explicitly typ
       })
     await expect
       .poll(() => readIfPresent(destinationPath))
-      .toBe('{"answer": 42}\n')
+      .toBe(`{"answer": 42}${os.EOL}`)
     await expect(
       page.locator('.document-tab[data-active] [role="tab"]')
     ).toHaveAttribute("aria-label", destinationPath)

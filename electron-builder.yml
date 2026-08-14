@@ -123,6 +123,8 @@ win:
   artifactName: ${productName}-${version}-${arch}.${ext}
 nsis:
   # electron-builder only installs NSIS file associations machine-wide.
+  # Keep the canonical Windows product identity stable across releases.
+  guid: 102e1616-3f19-5f08-a24a-3a30fb60faaa
   perMachine: true
   include: build/installer.nsh
 linux:
@@ -154,7 +156,7 @@ fileAssociations:
       - mkd
     description: Markdown document
     mimeType: text/markdown
-    name: Markdown document
+    name: PulseMD.Markdown
     role: Editor
 npmRebuild: false
 compression: maximum

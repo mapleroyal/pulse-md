@@ -938,10 +938,10 @@ export function linuxArtifactRuntimeRootCandidates(
   throw new Error(`Unsupported Linux release artifact format: ${format}`)
 }
 
-function isLinuxPackagedRuntimeRoot(root) {
-  const rootStat = lstatIfPresent(root)
-  const executableStat = lstatIfPresent(path.join(root, "pulse-md"))
-  const resourcesStat = lstatIfPresent(path.join(root, "resources"))
+function isLinuxPackagedRuntimeRoot(root, pathStat) {
+  const rootStat = pathStat(root)
+  const executableStat = pathStat(path.join(root, "pulse-md"))
+  const resourcesStat = pathStat(path.join(root, "resources"))
   return Boolean(
     rootStat?.isDirectory() &&
     !rootStat.isSymbolicLink() &&
@@ -953,12 +953,18 @@ function isLinuxPackagedRuntimeRoot(root) {
   )
 }
 
-export function resolveLinuxArtifactRuntimeRoot(format, extractionDirectory) {
+export function resolveLinuxArtifactRuntimeRoot(
+  format,
+  extractionDirectory,
+  { pathStat = lstatIfPresent } = {}
+) {
   const candidates = linuxArtifactRuntimeRootCandidates(
     format,
     extractionDirectory
   )
-  const matches = candidates.filter(isLinuxPackagedRuntimeRoot)
+  const matches = candidates.filter((candidate) =>
+    isLinuxPackagedRuntimeRoot(candidate, pathStat)
+  )
   if (matches.length !== 1) {
     throw new Error(
       `${format} extraction must contain exactly one canonical Pulse MD runtime root; found ${matches.length}. Checked:\n${candidates

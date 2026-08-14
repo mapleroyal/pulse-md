@@ -1,8 +1,8 @@
 import { randomUUID } from "node:crypto"
-import { link, lstat, open, readFile } from "node:fs/promises"
+import { link, lstat, readFile } from "node:fs/promises"
 import path from "node:path"
 
-import { syncParentDirectory } from "./file-durability"
+import { openFileForSync, syncParentDirectory } from "./file-durability"
 
 export type SettingsFileLoadResult<T> =
   | { readonly kind: "failed"; readonly error: unknown }
@@ -42,7 +42,7 @@ export async function preserveSettingsFileForReset(
     `${baseName}.preserved-${timestamp}-${uniqueId}${extension}`
   )
   await link(filePath, preservedPath)
-  const preservedHandle = await open(preservedPath, "r")
+  const preservedHandle = await openFileForSync(preservedPath)
   try {
     await preservedHandle.sync()
   } finally {

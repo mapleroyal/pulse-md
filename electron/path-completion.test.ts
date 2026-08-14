@@ -23,7 +23,11 @@ async function fixture() {
     writeFile(path.join(root, "draft.md"), ""),
     writeFile(path.join(root, "drawing.png"), ""),
   ])
-  await symlink(path.join(root, "docs"), path.join(root, "linked-docs"))
+  await symlink(
+    path.join(root, "docs"),
+    path.join(root, "linked-docs"),
+    process.platform === "win32" ? "junction" : "dir"
+  )
   return root
 }
 

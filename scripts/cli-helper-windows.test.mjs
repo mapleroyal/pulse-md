@@ -110,10 +110,21 @@ async function serveOnce(respond, pipeEndpoint = endpoint) {
   const activeSockets = new Set()
   let resolveRequest
   let rejectRequest
+  let requestTimeout
   const request = new Promise((resolve, reject) => {
-    resolveRequest = resolve
-    rejectRequest = reject
+    resolveRequest = (value) => {
+      clearTimeout(requestTimeout)
+      resolve(value)
+    }
+    rejectRequest = (error) => {
+      clearTimeout(requestTimeout)
+      reject(error)
+    }
   })
+  requestTimeout = setTimeout(
+    () => rejectRequest(new Error("CLI helper did not send a request")),
+    10_000
+  )
 
   const server = net.createServer({ allowHalfOpen: true }, (socket) => {
     activeSockets.add(socket)
@@ -377,17 +388,51 @@ windowsTest("Windows helper artifact is a native PE executable", async () => {
 })
 
 test("Windows CLI packaging installs the helper and PATH integration", async () => {
-  const [builderConfig, buildScript, installerInclude] = await Promise.all([
+  const [
+    builderConfig,
+    buildScript,
+    installerInclude,
+    packagedRuntimeScript,
+    nativeWindowsHelper,
+  ] = await Promise.all([
     readFile(path.join(projectRoot, "electron-builder.yml"), "utf8"),
     readFile(path.join(projectRoot, "scripts/build-cli.mjs"), "utf8"),
     readFile(path.join(projectRoot, "build/installer.nsh"), "utf8"),
+    readFile(
+      path.join(projectRoot, "scripts/test-packaged-runtime.mjs"),
+      "utf8"
+    ),
+    readFile(path.join(projectRoot, "native/pmd-cli-win.c"), "utf8"),
   ])
   assert.match(builderConfig, /dist-native\/win32\/bin\/pmd\.exe/)
   assert.match(builderConfig, /include: build\/installer\.nsh/)
   assert.match(buildScript, /native\/pmd-cli-win\.c/)
   assert.match(buildScript, /PMD_MSVC_CL \|\| "cl\.exe"/)
+  assert.match(buildScript, /windowsVerbatimArguments: true/)
   assert.match(buildScript, /"\/MT"/)
+  assert.match(nativeWindowsHelper, /--disable-error-dialogs/)
+  assert.ok(
+    buildScript.includes('`/DPMD_CLI_IDENTITY_W=L"${variant.cliIdentity}"`')
+  )
+  assert.ok(
+    buildScript.includes('`/DPMD_COMMAND_NAME="${variant.commandName}"`')
+  )
+  assert.ok(
+    buildScript.includes(
+      '`/DPMD_APP_EXECUTABLE_NAME_W=L"${variant.appExecutableName}"`'
+    )
+  )
+  assert.match(
+    packagedRuntimeScript,
+    /mkdir\(environment\.APPDATA, \{ recursive: true \}\)/
+  )
   assert.match(installerInclude, /customInstall/)
   assert.match(installerInclude, /customUnInstall/)
   assert.match(installerInclude, /\$INSTDIR\\resources\\bin/)
+  assert.match(
+    installerInclude,
+    /Software\\Classes\\pulse-md\\shell\\open\\command/
+  )
+  assert.match(installerInclude, /URL Protocol/)
+  assert.match(installerInclude, /DeleteRegKey SHCTX/)
 })

@@ -30,9 +30,44 @@ describe("Markdown image sources", () => {
       "pulse-md-image://local/C%3A%2FUsers%2Freader%2Fexample.png",
     ],
     [
+      "./images/example.png",
+      String.raw`C:\Users\reader\notes\document.md`,
+      "pulse-md-image://local/C%3A%2FUsers%2Freader%2Fnotes%2Fimages%2Fexample.png",
+    ],
+    [
+      "./example image.png",
+      String.raw`C:\Users\reader\100% notes\document #1.md`,
+      "pulse-md-image://local/C%3A%2FUsers%2Freader%2F100%25%20notes%2Fexample%20image.png",
+    ],
+    [
+      "hash%23.png",
+      String.raw`C:\Users\reader\notes\document.md`,
+      "pulse-md-image://local/C%3A%2FUsers%2Freader%2Fnotes%2Fhash%23.png",
+    ],
+    [
+      "image.png",
+      String.raw`C:\Users\reader\literal%20directory\document.md`,
+      "pulse-md-image://local/C%3A%2FUsers%2Freader%2Fliteral%2520directory%2Fimage.png",
+    ],
+    [
+      "./images/example.png",
+      String.raw`\\server\share\notes\document.md`,
+      "pulse-md-image://local/%2F%2Fserver%2Fshare%2Fnotes%2Fimages%2Fexample.png",
+    ],
+    [
       "file:///Users/reader/example%20image.png",
       null,
       "pulse-md-image://local/%2FUsers%2Freader%2Fexample%20image.png",
+    ],
+    [
+      "file://server/share/My%20Image.png",
+      null,
+      "pulse-md-image://local/%2F%2Fserver%2Fshare%2FMy%20Image.png",
+    ],
+    [
+      "file://localhost/C:/Users/reader/example%20image.png",
+      null,
+      "pulse-md-image://local/C%3A%2FUsers%2Freader%2Fexample%20image.png",
     ],
     [
       "./images/100%.png",

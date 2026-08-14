@@ -23,11 +23,15 @@ function localImageUrl(filePath: string) {
   return `${pulseMdImageScheme}//local/${encodeURIComponent(filePath)}`
 }
 
-function fileUrlForPath(filePath: string) {
+function fileUrlForPath(filePath: string, literalPath = false) {
   const normalized = filePath.replace(/\\/g, "/")
   const windowsDrive = /^[A-Za-z]:\//.test(normalized)
   const url = new URL("file:///")
-  url.pathname = windowsDrive ? `/${normalized}` : normalized
+  const pathname = windowsDrive ? `/${normalized}` : normalized
+  // A document path comes from the filesystem, where `%20` is a literal name.
+  // Markdown destinations still use URL escapes, so encode percents only for
+  // the document base rather than for the destination itself.
+  url.pathname = literalPath ? pathname.replaceAll("%", "%25") : pathname
   return url
 }
 
@@ -37,6 +41,9 @@ function pathFromFileUrl(url: URL) {
   let filePath = decodeURIComponent(
     url.pathname.replace(/%(?![\da-f]{2})/gi, "%25")
   )
+  if (url.hostname && url.hostname.toLowerCase() !== "localhost") {
+    filePath = `//${url.hostname}${filePath}`
+  }
   if (/^\/[A-Za-z]:\//.test(filePath)) filePath = filePath.slice(1)
   return filePath
 }
@@ -77,7 +84,7 @@ export function resolveMarkdownImageSource(
   try {
     const resolved = absolutePath
       ? fileUrlForPath(candidate)
-      : new URL(candidate, fileUrlForPath(encodeURI(documentPath!)))
+      : new URL(candidate, fileUrlForPath(documentPath!, true))
     return localImageUrl(pathFromFileUrl(resolved))
   } catch {
     return null

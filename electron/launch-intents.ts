@@ -70,7 +70,7 @@ function launchArguments(
 }
 
 function resolveLaunchPath(argument: string, workingDirectory: string): string {
-  if (argument.startsWith("file://")) {
+  if (/^file:\/\//i.test(argument)) {
     return path.resolve(fileURLToPath(argument))
   }
 

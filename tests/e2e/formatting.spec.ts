@@ -498,7 +498,10 @@ test("Paste and Match Style inserts the native plain clipboard representation", 
     )
 
     expect(menuItem).toEqual({
-      accelerator: process.platform === "darwin" ? "Cmd+Alt+Shift+V" : null,
+      accelerator:
+        process.platform === "darwin"
+          ? "Cmd+Alt+Shift+V"
+          : "Shift+CommandOrControl+V",
       label:
         process.platform === "darwin"
           ? "Paste and Match Style"

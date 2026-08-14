@@ -6,6 +6,7 @@ import {
   PRODUCT_NAME,
   resolveDistributionIdentity,
   USER_DATA_DIRECTORY_NAME,
+  WINDOWS_APP_USER_MODEL_ID,
 } from "./distribution-identity"
 import { developmentCheckoutIdentity } from "../scripts/development-checkout-identity.mjs"
 
@@ -15,6 +16,10 @@ const DEVELOPMENT_CHECKOUT = developmentCheckoutIdentity(
 )
 
 describe("distribution identity", () => {
+  it("uses the packaged Windows application identity", () => {
+    expect(WINDOWS_APP_USER_MODEL_ID).toBe("io.github.mapleroyal.pulse-md")
+  })
+
   it("gives source development a complete isolated identity", () => {
     expect(
       resolveDistributionIdentity(false, undefined, DEVELOPMENT_CHECKOUT)

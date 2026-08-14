@@ -19,7 +19,11 @@ import { TextDecoder } from "node:util"
 
 import { isProfileIdentifier } from "../src/shared/profile-identifiers"
 import { isScratchIdentifier } from "../src/shared/scratch-identifiers"
-import { syncParentDirectory } from "./file-durability"
+import {
+  openFileForSync,
+  renameReplacingFile,
+  syncParentDirectory,
+} from "./file-durability"
 
 export const SCRATCH_CATALOG_VERSION = 1 as const
 export const SCRATCH_CATALOG_FILE_NAME = ".catalog.json"
@@ -632,7 +636,7 @@ function serializedScratchBatchJournal(journal: ScratchBatchJournal): string {
 }
 
 async function syncRegularFile(filePath: string): Promise<void> {
-  const handle = await open(filePath, "r")
+  const handle = await openFileForSync(filePath)
   try {
     if (!(await handle.stat()).isFile()) {
       throw new ScratchStoreError(
@@ -713,7 +717,7 @@ async function atomicReplaceBuffer(
     await handle.sync()
     await handle.close()
     handle = null
-    await rename(temporaryPath, destinationPath)
+    await renameReplacingFile(temporaryPath, destinationPath)
     await syncParentDirectory(destinationPath)
   } catch (error) {
     await handle?.close().catch(() => undefined)
@@ -1099,7 +1103,10 @@ export class ScratchStore {
           throw error
         }
       } else {
-        await rename(this.batchJournalNextPath, this.batchJournalPath)
+        await renameReplacingFile(
+          this.batchJournalNextPath,
+          this.batchJournalPath
+        )
       }
       await syncParentDirectory(this.batchJournalPath)
       if (create) {

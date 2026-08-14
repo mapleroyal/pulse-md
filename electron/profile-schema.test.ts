@@ -110,16 +110,30 @@ describe("normalizeProfileSchema", () => {
   it("preserves absolute paths and decodes file URLs", () => {
     const absolutePath = path.resolve(path.sep, "notes", "one.md")
     const fileUrlPath = path.resolve(path.sep, "notes", "two words.md")
+    const mixedCaseFileUrlPath = path.resolve(
+      path.sep,
+      "notes",
+      "mixed scheme.md"
+    )
     const profile = validProfile()
     profile.tabs = [
       { id: "one", kind: "file", path: absolutePath },
       { id: "two", kind: "file", path: pathToFileURL(fileUrlPath).href },
+      {
+        id: "three",
+        kind: "file",
+        path: pathToFileURL(mixedCaseFileUrlPath).href.replace(
+          /^file:/u,
+          "FiLe:"
+        ),
+      },
     ]
     profile.activeTab = "one"
 
     expect(normalize(profile).tabs).toEqual([
       { id: "one", kind: "file", path: absolutePath },
       { id: "two", kind: "file", path: fileUrlPath },
+      { id: "three", kind: "file", path: mixedCaseFileUrlPath },
     ])
   })
 

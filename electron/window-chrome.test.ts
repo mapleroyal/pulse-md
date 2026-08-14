@@ -1,12 +1,40 @@
 import { describe, expect, it } from "vitest"
 
 import {
+  cliWindowDisplaySelection,
   centeredWindowPosition,
   macWindowButtonPosition,
+  minimizeWindowAccelerator,
   rectanglesIntersect,
   shouldPrepareTabTearOut,
   tabTearOutWindowPosition,
 } from "./window-chrome"
+
+describe("platform window behavior", () => {
+  it("places --mouse-monitor windows on the cursor display on Windows", () => {
+    expect(cliWindowDisplaySelection("win32", "mouse", false)).toBe("cursor")
+    expect(cliWindowDisplaySelection("win32", "mouse", true)).toBe("cursor")
+  })
+
+  it("leaves default Windows placement to the operating system", () => {
+    expect(cliWindowDisplaySelection("win32", "active-window", true)).toBeNull()
+  })
+
+  it("preserves active-window placement and cursor fallback on macOS", () => {
+    expect(cliWindowDisplaySelection("darwin", "active-window", true)).toBe(
+      "active-window"
+    )
+    expect(cliWindowDisplaySelection("darwin", "active-window", false)).toBe(
+      "cursor"
+    )
+  })
+
+  it("reserves the minimize shortcut for macOS", () => {
+    expect(minimizeWindowAccelerator("darwin")).toBe("Cmd+M")
+    expect(minimizeWindowAccelerator("win32")).toBeUndefined()
+    expect(minimizeWindowAccelerator("linux")).toBeUndefined()
+  })
+})
 
 describe("centeredWindowPosition", () => {
   it("centers a window within an offset display work area", () => {

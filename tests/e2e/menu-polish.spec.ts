@@ -492,6 +492,13 @@ test("recovery disables document commands while Close Window remains truthful", 
     path.join(os.tmpdir(), "pulse-md-recovery-menu-")
   )
   const app = await launchApplication(userData)
+  let applicationClosed = false
+  const closed = new Promise<void>((resolve) => {
+    app.once("close", () => {
+      applicationClosed = true
+      resolve()
+    })
+  })
   try {
     const page = await app.firstWindow()
     await page.locator(".cm-editor").waitFor()
@@ -518,8 +525,9 @@ test("recovery disables document commands while Close Window remains truthful", 
       })
     await clickMenuItem(app, "file-close-window")
     await expect.poll(() => app.windows().length).toBe(0)
+    if (process.platform !== "darwin") await closed
   } finally {
-    await exitApplication(app)
+    if (!applicationClosed) await exitApplication(app)
     await rm(userData, { force: true, recursive: true })
   }
 })

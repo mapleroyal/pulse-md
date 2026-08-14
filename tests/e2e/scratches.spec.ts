@@ -854,6 +854,10 @@ test("File menu creates scratches and backs a dirty pathless tab in place", asyn
       .toBe(marker)
 
     const autosaveMarker = "\nAutosaved through the scratch backing."
+    const persistedAutosaveMarker =
+      process.platform === "win32"
+        ? autosaveMarker.replaceAll("\n", "\r\n")
+        : autosaveMarker
     await page.locator(".cm-content").click()
     await page.keyboard.press("End")
     await page.keyboard.insertText(autosaveMarker)
@@ -863,7 +867,7 @@ test("File menu creates scratches and backs a dirty pathless tab in place", asyn
           readFile(path.join(scratchDirectory, savedScratch.fileName), "utf8"),
         { timeout: 5_000 }
       )
-      .toBe(`${marker}${autosaveMarker}`)
+      .toBe(`${marker}${persistedAutosaveMarker}`)
     await expect(page.locator(".document-tab[data-active]")).toHaveAttribute(
       "data-tab-id",
       pathlessTabId

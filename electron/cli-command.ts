@@ -410,7 +410,7 @@ function normalizePath(
 
   let resolvedPath: string
   try {
-    resolvedPath = value.startsWith("file://")
+    resolvedPath = /^file:\/\//i.test(value)
       ? path.resolve(fileURLToPath(value))
       : path.resolve(workingDirectory, value)
   } catch {
