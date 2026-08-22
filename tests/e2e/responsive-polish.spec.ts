@@ -10,7 +10,11 @@ import {
   test,
 } from "@playwright/test"
 
-import { exitApplication, openSettingsSection } from "./electron-helpers"
+import {
+  exitApplication,
+  openSettingsSection,
+  setWindowContentSize,
+} from "./electron-helpers"
 
 const projectRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -138,9 +142,7 @@ test("search and outline stay below the complete top chrome @renderer-isolated",
     ).toBeVisible()
     await checkOverlays()
 
-    await app.evaluate(({ BrowserWindow }) => {
-      BrowserWindow.getAllWindows()[0]?.setSize(480, 320)
-    })
+    await setWindowContentSize(app, 480, 320)
     await expect.poll(() => page.evaluate(() => innerWidth)).toBe(480)
 
     await page.mouse.move(240, 1)
@@ -228,9 +230,7 @@ test("Settings and specialized workspaces remain reachable at minimum size and m
   try {
     const page = await app.firstWindow()
     await page.locator(".cm-editor").waitFor()
-    await app.evaluate(({ BrowserWindow }) => {
-      BrowserWindow.getAllWindows()[0]?.setSize(480, 320)
-    })
+    await setWindowContentSize(app, 480, 320)
     await page.evaluate(() => window.pulseMd.previewWindowZoom(2))
     await expect.poll(() => page.evaluate(() => innerWidth)).toBe(240)
     await expect.poll(() => page.evaluate(() => innerHeight)).toBe(160)

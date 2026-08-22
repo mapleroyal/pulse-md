@@ -21,7 +21,11 @@ import {
 } from "@playwright/test"
 
 import { DEFAULT_APP_SETTINGS } from "../../src/shared/contracts"
-import { exitApplication, openSettingsSection } from "./electron-helpers"
+import {
+  exitApplication,
+  openSettingsSection,
+  setWindowContentSize,
+} from "./electron-helpers"
 import { seedScratchStore } from "./scratch-helpers"
 
 const projectRoot = path.resolve(
@@ -128,12 +132,14 @@ async function openWindowProfiles(page: Page) {
 }
 
 async function chooseOption(trigger: Locator, name: string) {
-  await trigger.click()
   const popup = trigger
     .page()
     .locator('[data-slot="select-content"][data-open]')
+  await expect(popup).toHaveCount(0)
+  await trigger.click()
   await expect(popup).toBeVisible()
   await popup.getByRole("option", { name, exact: true }).click()
+  await expect(popup).toHaveCount(0)
 }
 
 async function profileHeaderButtonGeometry(button: Locator) {
@@ -592,7 +598,7 @@ test("profile header actions compact symmetrically and open-profile guidance use
   try {
     const page = await app.firstWindow()
     await page.locator(".cm-editor").waitFor()
-    await setOrdinaryWindowSize(app, 900, 700)
+    await setWindowContentSize(app, 900, 700)
     await expect.poll(() => page.evaluate(() => innerWidth)).toBe(900)
 
     const initialWindowCount = app.windows().length

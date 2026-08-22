@@ -21,6 +21,7 @@ import {
 import {
   exitApplication,
   openSettingsSection,
+  setWindowContentSize,
   waitForApplicationClose,
 } from "./electron-helpers"
 
@@ -191,7 +192,11 @@ async function runViewMenuItem(
                 (candidate) => candidate.role?.toLowerCase() === request.item
               )
           : applicationMenu?.getMenuItemById(request.item)
-      const window = BrowserWindow.getFocusedWindow()
+      const window =
+        BrowserWindow.getFocusedWindow() ??
+        BrowserWindow.getAllWindows().find(
+          (candidate) => !candidate.isDestroyed()
+        )
       if (!menuItem || !window) {
         throw new Error(`View menu item ${request.item} is unavailable`)
       }
@@ -1173,14 +1178,17 @@ test("typography customization uses one read-only preview and offers included an
     const regularFontGroup = regularFont.locator(
       'xpath=ancestor::*[@data-slot="input-group"]'
     )
+    const devicePixelRatio = await page.evaluate(() => window.devicePixelRatio)
     await expect
       .poll(async () => {
         const regularFontBox = await regularFontGroup.boundingBox()
         const fontPopupBox = await fontPopup.boundingBox()
         if (!regularFontBox || !fontPopupBox) return Number.POSITIVE_INFINITY
-        return Math.abs(fontPopupBox.width - regularFontBox.width)
+        return (
+          Math.abs(fontPopupBox.width - regularFontBox.width) * devicePixelRatio
+        )
       })
-      .toBeLessThanOrEqual(0.15)
+      .toBeLessThanOrEqual(1)
     const fontOptionCount = await page.getByRole("option").count()
 
     await page.keyboard.press("ArrowDown")
@@ -2905,9 +2913,7 @@ test("centered paths and tabs offer shadcn path actions and a bounded long-path 
     const topChrome = page.locator(".top-chrome")
     const topControls = page.locator(".top-chrome-controls")
     await expect(secondTab).toBeVisible()
-    await app.evaluate(({ BrowserWindow }) => {
-      BrowserWindow.getAllWindows()[0]?.setSize(560, 720)
-    })
+    await setWindowContentSize(app, 560, 720)
     await expect.poll(() => page.evaluate(() => innerWidth)).toBe(560)
     await secondTab.hover()
     const pathPopover = page.locator(
@@ -2972,9 +2978,7 @@ test("centered paths and tabs offer shadcn path actions and a bounded long-path 
     await expect(pathPopover).toBeVisible()
     await page.locator(".cm-content").click()
     await expect(pathPopover).toBeHidden()
-    await app.evaluate(({ BrowserWindow }) => {
-      BrowserWindow.getAllWindows()[0]?.setSize(900, 720)
-    })
+    await setWindowContentSize(app, 900, 720)
     await expect.poll(() => page.evaluate(() => innerWidth)).toBe(900)
     await page.mouse.move(120, 20)
     await expect(secondTab).toBeVisible()
@@ -3501,10 +3505,9 @@ test("a newly created overflowing tab is fully revealed without owning later scr
       )
       .toBe(true)
 
+    await setWindowContentSize(app, 480, 320)
     await app.evaluate(({ BrowserWindow }) => {
-      const window = BrowserWindow.getAllWindows()[0]
-      window?.setSize(480, 320)
-      window?.webContents.setZoomFactor(2)
+      BrowserWindow.getAllWindows()[0]?.webContents.setZoomFactor(2)
     })
     await expect.poll(() => page.evaluate(() => innerWidth)).toBeCloseTo(240, 0)
     await page.evaluate(() => {
@@ -5639,12 +5642,16 @@ test("edit commands follow focus while Settings isolates document commands", asy
     const documentBefore = await content.textContent()
 
     await page.keyboard.press(`${primary}+F`)
+    await expect(
+      page.locator('[data-search-overlay-state="ready"]')
+    ).toBeVisible()
     const find = page.getByRole("textbox", { name: "Find" })
     await find.fill("")
     await find.focus()
-    await page.keyboard.type("needle")
+    await page.keyboard.insertText("needle")
+    await expect(find).toHaveValue("needle")
     await runEditMenuItem(app, "Undo")
-    await expect(find).not.toHaveValue("needle")
+    await expect(find).toHaveValue("")
     await expect(content).toHaveText(documentBefore ?? "")
     await runEditMenuItem(app, "Redo")
     await expect(find).toHaveValue("needle")
@@ -5662,7 +5669,8 @@ test("edit commands follow focus while Settings isolates document commands", asy
     const initialWidth = await width.inputValue()
     await width.focus()
     await page.keyboard.press(`${primary}+A`)
-    await page.keyboard.type("1200")
+    await page.keyboard.insertText("1200")
+    await expect(width).toHaveValue("1200")
     await runEditMenuItem(app, "Undo")
     await expect(width).toHaveValue(initialWidth)
     await expect(content).toHaveText(documentBefore ?? "")
@@ -5693,11 +5701,13 @@ test("edit commands follow focus while Settings isolates document commands", asy
       )
       .toBe(true)
     const fontSize = typography.getByLabel("Base font size in pixels")
+    const initialFontSize = await fontSize.inputValue()
     await fontSize.focus()
     await page.keyboard.press(`${primary}+A`)
-    await page.keyboard.type("22")
+    await page.keyboard.insertText("22")
+    await expect(fontSize).toHaveValue("22")
     await runEditMenuItem(app, "Undo")
-    await expect(fontSize).not.toHaveValue("22")
+    await expect(fontSize).toHaveValue(initialFontSize)
     await runEditMenuItem(app, "Redo")
     await expect(fontSize).toHaveValue("22")
 

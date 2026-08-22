@@ -10,6 +10,7 @@ import {
   test,
 } from "@playwright/test"
 
+import { isWindowsX64OnArm64 } from "../../scripts/e2e-worker-policy.mjs"
 import { exitApplication } from "./electron-helpers"
 
 const projectRoot = path.resolve(
@@ -21,6 +22,12 @@ const tableDemoFixturePath = path.join(
   "tests/e2e/fixtures/table-demo.md"
 )
 const selectAllKey = process.platform === "darwin" ? "Meta+a" : "Control+a"
+const windowsX64OnArm64 = isWindowsX64OnArm64()
+
+// This file's exhaustive keyboard sweeps make retained Playwright traces grow
+// beyond the x64 Node heap under Windows-on-Arm emulation. Native platforms
+// retain their usual failure traces.
+test.use({ trace: windowsX64OnArm64 ? "off" : "retain-on-failure" })
 
 const wideTableLines = [
   "| Phase | Items in phase | Cumulative item | Rate / hour | Seconds per item | Phase duration | Cumulative time | Cumulative units |",
@@ -846,8 +853,8 @@ test("wide tables keep keyboard selection and caret geometry stable", async () =
 
 test("table row boundaries and upward selection stay deterministic in table-demo", async () => {
   // The intentionally repeated, frame-settled selection sweeps take about 85s
-  // on Windows, before accounting for parallel-worker contention.
-  test.setTimeout(150_000)
+  // on native Windows and roughly twice as long under x64 emulation.
+  test.setTimeout(windowsX64OnArm64 ? 300_000 : 150_000)
 
   const userData = await mkdtemp(
     path.join(os.tmpdir(), "pulse-md-table-demo-navigation-e2e-")

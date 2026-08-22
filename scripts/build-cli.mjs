@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url"
 
 import { developmentCheckoutIdentity } from "./development-checkout-identity.mjs"
 import {
+  assertWindowsX64NodeArchitecture,
   windowsMsvcArchitecture,
   windowsMsvcComponent,
 } from "./windows-msvc.mjs"
@@ -175,6 +176,10 @@ if (
     `The native pmd CLI helper is not built on ${process.platform}.\n`
   )
   process.exit(0)
+}
+
+if (process.platform === "win32") {
+  assertWindowsX64NodeArchitecture(process.arch)
 }
 
 await mkdir(outputDirectory, { recursive: true })

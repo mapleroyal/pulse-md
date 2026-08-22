@@ -22,6 +22,11 @@ interface ExtraResource {
   to: string
 }
 
+interface TargetConfiguration {
+  arch?: string | string[]
+  target: string
+}
+
 interface BuilderConfiguration {
   appId?: string
   afterExtract?: string
@@ -58,7 +63,12 @@ interface BuilderConfiguration {
     runAfterFinish?: boolean
   }
   productName?: string
-  win?: { extraResources?: ExtraResource[]; icon?: string; signExts?: string[] }
+  win?: {
+    extraResources?: ExtraResource[]
+    icon?: string
+    signExts?: string[]
+    target?: string | TargetConfiguration | Array<string | TargetConfiguration>
+  }
 }
 
 const require = createRequire(import.meta.url)
@@ -135,6 +145,13 @@ describe("electron-builder configuration", () => {
       ])
       expect([png.readUInt8(24), png.readUInt8(25)]).toEqual([8, 6])
     }
+  })
+
+  it("pins every Windows package to x64", () => {
+    const expectedTarget = [{ arch: ["x64"], target: "nsis" }]
+
+    expect(builderConfiguration().win?.target).toEqual(expectedTarget)
+    expect(localBuilderConfiguration().win?.target).toEqual(expectedTarget)
   })
 
   it("keeps Markdown global and adds alternate text/code editing on macOS", async () => {

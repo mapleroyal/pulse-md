@@ -859,6 +859,19 @@ test("the final tab never creates a provisional tear-out window", async () => {
   try {
     const source = await app.firstWindow()
     await source.locator(".cm-editor").waitFor()
+    await source.waitForFunction(
+      () =>
+        performance.getEntriesByName("pmd:launch-transition-settled").length > 0
+    )
+    await setTabVisibility(app, source, "always")
+    await expect(source.locator(".top-chrome")).toHaveAttribute(
+      "data-pinned-tabs",
+      "true"
+    )
+    await expect(source.locator(".document-tab-strip")).toHaveAttribute(
+      "data-visible",
+      "true"
+    )
     await moveHeaderAwayFromCursor(app, source)
     const dragToken = await beginTearOut(source)
 

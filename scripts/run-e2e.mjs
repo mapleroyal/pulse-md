@@ -1,18 +1,23 @@
 import { spawn } from "node:child_process"
 import { createRequire } from "node:module"
 
+import { parallelE2eWorkers } from "./e2e-worker-policy.mjs"
+
 const require = createRequire(import.meta.url)
 const playwrightCli = require.resolve("@playwright/test/cli")
 const forwardedArguments = process.argv.slice(2)
+const parallelWorkers = parallelE2eWorkers()
 
 const phases = [
   {
-    description: "isolated renderer tests (4 workers)",
+    description: `isolated renderer tests (${parallelWorkers} ${parallelWorkers === 1 ? "worker" : "workers"})`,
     name: "parallel",
+    workers: parallelWorkers,
   },
   {
     description: "native OS and shared-resource tests (1 worker)",
     name: "serial",
+    workers: 1,
   },
 ]
 
@@ -26,7 +31,7 @@ for (const signal of ["SIGINT", "SIGTERM"]) {
   })
 }
 
-function runPhase({ description, name }) {
+function runPhase({ description, name, workers }) {
   console.log(`\nE2E phase: ${description}`)
   return new Promise((resolve, reject) => {
     const child = spawn(
@@ -37,7 +42,7 @@ function runPhase({ description, name }) {
         ...forwardedArguments,
         "--pass-with-no-tests",
         `--output=test-results/${name}`,
-        `--workers=${name === "parallel" ? 4 : 1}`,
+        `--workers=${workers}`,
       ],
       {
         env: { ...process.env, PMD_E2E_PHASE: name },

@@ -12,7 +12,7 @@ import {
 } from "@playwright/test"
 
 import { ScratchStore } from "../../electron/scratch-store"
-import { exitApplication } from "./electron-helpers"
+import { exitApplication, setWindowContentSize } from "./electron-helpers"
 import { seedScratchStore } from "./scratch-helpers"
 
 const projectRoot = path.resolve(
@@ -259,9 +259,7 @@ test("scratch picker keeps its selected result actions reachable at minimum size
   try {
     const page = await app.firstWindow()
     await page.locator(".cm-editor").waitFor()
-    await app.evaluate(({ BrowserWindow }) => {
-      BrowserWindow.getAllWindows()[0]?.setSize(480, 320)
-    })
+    await setWindowContentSize(app, 480, 320)
     await expect.poll(() => page.evaluate(() => innerWidth)).toBe(480)
     await expect.poll(() => page.evaluate(() => innerHeight)).toBe(320)
     await page.keyboard.press(`${primaryModifier}+P`)
@@ -432,6 +430,14 @@ test("unavailable profile references disable only scratch deletion", async () =>
     args: [projectRoot, `--user-data-dir=${userData}`],
     cwd: projectRoot,
   })
+  const releaseInventoryRefresh = () =>
+    app.evaluate(() => {
+      const testGlobal = globalThis as typeof globalThis & {
+        releaseScratchReferenceRefresh?: () => void
+      }
+      testGlobal.releaseScratchReferenceRefresh?.()
+      delete testGlobal.releaseScratchReferenceRefresh
+    })
 
   try {
     const page = await app.firstWindow()
@@ -458,19 +464,53 @@ test("unavailable profile references disable only scratch deletion", async () =>
         hasText: "Profile references could not be checked.",
       })
     ).toBeVisible()
-    await expect(
-      workspace.getByRole("button", { name: "Open", exact: true })
-    ).toBeEnabled()
+    const open = workspace.getByRole("button", { name: "Open", exact: true })
+    await expect(open).toBeEnabled()
+    const picker = workspace.locator("[data-scratch-picker]")
+    await expect(picker).toHaveAttribute("data-results-current", "true")
     const title = workspace.getByRole("textbox", { name: "Title" })
     await expect(title).toBeEnabled()
-    await title.fill("Editable while references recover")
+    await app.evaluate(({ ipcMain }, degradedInventory) => {
+      const testGlobal = globalThis as typeof globalThis & {
+        releaseScratchReferenceRefresh?: () => void
+      }
+      let releaseRefresh: () => void = () => undefined
+      const refreshGate = new Promise<void>((resolve) => {
+        releaseRefresh = resolve
+      })
+      testGlobal.releaseScratchReferenceRefresh = releaseRefresh
+      ipcMain.removeHandler("pulse-md:get-scratches")
+      ipcMain.handle("pulse-md:get-scratches", async () => {
+        await refreshGate
+        return {
+          ...degradedInventory,
+          profileReferencesAvailable: false,
+        }
+      })
+    }, inventory)
+    await page.evaluate(() => window.dispatchEvent(new Event("focus")))
+    await expect(picker).toHaveAttribute("data-results-current", "false")
+    await expect(open).toBeDisabled()
+    await expect(title).toBeEnabled()
+    await title.focus()
+    await title.press(`${primaryModifier}+A`)
+    const updatedTitle = "Editable while references recover"
+    await title.pressSequentially(updatedTitle)
+    await expect(title).toHaveValue(updatedTitle)
     await expect(
       workspace.getByRole("button", { name: "Save Details" })
     ).toBeEnabled()
     await expect(
       workspace.getByRole("button", { name: "Delete Alpha" })
     ).toBeDisabled()
+    await releaseInventoryRefresh()
+    await expect(picker).toHaveAttribute("data-results-current", "true")
+    await expect(open).toBeEnabled()
+    await expect(
+      workspace.getByRole("button", { name: "Delete Alpha" })
+    ).toBeDisabled()
   } finally {
+    await releaseInventoryRefresh().catch(() => undefined)
     await exitApplication(app)
     await rm(userData, { force: true, recursive: true })
   }
@@ -548,9 +588,7 @@ test("scratch delete failures stay inside their viewport-bounded confirmation", 
   try {
     const page = await app.firstWindow()
     await page.locator(".cm-editor").waitFor()
-    await app.evaluate(({ BrowserWindow }) => {
-      BrowserWindow.getAllWindows()[0]?.setSize(480, 320)
-    })
+    await setWindowContentSize(app, 480, 320)
     await page.evaluate(() => window.pulseMd.previewWindowZoom(2))
     await expect.poll(() => page.evaluate(() => innerWidth)).toBe(240)
     await expect.poll(() => page.evaluate(() => innerHeight)).toBe(160)
@@ -679,9 +717,7 @@ test("narrow Scratch settings keep details, profile context, and preview reachab
   try {
     const page = await app.firstWindow()
     await page.locator(".cm-editor").waitFor()
-    await app.evaluate(({ BrowserWindow }) => {
-      BrowserWindow.getAllWindows()[0]?.setSize(480, 640)
-    })
+    await setWindowContentSize(app, 480, 640)
     await expect.poll(() => page.evaluate(() => innerWidth)).toBe(480)
     await page.keyboard.press(settingsShortcut)
     const settings = page.getByRole("dialog", { name: "Settings" })

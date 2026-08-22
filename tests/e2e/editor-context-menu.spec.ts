@@ -740,7 +740,7 @@ test("fenced code spelling actions target the complete compound token @renderer-
   }
 })
 
-test("Command-right-click on a local document link shows only Open in New Tab", async () => {
+test("primary-modifier-right-click on a local document link shows only Open in New Tab", async () => {
   const testDirectory = await createTestDirectory()
   const userData = path.join(testDirectory, "user-data")
   const sourcePath = path.join(testDirectory, "source.md")
@@ -778,10 +778,10 @@ test("Command-right-click on a local document link shows only Open in New Tab", 
     await expect
       .poll(() => app.evaluate(({ clipboard }) => clipboard.readText()))
       .toBe("destination.md")
-
+    await expect(editorMenu(page)).toHaveCount(0)
     await link.click({
       button: "right",
-      modifiers: [process.platform === "darwin" ? "Meta" : "Control"],
+      modifiers: ["ControlOrMeta"],
     })
     const menu = editorMenu(page)
     await expect(menu).toHaveAttribute(

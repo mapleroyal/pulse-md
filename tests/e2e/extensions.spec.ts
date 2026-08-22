@@ -662,7 +662,13 @@ test("optional Markdown extensions preview safely and remain settings-controlled
 
     await page.keyboard.press(settingsShortcut)
     await page.getByRole("button", { name: "Extensions", exact: true }).click()
-    await page.getByRole("switch", { name: "Sanitized HTML" }).click()
+    const sanitizedHtml = page.getByRole("switch", {
+      name: "Sanitized HTML",
+    })
+    await expect(sanitizedHtml).toBeChecked()
+    await sanitizedHtml.click()
+    await expect(sanitizedHtml).not.toBeChecked()
+    await expect(page.locator(".cm-md-html-block")).toHaveCount(0)
     await page
       .getByRole("dialog", { name: "Settings" })
       .getByRole("button", { name: "Done" })

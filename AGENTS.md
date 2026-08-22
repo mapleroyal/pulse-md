@@ -18,6 +18,7 @@ Repository architecture and UI implementation conventions live in `ARCHITECTURE.
 # Delivery Verification
 
 - After the final code changes and before wrapping up an implementation task, run `npm run install:local` and complete any platform-specific install instruction it emits. Keep exactly one canonical **Pulse MD** copy at the stable platform location, then verify the relevant behavior in that installed copy. Development-server and project-directory Electron checks are useful while iterating, but they do not replace installed-build verification.
+- On Windows, the current development and packaging baseline is x64, including on Windows-on-Arm. Confirm `node -p process.arch` reports `x64` before building or installing. When PowerShell execution policy blocks `npm.ps1`, use `npm.cmd` for the corresponding repository command.
 - On macOS, use the explicit maintainer installed-candidate lane (`npm run install:mac:dev`) when a change needs stricter verification of installed integrations or Launch Services registration. That command creates a non-distributable ad-hoc-signed candidate and replaces the same canonical `/Applications/Pulse MD.app`; it does not create a second product identity. Do not distribute its output.
 - If the current environment cannot package or install the target app, state that limitation explicitly when handing off the work.
 

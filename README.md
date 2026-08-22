@@ -6,8 +6,8 @@
 
 Pulse MD is a fast, local-first desktop Markdown reader and editor. It combines
 an editable live-rendered document with a deliberate Raw Markdown mode, while
-keeping the surrounding interface quiet. macOS is the currently verified
-platform; source packaging targets also exist for Windows and Linux.
+keeping the surrounding interface quiet. macOS and Windows x64 are currently
+verified; a source packaging target also exists for Linux.
 
 Pulse MD 1.0 is a personal source-available project. The source is provided
 as-is for noncommercial use; there is no support, maintenance, compatibility,
@@ -70,6 +70,11 @@ operating systems before they are distributed.
 Use Node.js 24 LTS when possible (Node.js 22.13 or newer is supported). Native
 toolchain prerequisites and platform-specific commands are in
 [Building from source](docs/BUILDING.md).
+
+The supported Windows build is x64, including on Windows-on-Arm: install x64
+Node and confirm `node -p process.arch` prints `x64`. If a Restricted
+PowerShell policy selects and blocks `npm.ps1`, invoke the same commands with
+`npm.cmd`.
 
 ## Command line
 

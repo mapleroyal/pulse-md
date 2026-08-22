@@ -40,7 +40,7 @@
     "cli:dev": "node scripts/cli-development.mjs",
     "bundle:check": "node scripts/verify-csp.mjs index.html dist/index.html && node scripts/report-bundle.mjs --check",
     "bundle:report": "node scripts/report-bundle.mjs",
-    "bundle:test": "node --test scripts/report-bundle.test.mjs scripts/verify-csp.test.mjs scripts/macos-icon-assets.test.mjs scripts/build-release.test.mjs scripts/after-extract.test.mjs scripts/electron-download-config.test.mjs scripts/windows-installer-launch.test.mjs scripts/windows-msvc.test.mjs",
+    "bundle:test": "node --test scripts/report-bundle.test.mjs scripts/verify-csp.test.mjs scripts/macos-icon-assets.test.mjs scripts/build-release.test.mjs scripts/after-extract.test.mjs scripts/electron-download-config.test.mjs scripts/e2e-worker-policy.test.mjs scripts/windows-installer-launch.test.mjs scripts/windows-msvc.test.mjs",
     "check": "npm run format:check && npm run lint && npm test && npm run test:cli && npm run bundle:test && npm run build && npm run bundle:check",
     "check:full": "npm run check && npm run test:e2e",
     "benchmark:launch": "node scripts/benchmark-launch.mjs",
@@ -66,7 +66,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@base-ui/react": "^1.6.0",
+    "@base-ui/react": "^1.7.0",
     "@codemirror/autocomplete": "^6.20.3",
     "@codemirror/commands": "^6.10.4",
     "@codemirror/lang-markdown": "^6.5.0",
@@ -134,7 +134,7 @@
     "concurrently": "^9.2.4",
     "cross-env": "^10.1.0",
     "electron": "^43.4.0",
-    "electron-builder": "^26.15.3",
+    "electron-builder": "^26.15.6",
     "esbuild": "^0.28.1",
     "eslint": "^10",
     "eslint-plugin-react-hooks": "^7.1.1",

@@ -621,8 +621,7 @@ export default function SettingsDialog({
   )
 
   React.useLayoutEffect(() => {
-    let restoreFrame: number | null = null
-    let settleFrame: number | null = null
+    let restoreTimer: number | null = null
     const keyboardShortcutsWasOpen = keyboardShortcutsWasOpenRef.current
     keyboardShortcutsWasOpenRef.current = keyboardShortcutsOpen
     if (!open) {
@@ -642,26 +641,79 @@ export default function SettingsDialog({
         restoreKeyboardShortcutsFocusRef.current = true
         const restoreScrollTop = dialogScrollTopRef.current
         settingsScroll.scrollTop = restoreScrollTop
-        restoreFrame = requestAnimationFrame(() => {
-          settleFrame = requestAnimationFrame(() => {
-            if (
-              keyboardShortcutsWasOpenRef.current ||
-              !settingsScroll.isConnected
-            ) {
+        dialogContentRef.current?.focus({ preventScroll: true })
+        settingsScroll.scrollTop = restoreScrollTop
+        const restoreStartedAt = performance.now()
+        const restoreTriggerFocus = () => {
+          restoreTimer = null
+          if (
+            !open ||
+            keyboardShortcutsWasOpenRef.current ||
+            !settingsScroll.isConnected
+          ) {
+            restoreKeyboardShortcutsFocusRef.current = false
+            return
+          }
+
+          const trigger = keyboardShortcutsTriggerRef.current
+          const settingsSearchItem = trigger?.closest<HTMLElement>(
+            "[data-settings-search-item]"
+          )
+          if (settingsSearchItem?.hidden) {
+            restoreKeyboardShortcutsFocusRef.current = false
+            return
+          }
+          const activeElement = document.activeElement
+          settingsScroll.scrollTop = restoreScrollTop
+          if (activeElement === trigger) {
+            restoreKeyboardShortcutsFocusRef.current = false
+            return
+          }
+          if (
+            activeElement !== dialogContentRef.current &&
+            activeElement !== document.body
+          ) {
+            restoreKeyboardShortcutsFocusRef.current = false
+            return
+          }
+
+          const triggerStyle = trigger?.isConnected
+            ? getComputedStyle(trigger)
+            : null
+          if (
+            triggerStyle?.display !== "none" &&
+            triggerStyle?.visibility === "visible" &&
+            (trigger?.getClientRects().length ?? 0) > 0
+          ) {
+            trigger?.focus({ preventScroll: true })
+            settingsScroll.scrollTop = restoreScrollTop
+            if (document.activeElement === trigger) {
+              restoreKeyboardShortcutsFocusRef.current = false
               return
             }
-            keyboardShortcutsTriggerRef.current?.focus({ preventScroll: true })
-            settingsScroll.scrollTop = restoreScrollTop
-            restoreKeyboardShortcutsFocusRef.current = false
-          })
-        })
+          }
+
+          // On emulated Chromium the settings surface can remain hidden for
+          // more than one frame after the route changes. Poll without making
+          // animation-frame delivery the only path to restored focus.
+          if (
+            !keyboardShortcutsWasOpenRef.current &&
+            settingsScroll.isConnected &&
+            performance.now() - restoreStartedAt < 1_500
+          ) {
+            restoreTimer = window.setTimeout(restoreTriggerFocus, 16)
+            return
+          }
+          restoreKeyboardShortcutsFocusRef.current = false
+        }
+        restoreTimer = window.setTimeout(restoreTriggerFocus, 0)
       } else {
         settingsScroll.scrollTop = dialogScrollTopRef.current
       }
     }
     return () => {
-      if (restoreFrame !== null) cancelAnimationFrame(restoreFrame)
-      if (settleFrame !== null) cancelAnimationFrame(settleFrame)
+      if (restoreTimer !== null) window.clearTimeout(restoreTimer)
+      restoreKeyboardShortcutsFocusRef.current = false
     }
   }, [keyboardShortcutsOpen, open])
 

@@ -13542,7 +13542,15 @@ function registerIpc(): void {
         throw new TypeError("Invalid window zoom change")
       }
       const supportedZoomFactor = clampZoomFactor(zoomFactor)
-      applyWindowZoom(win, supportedZoomFactor)
+      // Renderer resize reports can arrive after a newer native accelerator
+      // step. Reapplying an already-supported report to its source window
+      // would roll that newer step back; only correct the source when the
+      // renderer actually reported an out-of-range factor.
+      if (supportedZoomFactor !== zoomFactor) {
+        applyWindowZoom(win, supportedZoomFactor)
+      } else {
+        positionMacWindowButtons(win, supportedZoomFactor)
+      }
       if (persist) persistWindowZoomFactor(supportedZoomFactor, win.id)
     }
   )

@@ -14,7 +14,11 @@ import {
   DEFAULT_APP_SETTINGS,
   SYNTAX_THEME_IDS,
 } from "../../src/shared/contracts"
-import { exitApplication, openSettingsSection } from "./electron-helpers"
+import {
+  exitApplication,
+  openSettingsSection,
+  setWindowContentSize,
+} from "./electron-helpers"
 
 const projectRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -904,9 +908,7 @@ test("cold forward and reverse scrolling through rendered extensions keeps visib
 
   try {
     const page = await fixture.app.firstWindow()
-    await fixture.app.evaluate(({ BrowserWindow }) => {
-      BrowserWindow.getAllWindows()[0]?.setSize(1200, 900)
-    })
+    await setWindowContentSize(fixture.app, 1200, 900)
     const scroller = page.locator(".cm-scroller")
     await page.locator(".cm-editor").waitFor()
     await page.keyboard.press("Escape")

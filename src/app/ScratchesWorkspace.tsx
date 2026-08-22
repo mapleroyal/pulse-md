@@ -218,12 +218,19 @@ export function ScratchesWorkspace({
     loaded,
     loading,
     profileReferencesAvailable,
+    resolvedQuery,
+    resolvedSort,
     current: resultsCurrent,
     refresh,
   } = useScratchInventory({ getScratches, query, sort })
 
   const busy = pendingAction !== null
   const initialLoading = loading && !loaded
+  const detailsInteractionDisabled =
+    !loaded ||
+    inventoryError !== null ||
+    resolvedQuery !== query ||
+    resolvedSort !== sort
   const operationBlocked = busy || deleteTarget !== null || initialLoading
   const hasDetailsDrafts = detailsDrafts.size > 0
   const navigationBlocked =
@@ -577,13 +584,13 @@ export function ScratchesWorkspace({
                   </Tooltip>
                 </>
               )}
-              renderDetails={(scratch, interactionDisabled) =>
+              renderDetails={(scratch) =>
                 (() => {
                   const draft = detailsDrafts.get(scratch.scratchId)
                   return (
                     <ScratchDetailsForm
                       key={scratch.scratchId}
-                      busy={busy || interactionDisabled}
+                      busy={busy || detailsInteractionDisabled}
                       fileName={draft?.fileName ?? scratch.fileName}
                       pendingAction={pendingAction}
                       profileReferencesAvailable={profileReferencesAvailable}

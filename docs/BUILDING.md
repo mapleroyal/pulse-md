@@ -8,8 +8,11 @@ supported), then install the native prerequisites for the host:
 
 - **macOS:** Xcode 26 or newer. Every macOS package compiles the checked-in
   Icon Composer document so the installed icon follows the system appearance.
-- **Windows:** Visual Studio 2022 Build Tools with **Desktop development with
-  C++**.
+- **Windows:** the x64 Node.js distribution, including on Windows-on-Arm, plus
+  Visual Studio 2022 Build Tools with **Desktop development with C++**. Confirm
+  `node -p process.arch` prints `x64`; Windows ARM packages are not part of the
+  current development baseline. If a Restricted PowerShell policy blocks
+  `npm.ps1`, use `npm.cmd` for every documented `npm` command.
 - **Linux:** a C compiler available as `cc` (`build-essential` or the
   distribution equivalent).
 

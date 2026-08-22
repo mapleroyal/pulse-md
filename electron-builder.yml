@@ -119,7 +119,9 @@ win:
     - from: dist-native/win32/bin/pmd.exe
       to: bin/pmd.exe
   target:
-    - nsis
+    - target: nsis
+      arch:
+        - x64
   artifactName: ${productName}-${version}-${arch}.${ext}
 nsis:
   # electron-builder only installs NSIS file associations machine-wide.

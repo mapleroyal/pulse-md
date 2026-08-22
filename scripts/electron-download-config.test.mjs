@@ -13,6 +13,7 @@ const builderRequire = createRequire(
   require.resolve("app-builder-lib/out/util/electronGet")
 )
 const electronGet = builderRequire("@electron/get")
+const { compute7zCompressArgs } = require("app-builder-lib/out/targets/archive")
 const electronMetadata = require("electron/package.json")
 const electronChecksums = require("electron/checksums.json")
 
@@ -58,6 +59,15 @@ async function captureEffectiveDownload(configuration, platformName, arch) {
   assert.ok(captured, "electron-builder did not reach @electron/get")
   return captured
 }
+
+test("NSIS archives use a filter supported by the bundled extractor", () => {
+  const args = compute7zCompressArgs("7z", {
+    compression: "maximum",
+    installTimeDecodable: true,
+  })
+  const filters = args.filter((argument) => argument.startsWith("-mf="))
+  assert.deepEqual(filters, ["-mf=BCJ"])
+})
 
 test("release and source builds pass pinned checksums to @electron/get", async () => {
   for (const configPath of [

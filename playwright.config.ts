@@ -1,5 +1,7 @@
 import { defineConfig } from "@playwright/test"
 
+import { parallelE2eWorkers } from "./scripts/e2e-worker-policy.mjs"
+
 const PARALLEL_E2E_TESTS = [
   "**/extensions.spec.ts",
   "**/math.spec.ts",
@@ -13,6 +15,7 @@ const PARALLEL_E2E_TESTS = [
   "**/theme-picker.spec.ts",
 ]
 const RENDERER_ISOLATED_TAG = /@renderer-isolated/
+const parallelWorkers = parallelE2eWorkers()
 
 const phase = process.env.PMD_E2E_PHASE
 if (phase !== undefined && phase !== "parallel" && phase !== "serial") {
@@ -54,5 +57,5 @@ export default defineConfig({
   // parallelizes only tests audited not to depend on those global resources,
   // then runs the remainder alone. Keep direct Playwright invocations serial
   // so focused debugging retains the same isolation as before.
-  workers: phase === "parallel" ? 4 : 1,
+  workers: phase === "parallel" ? parallelWorkers : 1,
 })
