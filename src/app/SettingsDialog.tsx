@@ -140,6 +140,7 @@ const sourceIndentationLabels: Record<SourceIndentation, string> = {
 
 interface SettingsDialogProps {
   activeScheme: ResolvedAppearance
+  backgroundEffectSupported: boolean
   keyboardShortcutsOpen: boolean
   nestedDialog?: React.ReactNode
   settings: AppSettings
@@ -464,6 +465,7 @@ function parsedInteger(value: string, fallback: number) {
 
 export default function SettingsDialog({
   activeScheme,
+  backgroundEffectSupported,
   keyboardShortcutsOpen,
   nestedDialog,
   settings,
@@ -507,6 +509,11 @@ export default function SettingsDialog({
   const [previewSchemeOverride, setPreviewSchemeOverride] =
     React.useState<ResolvedAppearance | null>(null)
   const previewScheme = previewSchemeOverride ?? activeScheme
+  const topControlsPosition = platform === "win32" ? "top-left" : "top-right"
+  const topControlsPositionLabel =
+    platform === "win32" ? "Top-Left" : "Top-Right"
+  const backgroundEffectControlsEnabled =
+    backgroundEffectSupported && draftSettings.backgroundEffect.enabled
   const [isSaving, setIsSaving] = React.useState(false)
   const [saveError, setSaveError] = React.useState<string | null>(null)
   const [settingsTransferOperation, setSettingsTransferOperation] =
@@ -1586,7 +1593,7 @@ export default function SettingsDialog({
             </CollapsibleContent>
           </Collapsible>
 
-          {platform === "darwin" ? (
+          {platform !== "linux" ? (
             <Collapsible
               className="rounded-3xl border border-border/70"
               data-settings-search-section="Transparency and Blur"
@@ -1632,15 +1639,24 @@ export default function SettingsDialog({
                     id="background-effect-enabled"
                     aria-label="Window transparency & blur"
                     checked={draftSettings.backgroundEffect.enabled}
+                    disabled={!backgroundEffectSupported}
                     onCheckedChange={(enabled) =>
                       updateBackgroundEffect({ enabled })
                     }
                   />
                 </Field>
 
+                {platform === "win32" && !backgroundEffectSupported ? (
+                  <FieldDescription>
+                    System backdrops are unavailable on this Windows release.
+                    Pulse MD remains opaque; Windows 11 22H2 or later is
+                    required.
+                  </FieldDescription>
+                ) : null}
+
                 <div
                   className="grid gap-3 rounded-2xl border border-border/60 p-3"
-                  data-disabled={!draftSettings.backgroundEffect.enabled}
+                  data-disabled={!backgroundEffectControlsEnabled}
                 >
                   <div>
                     <p className="text-sm font-medium">Translucent Surfaces</p>
@@ -1657,7 +1673,7 @@ export default function SettingsDialog({
                         defaultValue={
                           DEFAULT_APP_SETTINGS.backgroundEffect[setting]
                         }
-                        disabled={!draftSettings.backgroundEffect.enabled}
+                        disabled={!backgroundEffectControlsEnabled}
                         htmlFor={`background-effect-${setting}`}
                         label={`${label.toLowerCase()} translucency`}
                         value={draftSettings.backgroundEffect[setting]}
@@ -1674,7 +1690,7 @@ export default function SettingsDialog({
                         id={`background-effect-${setting}`}
                         aria-label={label}
                         checked={draftSettings.backgroundEffect[setting]}
-                        disabled={!draftSettings.backgroundEffect.enabled}
+                        disabled={!backgroundEffectControlsEnabled}
                         onCheckedChange={(enabled) =>
                           updateBackgroundEffect({ [setting]: enabled })
                         }
@@ -1684,14 +1700,14 @@ export default function SettingsDialog({
                 </div>
 
                 <Field
-                  data-disabled={!draftSettings.backgroundEffect.enabled}
+                  data-disabled={!backgroundEffectControlsEnabled}
                   orientation="vertical"
                 >
                   <ResettableFieldLabel
                     defaultValue={
                       DEFAULT_APP_SETTINGS.backgroundEffect.translucency
                     }
-                    disabled={!draftSettings.backgroundEffect.enabled}
+                    disabled={!backgroundEffectControlsEnabled}
                     htmlFor="background-translucency"
                     label="background translucency"
                     value={draftSettings.backgroundEffect.translucency}
@@ -1711,7 +1727,7 @@ export default function SettingsDialog({
                       <Slider
                         id="background-translucency"
                         aria-label="Background translucency"
-                        disabled={!draftSettings.backgroundEffect.enabled}
+                        disabled={!backgroundEffectControlsEnabled}
                         max={MAX_BACKGROUND_TRANSLUCENCY_PERCENT}
                         min={MIN_BACKGROUND_TRANSLUCENCY_PERCENT}
                         step={BACKGROUND_TRANSLUCENCY_PERCENT_STEP}
@@ -1739,7 +1755,7 @@ export default function SettingsDialog({
                         <Input
                           aria-label="Background translucency percentage"
                           className="pr-7 text-right tabular-nums"
-                          disabled={!draftSettings.backgroundEffect.enabled}
+                          disabled={!backgroundEffectControlsEnabled}
                           inputMode="numeric"
                           max={MAX_BACKGROUND_TRANSLUCENCY_PERCENT}
                           min={MIN_BACKGROUND_TRANSLUCENCY_PERCENT}
@@ -1777,87 +1793,98 @@ export default function SettingsDialog({
                   </FieldContent>
                 </Field>
 
-                <Field
-                  data-disabled={!draftSettings.backgroundEffect.enabled}
-                  orientation="vertical"
-                >
-                  <ResettableFieldLabel
-                    defaultValue={
-                      DEFAULT_APP_SETTINGS.backgroundEffect.blurRadius
-                    }
-                    disabled={!draftSettings.backgroundEffect.enabled}
-                    htmlFor="background-blur-radius"
-                    label="background blur radius"
-                    value={draftSettings.backgroundEffect.blurRadius}
-                    onReset={() => {
-                      const blurRadius =
-                        DEFAULT_APP_SETTINGS.backgroundEffect.blurRadius
-                      setBackgroundBlurRadiusInput(
-                        formatBackgroundBlurRadius(blurRadius)
-                      )
-                      updateBackgroundEffect({ blurRadius })
-                    }}
+                {platform === "darwin" ? (
+                  <Field
+                    data-disabled={!backgroundEffectControlsEnabled}
+                    orientation="vertical"
                   >
-                    Blur Radius
-                  </ResettableFieldLabel>
-                  <FieldContent>
-                    <div className="settings-input-pair grid grid-cols-[minmax(0,1fr)_5.5rem] items-center gap-3">
-                      <Slider
-                        id="background-blur-radius"
-                        aria-label="Background blur radius"
-                        disabled={!draftSettings.backgroundEffect.enabled}
-                        max={MAX_BACKGROUND_BLUR_RADIUS_VALUE}
-                        min={MIN_BACKGROUND_BLUR_RADIUS_VALUE}
-                        step={BACKGROUND_BLUR_RADIUS_STEP}
-                        value={[draftSettings.backgroundEffect.blurRadius]}
-                        onValueChange={(value) => {
-                          const blurRadius = clampBackgroundBlurRadius(
-                            typeof value === "number"
-                              ? value
-                              : (value[0] ??
-                                  draftSettings.backgroundEffect.blurRadius)
-                          )
-                          setBackgroundBlurRadiusInput(String(blurRadius))
-                          updateBackgroundEffect({ blurRadius })
-                        }}
-                      />
-                      <div className="relative">
-                        <Input
-                          aria-label="Background blur radius value"
-                          className="pr-7 text-right tabular-nums"
-                          disabled={!draftSettings.backgroundEffect.enabled}
-                          inputMode="numeric"
+                    <ResettableFieldLabel
+                      defaultValue={
+                        DEFAULT_APP_SETTINGS.backgroundEffect.blurRadius
+                      }
+                      disabled={!backgroundEffectControlsEnabled}
+                      htmlFor="background-blur-radius"
+                      label="background blur radius"
+                      value={draftSettings.backgroundEffect.blurRadius}
+                      onReset={() => {
+                        const blurRadius =
+                          DEFAULT_APP_SETTINGS.backgroundEffect.blurRadius
+                        setBackgroundBlurRadiusInput(
+                          formatBackgroundBlurRadius(blurRadius)
+                        )
+                        updateBackgroundEffect({ blurRadius })
+                      }}
+                    >
+                      Blur Radius
+                    </ResettableFieldLabel>
+                    <FieldContent>
+                      <div className="settings-input-pair grid grid-cols-[minmax(0,1fr)_5.5rem] items-center gap-3">
+                        <Slider
+                          id="background-blur-radius"
+                          aria-label="Background blur radius"
+                          disabled={!backgroundEffectControlsEnabled}
                           max={MAX_BACKGROUND_BLUR_RADIUS_VALUE}
                           min={MIN_BACKGROUND_BLUR_RADIUS_VALUE}
                           step={BACKGROUND_BLUR_RADIUS_STEP}
-                          type="number"
-                          value={backgroundBlurRadiusInput}
-                          onBlur={commitBackgroundBlurRadiusInput}
-                          onChange={(event) => {
-                            const value = event.currentTarget.value
-                            setBackgroundBlurRadiusInput(value)
-                            const parsed = Number(value)
-                            if (
-                              value.trim() !== "" &&
-                              Number.isInteger(parsed) &&
-                              parsed >= MIN_BACKGROUND_BLUR_RADIUS_VALUE &&
-                              parsed <= MAX_BACKGROUND_BLUR_RADIUS_VALUE
-                            ) {
-                              updateBackgroundEffect({ blurRadius: parsed })
-                            }
-                          }}
-                          onKeyDown={(event) => {
-                            if (event.key === "Enter")
-                              event.currentTarget.blur()
+                          value={[draftSettings.backgroundEffect.blurRadius]}
+                          onValueChange={(value) => {
+                            const blurRadius = clampBackgroundBlurRadius(
+                              typeof value === "number"
+                                ? value
+                                : (value[0] ??
+                                    draftSettings.backgroundEffect.blurRadius)
+                            )
+                            setBackgroundBlurRadiusInput(String(blurRadius))
+                            updateBackgroundEffect({ blurRadius })
                           }}
                         />
-                        <span className="pointer-events-none absolute inset-y-0 right-2 flex items-center text-xs text-muted-foreground">
-                          px
-                        </span>
+                        <div className="relative">
+                          <Input
+                            aria-label="Background blur radius value"
+                            className="pr-7 text-right tabular-nums"
+                            disabled={!backgroundEffectControlsEnabled}
+                            inputMode="numeric"
+                            max={MAX_BACKGROUND_BLUR_RADIUS_VALUE}
+                            min={MIN_BACKGROUND_BLUR_RADIUS_VALUE}
+                            step={BACKGROUND_BLUR_RADIUS_STEP}
+                            type="number"
+                            value={backgroundBlurRadiusInput}
+                            onBlur={commitBackgroundBlurRadiusInput}
+                            onChange={(event) => {
+                              const value = event.currentTarget.value
+                              setBackgroundBlurRadiusInput(value)
+                              const parsed = Number(value)
+                              if (
+                                value.trim() !== "" &&
+                                Number.isInteger(parsed) &&
+                                parsed >= MIN_BACKGROUND_BLUR_RADIUS_VALUE &&
+                                parsed <= MAX_BACKGROUND_BLUR_RADIUS_VALUE
+                              ) {
+                                updateBackgroundEffect({ blurRadius: parsed })
+                              }
+                            }}
+                            onKeyDown={(event) => {
+                              if (event.key === "Enter")
+                                event.currentTarget.blur()
+                            }}
+                          />
+                          <span className="pointer-events-none absolute inset-y-0 right-2 flex items-center text-xs text-muted-foreground">
+                            px
+                          </span>
+                        </div>
                       </div>
-                    </div>
-                  </FieldContent>
-                </Field>
+                    </FieldContent>
+                  </Field>
+                ) : (
+                  <Field orientation="vertical">
+                    <FieldLabel>Blur Radius</FieldLabel>
+                    <FieldDescription>
+                      Windows manages blur strength for the system backdrop, so
+                      it is not adjustable in Pulse MD. System backdrops require
+                      Windows 11 22H2 or later; older releases remain opaque.
+                    </FieldDescription>
+                  </Field>
+                )}
 
                 <Field
                   className="items-center! rounded-2xl border border-border/60 p-3"
@@ -1868,6 +1895,7 @@ export default function SettingsDialog({
                       defaultValue={
                         DEFAULT_APP_SETTINGS.launchTransition.enabled
                       }
+                      disabled={!backgroundEffectSupported}
                       htmlFor="launch-transition-enabled"
                       label="launch transition"
                       value={draftSettings.launchTransition.enabled}
@@ -1886,6 +1914,7 @@ export default function SettingsDialog({
                       id="launch-transition-enabled"
                       aria-label="Launch transition"
                       checked={draftSettings.launchTransition.enabled}
+                      disabled={!backgroundEffectSupported}
                       onCheckedChange={(enabled) =>
                         updateLaunchTransition({ enabled })
                       }
@@ -1893,6 +1922,7 @@ export default function SettingsDialog({
                     <Button
                       aria-label="Customize launch transition"
                       disabled={
+                        !backgroundEffectSupported ||
                         !draftSettings.launchTransition.enabled ||
                         isSaving ||
                         settingsTransferOperation !== null ||
@@ -1993,7 +2023,7 @@ export default function SettingsDialog({
                       DEFAULT_APP_SETTINGS.chrome.alwaysShowTopControls
                     }
                     htmlFor="always-show-top-controls"
-                    label="always show top-right controls"
+                    label={`always show ${topControlsPosition} controls`}
                     value={draftSettings.chrome.alwaysShowTopControls}
                     onReset={() =>
                       updateChrome({
@@ -2002,12 +2032,12 @@ export default function SettingsDialog({
                       })
                     }
                   >
-                    Always Show Top-Right Controls
+                    Always Show {topControlsPositionLabel} Controls
                   </ResettableFieldLabel>
                 </FieldContent>
                 <Switch
                   id="always-show-top-controls"
-                  aria-label="Always show top-right controls"
+                  aria-label={`Always show ${topControlsPosition} controls`}
                   checked={draftSettings.chrome.alwaysShowTopControls}
                   onCheckedChange={(alwaysShowTopControls) =>
                     updateChrome({ alwaysShowTopControls })
@@ -2016,10 +2046,12 @@ export default function SettingsDialog({
               </Field>
 
               <div className="grid gap-4" data-settings-search-group>
-                <p className="text-sm font-medium">Top-Right Controls</p>
+                <p className="text-sm font-medium">
+                  {topControlsPositionLabel} Controls
+                </p>
                 <Field
                   className="rounded-2xl border border-border/60 p-3"
-                  data-settings-search-item="Top-Right Controls"
+                  data-settings-search-item={`${topControlsPositionLabel} Controls`}
                   orientation="horizontal"
                 >
                   <FieldContent>
@@ -2029,7 +2061,7 @@ export default function SettingsDialog({
                   </FieldContent>
                   <Switch
                     id="all-top-right-controls"
-                    aria-label="All top-right controls"
+                    aria-label={`All ${topControlsPosition} controls`}
                     checked={topRightControlOptions.every(
                       (option) =>
                         draftSettings.chrome.topRightControls[option.key]
@@ -2040,7 +2072,7 @@ export default function SettingsDialog({
                 {topRightControlOptions.map((option) => (
                   <Field
                     key={option.key}
-                    data-settings-search-item="Top-Right Controls"
+                    data-settings-search-item={`${topControlsPositionLabel} Controls`}
                     orientation="horizontal"
                   >
                     <FieldContent>
@@ -2051,7 +2083,7 @@ export default function SettingsDialog({
                           ]
                         }
                         htmlFor={option.id}
-                        label={`${option.label.toLowerCase()} top-right control`}
+                        label={`${option.label.toLowerCase()} ${topControlsPosition} control`}
                         value={
                           draftSettings.chrome.topRightControls[option.key]
                         }
@@ -2069,7 +2101,7 @@ export default function SettingsDialog({
                     </FieldContent>
                     <Switch
                       id={option.id}
-                      aria-label={`Show ${option.label.toLowerCase()} control`}
+                      aria-label={`Show ${option.label.toLowerCase()} ${topControlsPosition} control`}
                       checked={
                         draftSettings.chrome.topRightControls[option.key]
                       }

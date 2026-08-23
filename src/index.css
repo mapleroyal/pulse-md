@@ -563,6 +563,9 @@ html[data-formatting-animations] .app-shell .editor-mount .cm-content {
 
 .top-chrome {
   --top-chrome-hover-height: var(--window-chrome-height);
+  --tc-edge: 16px;
+  --tc-current: var(--top-chrome-controls-reserved-width, 8px);
+  --cf-rest: 0px;
 
   position: fixed;
   z-index: 40;
@@ -632,7 +635,7 @@ html[data-formatting-animations]
 .top-chrome-hover-region {
   position: absolute;
   top: 0;
-  right: 50px;
+  right: var(--tc-hover-right);
   left: 0;
   height: var(--top-chrome-hover-height);
   pointer-events: none;
@@ -723,7 +726,8 @@ html[data-formatting-animations]
   position: absolute;
   z-index: 3;
   top: 50%;
-  right: 16px;
+  right: var(--tc-right);
+  left: var(--tc-left);
   display: flex;
   align-items: center;
   gap: 4px;
@@ -888,9 +892,23 @@ html[data-formatting-animations]
   z-index: 0;
   display: flex;
   min-width: 0;
-  max-width: calc(100% - var(--window-controls-safe-inset) * 2);
+  max-width: var(--cf-max);
   pointer-events: auto;
   -webkit-app-region: no-drag;
+}
+
+.top-chrome:is(
+    [data-hover-chrome],
+    [data-always-show-controls],
+    [data-outline-open],
+    :focus-within,
+    :has(.document-tab[data-popup-open]),
+    :has(.document-tab-strip:hover),
+    :has(.top-control-context-target[data-popup-open]),
+    :has(.top-chrome-document-menu[data-popup-open])
+  )
+  .centered-file-surface {
+  max-width: var(--cf-active);
 }
 
 .centered-file-surface::before {
@@ -960,8 +978,8 @@ html[data-formatting-animations]
   position: absolute;
   z-index: 2;
   top: 50%;
-  right: 8px;
-  left: var(--window-controls-safe-inset);
+  right: var(--tab-right);
+  left: var(--tab-left);
   min-width: 0;
   overflow-x: auto;
   overflow-y: hidden;
@@ -987,7 +1005,8 @@ html[data-formatting-animations]
 .top-chrome:has(.document-tab-strip:hover) .document-tab-strip,
 .top-chrome[data-outline-open] .document-tab-strip,
 .top-chrome:focus-within .document-tab-strip {
-  right: var(--top-chrome-controls-reserved-width, 8px);
+  right: var(--tab-active-right);
+  left: var(--tab-active-left);
 }
 
 .document-tab-strip::-webkit-scrollbar {
@@ -1566,37 +1585,29 @@ button.window-profile-tab-preview {
 }
 
 @media (max-width: 520px) {
-  :root {
+  .top-chrome {
+    --tc-edge: 8px;
+    --tc-current: var(--top-chrome-narrow-controls-reserved-width, 8px);
+    --cf-rest: var(--tc-current);
     --document-tab-width: clamp(
       72px,
-      calc(100vw - var(--window-controls-safe-inset) - 58px),
+      calc(100vw - var(--tab-inset) - var(--tab-narrow-offset)),
       128px
     );
   }
 
-  .top-chrome-controls {
-    right: 8px;
-  }
-
-  .top-chrome[data-hover-chrome] .document-tab-strip,
-  .top-chrome[data-always-show-controls] .document-tab-strip,
-  .top-chrome:has(.document-tab[data-popup-open]) .document-tab-strip,
-  .top-chrome:has(.document-tab-strip:hover) .document-tab-strip,
-  .top-chrome[data-outline-open] .document-tab-strip,
-  .top-chrome:focus-within .document-tab-strip,
   .document-tab-strip {
-    right: var(--top-chrome-narrow-controls-reserved-width, 8px);
+    right: var(--tab-active-right);
+    left: var(--tab-active-left);
   }
 }
 
 @media (max-width: 420px) {
   .top-chrome {
+    --tc-current: var(--top-chrome-compact-controls-reserved-width, 8px);
     --document-tab-width: min(
       128px,
-      max(
-        0px,
-        calc(100vw - var(--window-controls-safe-inset) - 86px)
-      )
+      max(0px, calc(100vw - var(--tab-inset) - var(--tab-compact-offset)))
     );
   }
 
@@ -1611,16 +1622,6 @@ button.window-profile-tab-preview {
 
   .top-chrome-document-menu {
     display: grid;
-  }
-
-  .top-chrome[data-hover-chrome] .document-tab-strip,
-  .top-chrome[data-always-show-controls] .document-tab-strip,
-  .top-chrome:has(.document-tab[data-popup-open]) .document-tab-strip,
-  .top-chrome:has(.document-tab-strip:hover) .document-tab-strip,
-  .top-chrome[data-outline-open] .document-tab-strip,
-  .top-chrome:focus-within .document-tab-strip,
-  .document-tab-strip {
-    right: var(--top-chrome-compact-controls-reserved-width, 8px);
   }
 }
 
@@ -1777,10 +1778,7 @@ html[data-formatting-animations] .app-shell .formatting-toolbar {
 
 @media (max-width: 420px) {
   .status-overlay
-    :is(
-      [data-status-item="encoding"],
-      [data-status-item="line-ending"]
-    ) {
+    :is([data-status-item="encoding"], [data-status-item="line-ending"]) {
     display: none;
   }
 }

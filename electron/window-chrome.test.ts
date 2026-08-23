@@ -8,6 +8,9 @@ import {
   rectanglesIntersect,
   shouldPrepareTabTearOut,
   tabTearOutWindowPosition,
+  windowsBackgroundMaterial,
+  windowsBackgroundMaterialSupported,
+  windowsTitleBarOverlay,
 } from "./window-chrome"
 
 describe("platform window behavior", () => {
@@ -99,6 +102,55 @@ describe("macWindowButtonPosition", () => {
       expect(() => macWindowButtonPosition(zoom)).toThrow(TypeError)
     }
   )
+})
+
+describe("Windows native chrome", () => {
+  it.each([
+    ["10.0.22621", true],
+    ["10.0.26100", true],
+    ["10.0.22000", false],
+    ["6.3.9600", false],
+    ["invalid", false],
+  ])("detects backdrop support for Windows release %s", (release, expected) => {
+    expect(windowsBackgroundMaterialSupported("win32", release)).toBe(expected)
+  })
+
+  it("does not expose the Windows backdrop on other platforms", () => {
+    expect(windowsBackgroundMaterialSupported("darwin", "10.0.26100")).toBe(
+      false
+    )
+  })
+
+  it("maps a zero-radius background to Mica and blurred backgrounds to Acrylic", () => {
+    expect(windowsBackgroundMaterial(0)).toBe("mica")
+    expect(windowsBackgroundMaterial(1)).toBe("acrylic")
+    expect(windowsBackgroundMaterial(80)).toBe("acrylic")
+  })
+
+  it.each([-1, Number.NaN, Number.POSITIVE_INFINITY])(
+    "rejects an invalid Windows blur radius: %s",
+    (blurRadius) => {
+      expect(() => windowsBackgroundMaterial(blurRadius)).toThrow(TypeError)
+    }
+  )
+
+  it.each([
+    [0.8, 37],
+    [1, 46],
+    [1.25, 58],
+    [2, 92],
+  ])("scales the transparent caption overlay at %sx zoom", (zoom, height) => {
+    expect(windowsTitleBarOverlay("#171717", zoom)).toEqual({
+      color: "#00000000",
+      height,
+      symbolColor: "#171717",
+    })
+  })
+
+  it("rejects invalid Windows caption overlay inputs", () => {
+    expect(() => windowsTitleBarOverlay("black", 1)).toThrow(TypeError)
+    expect(() => windowsTitleBarOverlay("#171717", 0)).toThrow(TypeError)
+  })
 })
 
 describe("tab tear-out geometry", () => {

@@ -78,6 +78,96 @@ async function expectHorizontallyReachable(surface: Locator) {
   }
 }
 
+test("Windows bare Alt exposes and light-dismisses the application menu @renderer-isolated", async () => {
+  test.skip(process.platform !== "win32", "Windows-only application chrome")
+  const userData = await mkdtemp(path.join(os.tmpdir(), "pulse-md-alt-menu-"))
+  const app = await electron.launch({
+    args: [projectRoot, `--user-data-dir=${userData}`, samplePath],
+    cwd: projectRoot,
+  })
+
+  try {
+    const page = await app.firstWindow()
+    await page.locator(".cm-editor").waitFor()
+    const chrome = page.locator(".top-chrome")
+    const menu = page.locator(".windows-menu-strip")
+
+    await expect(menu).toBeHidden()
+    await page.keyboard.press("Alt")
+    await expect(menu).toBeVisible()
+    await expect(chrome).toHaveAttribute("data-windows-menu-open", "true")
+    await expect(menu.locator("button[data-active]")).toHaveText("File")
+
+    const editorText = await page.locator(".cm-content").textContent()
+    await page.keyboard.press("x")
+    await expect(menu).toBeVisible()
+    await expect(page.locator(".cm-content")).toHaveText(editorText ?? "")
+
+    await page.keyboard.press("ArrowRight")
+    await expect(menu.locator("button[data-active]")).toHaveText("Edit")
+    await page.keyboard.press("Escape")
+    await expect(menu).toBeHidden()
+
+    await page.getByRole("button", { name: "Settings" }).focus()
+    await page.keyboard.press("Alt")
+    await expect(menu).toBeVisible()
+    await expect(menu.getByRole("menuitem", { name: "Format" })).toBeDisabled()
+    await page.keyboard.press("Escape")
+
+    await page.keyboard.press("Alt")
+    await expect(menu).toBeVisible()
+    const blankChromePoint = await menu.evaluate((element) => ({
+      x: Math.min(innerWidth - 150, element.getBoundingClientRect().right + 30),
+      y: 23,
+    }))
+    await page.mouse.click(blankChromePoint.x, blankChromePoint.y)
+    await expect(menu).toBeHidden()
+
+    await setWindowContentSize(app, 480, 320)
+    await app.evaluate(({ BrowserWindow }) => {
+      BrowserWindow.getAllWindows()[0]?.webContents.setZoomFactor(2)
+    })
+    await expect.poll(() => page.evaluate(() => innerWidth)).toBeCloseTo(240, 0)
+    await page.keyboard.press("Alt")
+    await expect(menu).toBeVisible()
+    await page.keyboard.press("End")
+    const helpMenu = menu.getByRole("menuitem", { name: "Help" })
+    await expect(helpMenu).toHaveAttribute("data-active", "true")
+    await expect
+      .poll(() =>
+        menu.evaluate((strip) => {
+          const button = strip.querySelector<HTMLElement>(
+            ".windows-menu-item[data-active]"
+          )
+          if (!button) throw new Error("The active menu item is unavailable")
+          const stripBounds = strip.getBoundingClientRect()
+          const buttonBounds = button.getBoundingClientRect()
+          return (
+            buttonBounds.left >= stripBounds.left - 0.5 &&
+            buttonBounds.right <= stripBounds.right + 0.5
+          )
+        })
+      )
+      .toBe(true)
+
+    await page.keyboard.press("Escape")
+    await page.keyboard.press("Alt+H")
+    await expect(helpMenu).toHaveAttribute("aria-expanded", "true")
+    await app.evaluate(({ BrowserWindow, Menu }) => {
+      const win = BrowserWindow.getAllWindows()[0]
+      const help = Menu.getApplicationMenu()?.items.find(
+        ({ label }) => label === "Help"
+      )?.submenu
+      if (!win || !help) throw new Error("The native Help menu is unavailable")
+      help.closePopup(win)
+    })
+    await expect(menu).toBeHidden()
+  } finally {
+    await exitApplication(app)
+    await rm(userData, { force: true, recursive: true })
+  }
+})
+
 test("search and outline stay below the complete top chrome @renderer-isolated", async () => {
   const userData = await mkdtemp(
     path.join(os.tmpdir(), "pulse-md-overlay-position-")

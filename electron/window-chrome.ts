@@ -3,6 +3,14 @@ export const NATIVE_WINDOW_CONTROL_SIZE = 14
 export const NATIVE_WINDOW_CONTROL_X = 16
 export const TAB_TEAR_OUT_DISTANCE = 18
 
+export type WindowsBackgroundMaterial = "acrylic" | "mica"
+
+export interface WindowsTitleBarOverlay {
+  color: string
+  height: number
+  symbolColor: string
+}
+
 interface RectangleLike {
   x: number
   y: number
@@ -99,5 +107,46 @@ export function macWindowButtonPosition(zoomFactor: number): {
     y: Math.round(
       (TOP_CHROME_HEIGHT * zoomFactor - NATIVE_WINDOW_CONTROL_SIZE) / 2
     ),
+  }
+}
+
+export function windowsBackgroundMaterial(
+  blurRadius: number
+): WindowsBackgroundMaterial {
+  if (!Number.isFinite(blurRadius) || blurRadius < 0) {
+    throw new TypeError(
+      "Background blur radius must be non-negative and finite"
+    )
+  }
+  return blurRadius > 0 ? "acrylic" : "mica"
+}
+
+export function windowsBackgroundMaterialSupported(
+  platform: NodeJS.Platform,
+  release: string
+): boolean {
+  if (platform !== "win32") return false
+  const [major, minor, build] = release.split(".").map(Number)
+  return (
+    major === 10 && minor === 0 && Number.isInteger(build) && build >= 22621
+  )
+}
+
+export function windowsTitleBarOverlay(
+  symbolColor: string,
+  zoomFactor: number
+): WindowsTitleBarOverlay {
+  if (!/^#[\da-f]{6}$/i.test(symbolColor)) {
+    throw new TypeError(
+      "Window control symbol color must be a six-digit hex color"
+    )
+  }
+  if (!Number.isFinite(zoomFactor) || zoomFactor <= 0) {
+    throw new TypeError("Window zoom factor must be a positive finite number")
+  }
+  return {
+    color: "#00000000",
+    height: Math.round(TOP_CHROME_HEIGHT * zoomFactor),
+    symbolColor,
   }
 }

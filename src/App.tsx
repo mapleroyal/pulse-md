@@ -1292,6 +1292,7 @@ export function App() {
   const [searchOpen, setSearchOpen] = React.useState(false)
   const [activeEditorMode, setActiveEditorMode] =
     React.useState<MarkdownEditorMode>("live")
+  const [editorFocused, setEditorFocused] = React.useState(false)
   const [outlineOpen, setOutlineOpen] = React.useState(false)
   const [outlineHeadings, setOutlineHeadings] = React.useState<
     readonly MarkdownHeading[]
@@ -1697,7 +1698,10 @@ export function App() {
     if (!controller) return
     const activeId = activeTabIdRef.current
     const tab = activeId ? tabsRef.current.get(activeId) : undefined
-    const editorFocused = controller.view.hasFocus
+    const nextEditorFocused = controller.view.hasFocus
+    setEditorFocused((current) =>
+      current === nextEditorFocused ? current : nextEditorFocused
+    )
     const queryCommandEnabled = (command: "redo" | "undo") => {
       try {
         return document.queryCommandEnabled(command)
@@ -1707,14 +1711,14 @@ export function App() {
     }
     const softwareLicensesOpen = softwareLicensesOpenRef.current
     const next: EditorMenuState = {
-      canRedo: editorFocused
+      canRedo: nextEditorFocused
         ? controller.canRedo()
         : queryCommandEnabled("redo"),
-      canUndo: editorFocused
+      canUndo: nextEditorFocused
         ? controller.canUndo()
         : queryCommandEnabled("undo"),
       documentKind: tab?.document.kind ?? "markdown",
-      editorFocused,
+      editorFocused: nextEditorFocused,
       hasSelection: controller.hasSelection(),
       mode: controller.getMode(),
       settingsDialogOpen:
@@ -2064,8 +2068,10 @@ export function App() {
         "--document-background",
         resolvedProfile.backgroundColor
       )
+      const backgroundCapability =
+        document.documentElement.dataset.backgroundCapability
       const supportsBackgroundEffect =
-        document.documentElement.dataset.backgroundCapability === "darwin"
+        backgroundCapability === "darwin" || backgroundCapability === "win32"
       const backgroundEffectEnabled =
         supportsBackgroundEffect &&
         nextSettings.backgroundEffect.enabled &&
@@ -5117,11 +5123,16 @@ export function App() {
 
   const hideTopControls = React.useCallback(
     (controls: readonly TopRightControlKey[]) =>
-      updateChromeFromCommand((chrome) => {
-        const topRightControls = { ...chrome.topRightControls }
-        for (const control of controls) topRightControls[control] = false
-        return { topRightControls }
-      }, "The top-right controls setting could not be saved."),
+      updateChromeFromCommand(
+        (chrome) => {
+          const topRightControls = { ...chrome.topRightControls }
+          for (const control of controls) topRightControls[control] = false
+          return { topRightControls }
+        },
+        `The ${
+          platformRef.current === "win32" ? "top-left" : "top-right"
+        } controls setting could not be saved.`
+      ),
     [updateChromeFromCommand]
   )
 
@@ -7005,6 +7016,7 @@ export function App() {
           canNavigateForward={navigationAvailability.forward}
           chrome={appSettings.chrome}
           dragShelfVisible={tabDragShelfVisible}
+          editorFocused={editorFocused}
           editorMode={activeEditorMode}
           editorPanelId={DOCUMENT_EDITOR_PANEL_ID}
           hoverLatched={topChromeHoverLatched}
@@ -7187,6 +7199,9 @@ export function App() {
         <SettingsDialog
           key={settingsSession}
           activeScheme={resolvedTheme}
+          backgroundEffectSupported={
+            document.documentElement.dataset.backgroundCapability === platform
+          }
           keyboardShortcutsOpen={
             settingsNavigationRoute.kind === "keyboard-shortcuts"
           }
@@ -7275,6 +7290,7 @@ export function App() {
           workspace={{
             kind: "launch-transition",
             props: {
+              platform,
               settings: launchTransitionPreview.parentDraft,
               onCancel: cancelLaunchTransitionPreview,
               onSave: saveLaunchTransitionPreview,

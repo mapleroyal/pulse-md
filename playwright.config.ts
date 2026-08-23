@@ -1,6 +1,17 @@
-import { defineConfig } from "@playwright/test"
+import { _electron as electron, defineConfig } from "@playwright/test"
 
 import { parallelE2eWorkers } from "./scripts/e2e-worker-policy.mjs"
+
+const launchElectron = electron.launch.bind(electron)
+if (process.env.PMD_E2E_FORCE_DARK_MODE === "1") {
+  // Playwright otherwise emulates light before Electron's delayed ready event.
+  // A per-launch color scheme or an explicit app appearance still wins.
+  electron.launch = (options) =>
+    launchElectron({
+      colorScheme: "dark",
+      ...options,
+    })
+}
 
 const PARALLEL_E2E_TESTS = [
   "**/extensions.spec.ts",

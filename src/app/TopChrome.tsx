@@ -41,6 +41,7 @@ import { PathLabel } from "@/app/PathLabel"
 import { installHorizontalWheelScrolling } from "@/app/horizontal-wheel-scroll"
 import { splitPath } from "@/app/path-label"
 import { tabInsertionIndex } from "@/app/tab-drag"
+import { WindowsMenuStrip } from "@/app/WindowsMenuStrip"
 import { useLongTextPopover } from "@/components/ui/use-long-text-popover"
 import { createRetryableDynamicImport } from "@/lib/retryable-dynamic-import"
 import type { MarkdownEditorMode } from "@/editor/types"
@@ -148,6 +149,7 @@ interface TopChromeProps {
   canNavigateForward: boolean
   chrome: ChromeSettings
   dragShelfVisible: boolean
+  editorFocused: boolean
   editorMode: MarkdownEditorMode
   editorPanelId: string
   hoverLatched: boolean
@@ -188,6 +190,7 @@ interface TopChromeProps {
 }
 
 const WINDOW_CONTROLS_SAFE_INSET = 86
+const WINDOWS_CAPTION_CONTROLS_WIDTH = 138
 const TOP_CONTROL_SIZE = 30
 const TOP_CONTROL_GAP = 4
 
@@ -246,9 +249,11 @@ function PathContextMenu({
 
 function TopControlContextMenu({
   children,
+  platform,
   onHide,
 }: {
   children: React.ReactNode
+  platform: AppPlatform
   onHide: () => void
 }) {
   return (
@@ -259,7 +264,11 @@ function TopControlContextMenu({
         {children}
       </ContextMenuTrigger>
       <ContextMenuContent
-        aria-label="Top-right controls menu"
+        aria-label={
+          platform === "win32"
+            ? "Top-left controls menu"
+            : "Top-right controls menu"
+        }
         className="min-w-32"
         finalFocus={(interactionType) => interactionType === "keyboard"}
       >
@@ -576,6 +585,7 @@ export function TopChrome({
   canNavigateForward,
   chrome,
   dragShelfVisible,
+  editorFocused,
   editorMode,
   editorPanelId,
   hoverLatched,
@@ -616,6 +626,7 @@ export function TopChrome({
   const [documentActionsActivated, setDocumentActionsActivated] =
     React.useState(false)
   const [documentActionsOpen, setDocumentActionsOpen] = React.useState(false)
+  const [windowsMenuVisible, setWindowsMenuVisible] = React.useState(false)
   const chromeRef = React.useRef<HTMLElement>(null)
   const dragCancelledRef = React.useRef(false)
   const dragChipBoundsRef = React.useRef<Array<{
@@ -743,16 +754,22 @@ export function TopChrome({
       previousStripWidth = nextStripWidth
       if (!stripShrank) return
 
-      // Revealed controls move the strip's right edge without changing its
-      // scroll offset. Preserve that offset unless it would clip the active tab.
+      // Revealed controls move the strip's trailing edge on macOS/Linux and
+      // its leading edge on Windows. Preserve the scroll offset unless the
+      // resized viewport would clip the active tab.
       const activeChip = strip.querySelector<HTMLElement>(
         ".document-tab[data-active]"
       )
       if (!activeChip) return
       const stripBounds = strip.getBoundingClientRect()
       const activeBounds = activeChip.getBoundingClientRect()
-      const coveredWidth = activeBounds.right - stripBounds.right
-      if (coveredWidth > 0.5) strip.scrollLeft += coveredWidth
+      const clippedAtStart = stripBounds.left - activeBounds.left
+      const clippedAtEnd = activeBounds.right - stripBounds.right
+      if (clippedAtStart > 0.5) {
+        strip.scrollLeft -= clippedAtStart
+      } else if (clippedAtEnd > 0.5) {
+        strip.scrollLeft += clippedAtEnd
+      }
     }
     const ownerWindow = strip.ownerDocument.defaultView
     const resizeObserver = ownerWindow?.ResizeObserver
@@ -928,6 +945,10 @@ export function TopChrome({
     Number(showCompactDocumentActions) + Number(showSettings),
     false
   )
+  const windowsChrome = platform === "win32"
+  const windowsMenuOpen = windowsChrome && !previewTitle && windowsMenuVisible
+  const hiddenForWindowsMenuStyle: React.CSSProperties | undefined =
+    windowsMenuOpen ? { opacity: 0, pointerEvents: "none" } : undefined
 
   const documentActionsFallback = (
     <Button
@@ -958,6 +979,7 @@ export function TopChrome({
       <header
         ref={chromeRef}
         className="top-chrome"
+        data-platform={platform}
         data-pinned-tabs={tabsPinned || undefined}
         data-hover-chrome={hoverLatched || undefined}
         data-hover-tabs={(!tabsHidden && hoverLatched) || undefined}
@@ -969,6 +991,7 @@ export function TopChrome({
         data-tab-drag-shelf={dragShelfVisible || undefined}
         data-tab-drag-active={tabDragActive || undefined}
         data-drag-over={dragOver || undefined}
+        data-windows-menu-open={windowsMenuOpen || undefined}
         style={
           {
             "--top-chrome-controls-reserved-width": `${
@@ -985,6 +1008,40 @@ export function TopChrome({
                 ? WINDOW_CONTROLS_SAFE_INSET / windowZoomFactor
                 : WINDOW_CONTROLS_SAFE_INSET
             }px`,
+            "--windows-caption-controls-inset": `${
+              windowsChrome
+                ? WINDOWS_CAPTION_CONTROLS_WIDTH / windowZoomFactor
+                : 0
+            }px`,
+            "--tc-hover-right": windowsChrome
+              ? "calc(var(--windows-caption-controls-inset) + 8px)"
+              : "50px",
+            "--tc-left": windowsChrome ? "var(--tc-edge)" : "auto",
+            "--tc-right": windowsChrome ? "auto" : "var(--tc-edge)",
+            "--cf-max": windowsChrome
+              ? "max(0px, calc(100% - max(var(--windows-caption-controls-inset), var(--cf-rest, 0px)) * 2 - 16px))"
+              : "calc(100% - var(--window-controls-safe-inset) * 2)",
+            "--cf-active": windowsChrome
+              ? "max(0px, calc(100% - max(var(--windows-caption-controls-inset), var(--tc-current)) * 2 - 16px))"
+              : "calc(100% - var(--window-controls-safe-inset) * 2)",
+            "--tab-left": windowsChrome
+              ? "var(--tc-current)"
+              : "var(--window-controls-safe-inset)",
+            "--tab-right": windowsChrome
+              ? "calc(var(--windows-caption-controls-inset) + 8px)"
+              : "8px",
+            "--tab-active-left": windowsChrome
+              ? "var(--tc-current)"
+              : "var(--window-controls-safe-inset)",
+            "--tab-active-right": windowsChrome
+              ? "calc(var(--windows-caption-controls-inset) + 8px)"
+              : "var(--tc-current)",
+            "--tab-inset": windowsChrome
+              ? "var(--windows-caption-controls-inset)"
+              : "var(--window-controls-safe-inset)",
+            "--tab-narrow-offset": windowsChrome ? "66px" : "58px",
+            "--tab-compact-offset": windowsChrome ? "94px" : "86px",
+            WebkitAppRegion: windowsMenuOpen ? "no-drag" : undefined,
           } as React.CSSProperties
         }
         onDragEnter={(event) => {
@@ -1019,24 +1076,41 @@ export function TopChrome({
           if (dragToken) void onDropTab(dragToken, index)
         }}
       >
+        {windowsChrome && !previewTitle ? (
+          <WindowsMenuStrip
+            formatEnabled={markdownControlsEnabled && editorFocused}
+            visible={windowsMenuVisible}
+            windowZoomFactor={windowZoomFactor}
+            onVisibleChange={setWindowsMenuVisible}
+          />
+        ) : null}
         {!previewTitle ? (
           <div
             ref={outlineAnchorRef}
             aria-hidden="true"
             className="top-chrome-hover-region"
+            style={hiddenForWindowsMenuStyle}
           />
         ) : null}
         {!previewTitle ? (
-          <div aria-hidden="true" className="top-chrome-tab-drag-shelf" />
+          <div
+            aria-hidden="true"
+            className="top-chrome-tab-drag-shelf"
+            style={windowsMenuOpen ? { pointerEvents: "none" } : undefined}
+          />
         ) : null}
-        {!previewTitle && !hoverLatched && !dragOver && !tabDragActive ? (
+        {!previewTitle &&
+        !windowsMenuOpen &&
+        !hoverLatched &&
+        !dragOver &&
+        !tabDragActive ? (
           <div
             aria-hidden="true"
             className="top-chrome-hover-activation"
             onPointerEnter={() => onHoverLatchedChange(true)}
           />
         ) : null}
-        {!previewTitle ? (
+        {!previewTitle && !windowsMenuOpen ? (
           <>
             <div
               aria-hidden="true"
@@ -1064,7 +1138,7 @@ export function TopChrome({
             />
           </>
         ) : null}
-        {platform === "darwin" ? null : (
+        {platform === "linux" ? (
           <div aria-label="Window controls" className="window-controls">
             <button
               aria-label="Close window"
@@ -1085,12 +1159,16 @@ export function TopChrome({
               onClick={() => onWindowAction("toggle-maximize")}
             />
           </div>
-        )}
+        ) : null}
 
         {wideControlWidth > 0 || compactControlWidth > 0 ? (
-          <div className="top-chrome-controls">
+          <div
+            className="top-chrome-controls"
+            style={hiddenForWindowsMenuStyle}
+          >
             {showBack ? (
               <TopControlContextMenu
+                platform={platform}
                 onHide={() => onHideTopControls(["navigation"])}
               >
                 <Tooltip>
@@ -1116,6 +1194,7 @@ export function TopChrome({
             ) : null}
             {showForward ? (
               <TopControlContextMenu
+                platform={platform}
                 onHide={() => onHideTopControls(["navigation"])}
               >
                 <Tooltip>
@@ -1147,6 +1226,7 @@ export function TopChrome({
             ) : null}
             {showViewMode ? (
               <TopControlContextMenu
+                platform={platform}
                 onHide={() => onHideTopControls(["viewMode"])}
               >
                 <Tooltip>
@@ -1183,7 +1263,10 @@ export function TopChrome({
               </TopControlContextMenu>
             ) : null}
             {showFind ? (
-              <TopControlContextMenu onHide={() => onHideTopControls(["find"])}>
+              <TopControlContextMenu
+                platform={platform}
+                onHide={() => onHideTopControls(["find"])}
+              >
                 <Tooltip>
                   <TooltipTrigger
                     render={
@@ -1208,6 +1291,7 @@ export function TopChrome({
             ) : null}
             {showOutline ? (
               <TopControlContextMenu
+                platform={platform}
                 onHide={() => onHideTopControls(["outline"])}
               >
                 <Tooltip>
@@ -1254,6 +1338,7 @@ export function TopChrome({
             ) : null}
             {showFormattingToolbar ? (
               <TopControlContextMenu
+                platform={platform}
                 onHide={() => onHideTopControls(["formattingToolbar"])}
               >
                 <Tooltip>
@@ -1282,6 +1367,7 @@ export function TopChrome({
             ) : null}
             {showCompactDocumentActions ? (
               <TopControlContextMenu
+                platform={platform}
                 onHide={() => onHideTopControls(compactControlKeys)}
               >
                 {documentActionsActivated ? (
@@ -1309,6 +1395,7 @@ export function TopChrome({
             ) : null}
             {showSettings ? (
               <TopControlContextMenu
+                platform={platform}
                 onHide={() => onHideTopControls(["settings"])}
               >
                 <Tooltip>
@@ -1335,7 +1422,11 @@ export function TopChrome({
         ) : null}
 
         {previewTitle ? (
-          <div className="centered-file-label z-[2]" data-preview-title>
+          <div
+            className="centered-file-label z-[2]"
+            data-preview-title
+            style={hiddenForWindowsMenuStyle}
+          >
             <span className="centered-file-surface">{previewTitle}</span>
           </div>
         ) : activeTab && chrome.showCenteredPath ? (
@@ -1343,6 +1434,7 @@ export function TopChrome({
             aria-hidden={tabsVisible}
             className="centered-file-label z-[2]"
             data-hidden={tabsVisible || undefined}
+            style={hiddenForWindowsMenuStyle}
             onPointerEnter={() => onHoverLatchedChange(true)}
           >
             <PathContextMenu
@@ -1370,6 +1462,7 @@ export function TopChrome({
             className="document-tab-strip"
             data-visible={tabsVisible || undefined}
             role="tablist"
+            style={hiddenForWindowsMenuStyle}
             onPointerEnter={() => {
               onHoverLatchedChange(true)
               onDragShelfVisibleChange(true)

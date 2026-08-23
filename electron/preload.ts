@@ -8,6 +8,7 @@ import {
   MAX_SPELLING_WORD_LENGTH,
   MAX_ZOOM_FACTOR,
   MIN_ZOOM_FACTOR,
+  WINDOWS_MENU_IDS,
   ZOOM_FACTOR_STEP,
 } from "../src/shared/contracts"
 import type {
@@ -65,6 +66,8 @@ import type {
   TabTransferImport,
   TransferId,
   WindowAction,
+  WindowsMenuId,
+  WindowsMenuPopupAnchor,
   WindowProfileCaptureKind,
   WindowProfile,
   WindowProfileFileChoice,
@@ -476,6 +479,24 @@ const pulseMd: PulseMdApi = {
       filePaths,
       replaceActive
     ) as Promise<OpenDocumentResult | null>
+  },
+  popupWindowsMenu: (menu: WindowsMenuId, anchor: WindowsMenuPopupAnchor) => {
+    if (
+      !WINDOWS_MENU_IDS.includes(menu) ||
+      typeof anchor !== "object" ||
+      anchor === null ||
+      !Number.isInteger(anchor.x) ||
+      !Number.isInteger(anchor.y) ||
+      anchor.x < 0 ||
+      anchor.y < 0
+    ) {
+      return Promise.reject(new TypeError("Invalid Windows menu popup"))
+    }
+    return ipcRenderer.invoke(
+      ipcChannels.popupWindowsMenu,
+      menu,
+      anchor
+    ) as Promise<void>
   },
   previewAppearance: (settings: AppearanceSettings | null) =>
     ipcRenderer.send(ipcChannels.previewAppearance, settings),

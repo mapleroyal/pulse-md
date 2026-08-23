@@ -610,7 +610,12 @@ async function verifyPackagedCli(cli, executable, expectedProductName) {
         await stopOwnedChild(packagedApp, packagedAppObservation.result)
       }
     } finally {
-      await rm(temporaryDirectory, { force: true, recursive: true })
+      await rm(temporaryDirectory, {
+        force: true,
+        maxRetries: 5,
+        recursive: true,
+        retryDelay: 100,
+      })
     }
   }
 }
@@ -760,7 +765,12 @@ async function verifyDefaultPackagedCliIdentity(
 
     await waitForEndpointShutdown(endpoint)
   } finally {
-    await rm(temporaryDirectory, { force: true, recursive: true })
+    await rm(temporaryDirectory, {
+      force: true,
+      maxRetries: 5,
+      recursive: true,
+      retryDelay: 100,
+    })
   }
 }
 

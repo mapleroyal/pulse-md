@@ -12,7 +12,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { Field, FieldContent, FieldLabel } from "@/components/ui/field"
+import {
+  Field,
+  FieldContent,
+  FieldDescription,
+  FieldLabel,
+} from "@/components/ui/field"
 import { Slider } from "@/components/ui/slider"
 import {
   Tooltip,
@@ -31,6 +36,7 @@ import {
   MIN_LAUNCH_TRANSITION_DELAY_MS,
   MIN_LAUNCH_TRANSITION_DURATION_MS,
   parseLaunchTransitionCubicBezier,
+  type AppPlatform,
   type AppSettings,
   type LaunchTransitionEasing,
   type LaunchTransitionSettings,
@@ -61,6 +67,7 @@ const strategyLabels: Record<LaunchTransitionStrategy, string> = {
 
 export interface LaunchTransitionPreviewWorkspaceProps {
   isSaving?: boolean
+  platform: AppPlatform
   settings: AppSettings
   onCancel: () => void
   onSave: (settings: AppSettings) => void | Promise<void>
@@ -182,13 +189,34 @@ function transitionSettingsMatch(
   )
 }
 
+function launchTransitionForPlatform(
+  transition: LaunchTransitionSettings,
+  platform: AppPlatform
+): LaunchTransitionSettings {
+  return {
+    ...transition,
+    strategy:
+      platform === "win32" && transition.strategy === "tint-blur"
+        ? "cover"
+        : transition.strategy,
+  }
+}
+
 export function LaunchTransitionPreviewWorkspace({
   isSaving = false,
+  platform,
   settings,
   onCancel,
   onSave,
 }: LaunchTransitionPreviewWorkspaceProps) {
-  const [draft, setDraft] = React.useState(() => cloneAppSettings(settings))
+  const [draft, setDraft] = React.useState(() => {
+    const initialDraft = cloneAppSettings(settings)
+    initialDraft.launchTransition = launchTransitionForPlatform(
+      initialDraft.launchTransition,
+      platform
+    )
+    return initialDraft
+  })
   const draftRef = React.useRef(draft)
   const [customEasingInput, setCustomEasingInput] = React.useState(
     settings.launchTransition.customEasing
@@ -203,6 +231,10 @@ export function LaunchTransitionPreviewWorkspace({
   const customEasingValid =
     draft.launchTransition.easing !== "custom" ||
     parseLaunchTransitionCubicBezier(customEasingInput) !== null
+  const defaultLaunchTransition = launchTransitionForPlatform(
+    DEFAULT_APP_SETTINGS.launchTransition,
+    platform
+  )
 
   const updateTransition = React.useCallback(
     (change: Partial<LaunchTransitionSettings>) => {
@@ -336,7 +368,7 @@ export function LaunchTransitionPreviewWorkspace({
 
   const resetAll = () => {
     const launchTransition = {
-      ...DEFAULT_APP_SETTINGS.launchTransition,
+      ...defaultLaunchTransition,
       enabled: draftRef.current.launchTransition.enabled,
     }
     setCustomEasingInput(launchTransition.customEasing)
@@ -510,7 +542,10 @@ export function LaunchTransitionPreviewWorkspace({
                   </SelectTrigger>
                   <SelectContent>
                     <SelectGroup>
-                      {LAUNCH_TRANSITION_STRATEGIES.map((strategy) => (
+                      {LAUNCH_TRANSITION_STRATEGIES.filter(
+                        (strategy) =>
+                          platform !== "win32" || strategy !== "tint-blur"
+                      ).map((strategy) => (
                         <SelectItem key={strategy} value={strategy}>
                           {strategyLabels[strategy]}
                         </SelectItem>
@@ -518,6 +553,12 @@ export function LaunchTransitionPreviewWorkspace({
                     </SelectGroup>
                   </SelectContent>
                 </Select>
+                {platform === "win32" ? (
+                  <FieldDescription>
+                    Windows preloads the system-managed backdrop; its blur
+                    strength cannot be animated by Pulse MD.
+                  </FieldDescription>
+                ) : null}
               </FieldContent>
             </Field>
           </div>
@@ -568,7 +609,7 @@ export function LaunchTransitionPreviewWorkspace({
               <Button
                 disabled={transitionSettingsMatch(
                   draft.launchTransition,
-                  DEFAULT_APP_SETTINGS.launchTransition
+                  defaultLaunchTransition
                 )}
                 size="sm"
                 type="button"

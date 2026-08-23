@@ -45,7 +45,11 @@ function runPhase({ description, name, workers }) {
         `--workers=${workers}`,
       ],
       {
-        env: { ...process.env, PMD_E2E_PHASE: name },
+        env: {
+          ...process.env,
+          PMD_E2E_FORCE_DARK_MODE: "1",
+          PMD_E2E_PHASE: name,
+        },
         stdio: "inherit",
       }
     )

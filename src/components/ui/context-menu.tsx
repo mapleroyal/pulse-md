@@ -6,8 +6,48 @@ import { ContextMenu as ContextMenuPrimitive } from "@base-ui/react/context-menu
 import { cn } from "@/lib/utils"
 import { ChevronRightIcon, CheckIcon } from "lucide-react"
 
-function ContextMenu({ ...props }: ContextMenuPrimitive.Root.Props) {
-  return <ContextMenuPrimitive.Root data-slot="context-menu" {...props} />
+function ContextMenu({
+  actionsRef,
+  defaultOpen = false,
+  onOpenChange,
+  open: controlledOpen,
+  ...props
+}: ContextMenuPrimitive.Root.Props) {
+  const fallbackActionsRef =
+    React.useRef<ContextMenuPrimitive.Root.Actions>(null)
+  const primitiveActionsRef = actionsRef ?? fallbackActionsRef
+  const [uncontrolledOpen, setUncontrolledOpen] = React.useState(defaultOpen)
+  const open = controlledOpen ?? uncontrolledOpen
+
+  React.useLayoutEffect(() => {
+    if (!open) return
+
+    const close = () => primitiveActionsRef.current?.close()
+    const unsubscribe = window.pulseMd.onWindowActivationChanged((active) => {
+      if (!active) primitiveActionsRef.current?.close()
+    })
+    window.addEventListener("resize", close)
+    return () => {
+      unsubscribe()
+      window.removeEventListener("resize", close)
+    }
+  }, [open, primitiveActionsRef])
+
+  return (
+    <ContextMenuPrimitive.Root
+      data-slot="context-menu"
+      actionsRef={primitiveActionsRef}
+      defaultOpen={defaultOpen}
+      open={controlledOpen}
+      onOpenChange={(nextOpen, eventDetails) => {
+        onOpenChange?.(nextOpen, eventDetails)
+        if (controlledOpen === undefined && !eventDetails.isCanceled) {
+          setUncontrolledOpen(nextOpen)
+        }
+      }}
+      {...props}
+    />
+  )
 }
 
 function ContextMenuPortal({ ...props }: ContextMenuPrimitive.Portal.Props) {
@@ -44,6 +84,15 @@ function ContextMenuContent({
   >) {
   return (
     <ContextMenuPrimitive.Portal>
+      <ContextMenuPrimitive.Backdrop
+        data-slot="context-menu-backdrop"
+        className={({ open }) =>
+          cn(
+            "fixed inset-x-0 top-0 z-40 h-[var(--window-chrome-height)] [-webkit-app-region:no-drag]",
+            !open && "pointer-events-none"
+          )
+        }
+      />
       <ContextMenuPrimitive.Positioner
         data-slot="context-menu-positioner"
         className="isolate z-50 outline-none"

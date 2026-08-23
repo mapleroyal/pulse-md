@@ -57,6 +57,7 @@ export const ipcChannels = {
   openScratch: "pulse-md:open-scratch",
   openDocument: "pulse-md:open-document",
   openDroppedDocuments: "pulse-md:open-dropped-documents",
+  popupWindowsMenu: "pulse-md:popup-windows-menu",
   previewAppearance: "pulse-md:preview-appearance",
   provideSettingsScratchSnapshot: "pulse-md:provide-settings-scratch-snapshot",
   provideTabExport: "pulse-md:provide-tab-export",

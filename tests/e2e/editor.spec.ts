@@ -31,6 +31,10 @@ const projectRoot = path.resolve(
 )
 const samplePath = path.join(projectRoot, "tests/fixtures/sample.md")
 const execFileAsync = promisify(execFile)
+const WINDOWS_CAPTION_CONTROLS_WIDTH = 138
+const TOP_CHROME_CONTENT_GAP = 8
+const TOP_CONTROLS_POSITION_LABEL =
+  process.platform === "win32" ? "Top-Left" : "Top-Right"
 
 function documentSurfaceColor(opaqueColor: string, translucency = 0) {
   if (process.platform !== "darwin" || translucency <= 0) return opaqueColor
@@ -2207,7 +2211,9 @@ test("settings can reset individual values or restore every default", async () =
       "With Multiple Tabs"
     )
     await expect(
-      page.getByRole("switch", { name: "Always show top-right controls" })
+      page.getByRole("switch", {
+        name: `Always Show ${TOP_CONTROLS_POSITION_LABEL} Controls`,
+      })
     ).not.toBeChecked()
     await expect(
       page.getByRole("switch", { name: "Show formatting toolbar" })
@@ -2257,7 +2263,7 @@ test("settings can reset individual values or restore every default", async () =
   }
 })
 
-test("top-right controls can remain visible without hovering @renderer-isolated", async () => {
+test("top controls can remain visible without hovering @renderer-isolated", async () => {
   const userData = await createTestUserData()
   const documentPath = path.join(userData, "top-right-controls.md")
   await writeFile(
@@ -2287,12 +2293,17 @@ test("top-right controls can remain visible without hovering @renderer-isolated"
       "Settings",
     ]) {
       await expect(
-        page.getByRole("switch", { name, exact: true })
+        page.getByRole("switch", {
+          name,
+          exact: true,
+        })
       ).not.toBeChecked()
     }
     await allControls.click()
     await page
-      .getByRole("switch", { name: "Always show top-right controls" })
+      .getByRole("switch", {
+        name: `Always Show ${TOP_CONTROLS_POSITION_LABEL} Controls`,
+      })
       .click()
     await settingsSaveButton(page).click()
     await page.mouse.move(450, 180)
@@ -2327,8 +2338,48 @@ test("top-right controls can remain visible without hovering @renderer-isolated"
       .toBe(true)
 
     const controlsMenu = page.getByRole("menu", {
-      name: "Top-right controls menu",
+      name: /Top-(?:left|right) controls menu/,
     })
+    const blankChromePoint = await topChrome.evaluate((element) => {
+      const bounds = element.getBoundingClientRect()
+      const y = bounds.top + bounds.height / 2
+      for (let x = bounds.left + 100; x < bounds.right - 160; x += 8) {
+        const target = document.elementFromPoint(x, y)
+        if (!target?.closest("button, [role='tab'], .centered-file-surface"))
+          return { x, y }
+      }
+      throw new Error("The top chrome has no blank point")
+    })
+    const settingsControl = page.getByRole("button", {
+      name: "Settings",
+      exact: true,
+    })
+
+    await settingsControl.click({ button: "right" })
+    await expect(controlsMenu).toBeVisible()
+    await expect(page.locator('[data-slot="context-menu-backdrop"]')).toHaveCSS(
+      "-webkit-app-region",
+      "no-drag"
+    )
+    await page.mouse.click(blankChromePoint.x, blankChromePoint.y)
+    await expect(controlsMenu).toHaveCount(0)
+
+    await settingsControl.click({ button: "right" })
+    await expect(controlsMenu).toBeVisible()
+    await deactivateNativeWindow(app)
+    await focusNativeWindow(app)
+    await expect(controlsMenu).toHaveCount(0)
+
+    await settingsControl.click({ button: "right" })
+    await expect(controlsMenu).toBeVisible()
+    await app.evaluate(({ BrowserWindow }) => {
+      const window = BrowserWindow.getAllWindows()[0]
+      if (!window) throw new Error("The document window is unavailable")
+      const [width, height] = window.getSize()
+      window.setSize(width - 20, height)
+    })
+    await expect(controlsMenu).toHaveCount(0)
+
     for (const name of [
       "Switch to Raw Markdown",
       "Find",
@@ -3212,6 +3263,13 @@ test("tab labels align fitted names left and feather overflowing names @renderer
 
     const tabStrip = page.locator(".document-tab-strip")
     await page.mouse.move(450, 160)
+    await expect(page.locator(".top-chrome")).toHaveAttribute(
+      "data-platform",
+      process.platform
+    )
+    await expect(page.locator(".window-controls")).toHaveCount(
+      process.platform === "linux" ? 1 : 0
+    )
     const restingStrip = await tabStrip.evaluate((element) => {
       const bounds = element.getBoundingClientRect()
       return {
@@ -3220,23 +3278,26 @@ test("tab labels align fitted names left and feather overflowing names @renderer
       }
     })
     expect(restingStrip.scrolls).toBe(true)
-    expect(restingStrip.rightInset).toBeCloseTo(8, 0)
+    const restingRightInset =
+      process.platform === "win32"
+        ? WINDOWS_CAPTION_CONTROLS_WIDTH + TOP_CHROME_CONTENT_GAP
+        : TOP_CHROME_CONTENT_GAP
+    expect(restingStrip.rightInset).toBeCloseTo(restingRightInset, 0)
 
     await tabStrip.hover({ position: { x: 20, y: 15 } })
     await expect
       .poll(() =>
-        tabStrip.evaluate((element) => {
+        tabStrip.evaluate((element, controlsOnLeft) => {
           const controls = document.querySelector<HTMLElement>(
             ".top-chrome-controls"
           )
           if (!controls) return false
-          return (
-            Math.abs(
-              element.getBoundingClientRect().right -
-                (controls.getBoundingClientRect().left - 8)
-            ) <= 0.5
-          )
-        })
+          const stripBounds = element.getBoundingClientRect()
+          const controlsBounds = controls.getBoundingClientRect()
+          return controlsOnLeft
+            ? Math.abs(stripBounds.left - (controlsBounds.right + 8)) <= 0.5
+            : Math.abs(stripBounds.right - (controlsBounds.left - 8)) <= 0.5
+        }, process.platform === "win32")
       )
       .toBe(true)
 
@@ -3247,14 +3308,14 @@ test("tab labels align fitted names left and feather overflowing names @renderer
           (element) => innerWidth - element.getBoundingClientRect().right
         )
       )
-      .toBeCloseTo(8, 0)
+      .toBeCloseTo(restingRightInset, 0)
   } finally {
     await exitApplication(app)
     await rm(userData, { force: true, recursive: true })
   }
 })
 
-test("revealing top controls keeps a covered active tab against their leading edge @renderer-isolated", async () => {
+test("revealing top controls keeps a covered active tab against their adjacent edge @renderer-isolated", async () => {
   const userData = await createTestUserData()
   const documentPaths = Array.from({ length: 8 }, (_, index) =>
     path.join(userData, `active-tab-visibility-${index + 1}.md`)
@@ -3279,7 +3340,11 @@ test("revealing top controls keeps a covered active tab against their leading ed
     const page = await app.firstWindow()
     await page.locator(".cm-editor").waitFor()
     const tabStrip = page.locator(".document-tab-strip")
-    const activeTab = page.locator(".document-tab").nth(6)
+    const controlsOnLeft = process.platform === "win32"
+    const activeTab = page.locator(".document-tab").nth(controlsOnLeft ? 3 : 6)
+    const restingRightInset = controlsOnLeft
+      ? WINDOWS_CAPTION_CONTROLS_WIDTH + TOP_CHROME_CONTENT_GAP
+      : TOP_CHROME_CONTENT_GAP
     await activeTab.getByRole("tab").click()
     await page.mouse.move(450, 160)
     await expect
@@ -3288,30 +3353,41 @@ test("revealing top controls keeps a covered active tab against their leading ed
           (element) => innerWidth - element.getBoundingClientRect().right
         )
       )
-      .toBeCloseTo(8, 0)
+      .toBeCloseTo(restingRightInset, 0)
 
-    const restingGeometry = await tabStrip.evaluate((element) => {
+    const restingGeometry = await tabStrip.evaluate((element, startEdge) => {
       const active = element.querySelector<HTMLElement>(
         ".document-tab[data-active]"
       )
       if (!active) throw new Error("The active tab is unavailable")
       const stripBounds = element.getBoundingClientRect()
       const activeBounds = active.getBoundingClientRect()
-      element.scrollLeft += activeBounds.right - (stripBounds.right - 24)
+      element.scrollLeft += startEdge
+        ? activeBounds.left - (stripBounds.left + 24)
+        : activeBounds.right - (stripBounds.right - 24)
       const positionedActiveBounds = active.getBoundingClientRect()
       return {
+        activeLeft: positionedActiveBounds.left,
         activeRight: positionedActiveBounds.right,
         scrollLeft: element.scrollLeft,
+        stripLeft: stripBounds.left,
         stripRight: stripBounds.right,
       }
-    })
-    expect(restingGeometry.activeRight).toBeCloseTo(
-      restingGeometry.stripRight - 24,
-      0
-    )
+    }, controlsOnLeft)
+    if (controlsOnLeft) {
+      expect(restingGeometry.activeLeft).toBeCloseTo(
+        restingGeometry.stripLeft + 24,
+        0
+      )
+    } else {
+      expect(restingGeometry.activeRight).toBeCloseTo(
+        restingGeometry.stripRight - 24,
+        0
+      )
+    }
 
     const revealedGeometry = () =>
-      tabStrip.evaluate((element) => {
+      tabStrip.evaluate((element, startEdge) => {
         const active = element.querySelector<HTMLElement>(
           ".document-tab[data-active]"
         )
@@ -3324,21 +3400,33 @@ test("revealing top controls keeps a covered active tab against their leading ed
         const controlsBounds = controls.getBoundingClientRect()
         const activeBounds = active.getBoundingClientRect()
         return {
+          activeLeft: activeBounds.left,
           activeRight: activeBounds.right,
-          aligned:
-            Math.abs(stripBounds.right - (controlsBounds.left - 8)) <= 0.5 &&
-            Math.abs(activeBounds.right - stripBounds.right) <= 0.5,
+          aligned: startEdge
+            ? Math.abs(stripBounds.left - (controlsBounds.right + 8)) <= 0.5 &&
+              Math.abs(activeBounds.left - (stripBounds.left + 24)) <= 0.5
+            : Math.abs(stripBounds.right - (controlsBounds.left - 8)) <= 0.5 &&
+              Math.abs(activeBounds.right - stripBounds.right) <= 0.5,
           scrollLeft: element.scrollLeft,
+          stripLeft: stripBounds.left,
           stripRight: stripBounds.right,
         }
-      })
+      }, controlsOnLeft)
 
     await tabStrip.hover({ position: { x: 20, y: 15 } })
     await expect.poll(async () => (await revealedGeometry()).aligned).toBe(true)
     const firstReveal = await revealedGeometry()
-    expect(firstReveal.stripRight).toBeLessThan(restingGeometry.stripRight)
-    expect(restingGeometry.activeRight).toBeGreaterThan(firstReveal.stripRight)
-    expect(firstReveal.scrollLeft).toBeGreaterThan(restingGeometry.scrollLeft)
+    if (controlsOnLeft) {
+      expect(firstReveal.stripLeft).toBeCloseTo(restingGeometry.stripLeft, 5)
+      expect(firstReveal.activeLeft).toBeCloseTo(restingGeometry.activeLeft, 5)
+      expect(firstReveal.scrollLeft).toBe(restingGeometry.scrollLeft)
+    } else {
+      expect(firstReveal.stripRight).toBeLessThan(restingGeometry.stripRight)
+      expect(restingGeometry.activeRight).toBeGreaterThan(
+        firstReveal.stripRight
+      )
+      expect(firstReveal.scrollLeft).toBeGreaterThan(restingGeometry.scrollLeft)
+    }
 
     const settingsShortcut =
       process.platform === "darwin" ? "Meta+," : "Control+,"
@@ -3357,32 +3445,45 @@ test("revealing top controls keeps a covered active tab against their leading ed
           (element) => innerWidth - element.getBoundingClientRect().right
         )
       )
-      .toBeCloseTo(8, 0)
-    const remountedGeometry = await tabStrip.evaluate((element) => {
+      .toBeCloseTo(restingRightInset, 0)
+    const remountedGeometry = await tabStrip.evaluate((element, startEdge) => {
       const active = element.querySelector<HTMLElement>(
         ".document-tab[data-active]"
       )
       if (!active) throw new Error("The active tab is unavailable")
       const stripBounds = element.getBoundingClientRect()
       const activeBounds = active.getBoundingClientRect()
-      element.scrollLeft += activeBounds.right - (stripBounds.right - 24)
+      element.scrollLeft += startEdge
+        ? activeBounds.left - (stripBounds.left + 24)
+        : activeBounds.right - (stripBounds.right - 24)
       return {
+        activeLeft: active.getBoundingClientRect().left,
         activeRight: active.getBoundingClientRect().right,
         scrollLeft: element.scrollLeft,
+        stripLeft: stripBounds.left,
         stripRight: stripBounds.right,
       }
-    })
+    }, controlsOnLeft)
 
     await tabStrip.hover({ position: { x: 20, y: 15 } })
     await expect.poll(async () => (await revealedGeometry()).aligned).toBe(true)
     const secondReveal = await revealedGeometry()
-    expect(secondReveal.stripRight).toBeLessThan(remountedGeometry.stripRight)
-    expect(remountedGeometry.activeRight).toBeGreaterThan(
-      secondReveal.stripRight
-    )
-    expect(secondReveal.scrollLeft).toBeGreaterThan(
-      remountedGeometry.scrollLeft
-    )
+    if (controlsOnLeft) {
+      expect(secondReveal.stripLeft).toBeCloseTo(remountedGeometry.stripLeft, 5)
+      expect(secondReveal.activeLeft).toBeCloseTo(
+        remountedGeometry.activeLeft,
+        5
+      )
+      expect(secondReveal.scrollLeft).toBe(remountedGeometry.scrollLeft)
+    } else {
+      expect(secondReveal.stripRight).toBeLessThan(remountedGeometry.stripRight)
+      expect(remountedGeometry.activeRight).toBeGreaterThan(
+        secondReveal.stripRight
+      )
+      expect(secondReveal.scrollLeft).toBeGreaterThan(
+        remountedGeometry.scrollLeft
+      )
+    }
   } finally {
     await exitApplication(app)
     await rm(userData, { force: true, recursive: true })
@@ -3530,6 +3631,19 @@ test("a newly created overflowing tab is fully revealed without owning later scr
           )
       )
       .toBe("86px")
+    const windowsCaptionInset = await page
+      .locator(".top-chrome")
+      .evaluate((element) =>
+        Number.parseFloat(
+          getComputedStyle(element).getPropertyValue(
+            "--windows-caption-controls-inset"
+          )
+        )
+      )
+    expect(windowsCaptionInset).toBeCloseTo(
+      process.platform === "win32" ? WINDOWS_CAPTION_CONTROLS_WIDTH / 2 : 0,
+      5
+    )
     await expect
       .poll(() =>
         tabStrip.evaluate((element) => {
@@ -7648,6 +7762,8 @@ test("live Markdown renders nested quotes and foldable callout cards", async () 
     await expect(custom.locator(".cm-md-callout-title")).toHaveText(
       "Authored custom title"
     )
+    await page.emulateMedia({ colorScheme: "light" })
+    await expect(page.locator("html")).toHaveClass(/light/)
     const calloutAppearance = await page.evaluate(() => {
       const categories = [
         "info",
@@ -7735,9 +7851,17 @@ test("live Markdown renders nested quotes and foldable callout cards", async () 
       bug: calloutAppearance.titleColors.danger,
       important: calloutAppearance.titleColors.example,
     })
+    const expectedCalloutColor = await page.evaluate(() => {
+      const sample = document.createElement("span")
+      sample.style.color = "var(--document-foreground)"
+      document.body.append(sample)
+      const color = getComputedStyle(sample).color
+      sample.remove()
+      return color
+    })
     expect(calloutAppearance).toMatchObject({
       borderWidths: ["0px", "0px", "0px", "0px"],
-      color: "rgb(23, 23, 23)",
+      color: expectedCalloutColor,
       titleTextTransform: "uppercase",
     })
     expect(calloutAppearance.titleFontRatio).toBeCloseTo(1, 4)

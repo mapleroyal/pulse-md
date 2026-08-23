@@ -226,6 +226,17 @@ describe("electron-builder configuration", () => {
     expect(installerInclude).toContain(
       'DeleteRegKey SHCTX "Software\\Classes\\PulseMD.Markdown"'
     )
+    expect(installerInclude).toContain('${If} $installMode == "all"')
+    expect(installerInclude).toContain(
+      'DeleteRegKey HKCU "Software\\Classes\\PulseMD.Markdown"'
+    )
+    expect(installerInclude).toContain(
+      'DeleteRegKey HKCU "Software\\Classes\\pulse-md"'
+    )
+    expect(installerInclude).toContain(
+      'DeleteRegValue HKCU "Software\\Classes\\.${extension}\\OpenWithProgids" "PulseMD.Markdown"'
+    )
+    expect(installerInclude).toContain("!insertmacro UPDATEFILEASSOC")
   })
 
   it("verifies Electron downloads from the package's pinned checksums", () => {
