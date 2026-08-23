@@ -8,6 +8,7 @@ import path from "node:path"
 import { FuseV1Options, getCurrentFuseWire } from "@electron/fuses"
 
 import { assertAdaptiveMacIconAssetInfo } from "./macos-icon-assets.mjs"
+import { sameCanonicalPath } from "./canonical-path.mjs"
 
 const projectRoot = path.resolve(import.meta.dirname, "..")
 const releaseDirectory = path.join(projectRoot, "release")
@@ -717,7 +718,7 @@ async function verifyDefaultPackagedCliIdentity(
       ? path.join(environment.APPDATA, expectedProductName)
       : process.platform === "darwin"
         ? path.join(
-            environment.HOME,
+            os.homedir(),
             "Library",
             "Application Support",
             expectedProductName
@@ -748,9 +749,13 @@ async function verifyDefaultPackagedCliIdentity(
         ?.slice(label.length + 2)
     const profileDirectory = value("Profiles")
     const scratchDirectory = value("Scratch")
+    const applicationMatches = await sameCanonicalPath(
+      value("Application"),
+      executable
+    )
     if (
       !doctor.stdout.startsWith(`${expectedProductName} `) ||
-      value("Application") !== executable ||
+      !applicationMatches ||
       value("Packaged") !== "yes" ||
       value("Endpoint") !== endpoint ||
       path.resolve(profileDirectory ?? "") !==

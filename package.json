@@ -40,7 +40,7 @@
     "cli:dev": "node scripts/cli-development.mjs",
     "bundle:check": "node scripts/verify-csp.mjs index.html dist/index.html && node scripts/report-bundle.mjs --check",
     "bundle:report": "node scripts/report-bundle.mjs",
-    "bundle:test": "node --test scripts/report-bundle.test.mjs scripts/verify-csp.test.mjs scripts/macos-icon-assets.test.mjs scripts/build-release.test.mjs scripts/after-extract.test.mjs scripts/electron-download-config.test.mjs scripts/e2e-worker-policy.test.mjs scripts/windows-installer-launch.test.mjs scripts/windows-msvc.test.mjs",
+    "bundle:test": "node --test scripts/report-bundle.test.mjs scripts/verify-csp.test.mjs scripts/macos-icon-assets.test.mjs scripts/build-release.test.mjs scripts/after-extract.test.mjs scripts/canonical-path.test.mjs scripts/electron-download-config.test.mjs scripts/e2e-worker-policy.test.mjs scripts/windows-installer-launch.test.mjs scripts/windows-msvc.test.mjs",
     "check": "npm run format:check && npm run lint && npm test && npm run test:cli && npm run bundle:test && npm run build && npm run bundle:check",
     "check:full": "npm run check && npm run test:e2e",
     "benchmark:launch": "node scripts/benchmark-launch.mjs",
