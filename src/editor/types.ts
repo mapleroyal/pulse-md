@@ -137,6 +137,8 @@ export interface MarkdownEditorControllerOptions {
   autofocus?: boolean
   /** Empty primary documents focus their caret by default; auxiliary previews opt out. */
   focusWhenEmpty?: boolean
+  /** Creates non-interactive preview surfaces as read-only from their first DOM commit. */
+  readOnly?: boolean
   initialCursor?: { line: number; column: number }
   platform?: AppPlatform
   spellCheck?: boolean

@@ -1051,6 +1051,7 @@ export interface TabDescriptor {
   fileMissing: boolean
   filePath: string | null
   kind: DocumentKind
+  scratchId?: string
 }
 
 export type WindowProfileTabVisibility = TabVisibilityMode | "inherit"

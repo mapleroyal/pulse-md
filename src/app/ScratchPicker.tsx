@@ -1,4 +1,5 @@
 import * as React from "react"
+import { Autocomplete as AutocompletePrimitive } from "@base-ui/react"
 import { FileTextIcon, SearchIcon } from "lucide-react"
 
 import {
@@ -16,11 +17,6 @@ import {
 } from "@/app/scratch-picker-model"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import {
-  ContextMenu,
-  ContextMenuContent,
-  ContextMenuTrigger,
-} from "@/components/ui/context-menu"
 import { Input } from "@/components/ui/input"
 import {
   Select,
@@ -45,7 +41,7 @@ export interface ScratchPreviewRenderState {
   error: string | null
   loading: boolean
   preview: ScratchPreviewDocument | null
-  scratch: ScratchSummary
+  scratch: ScratchSummary | null
 }
 
 export interface ScratchPickerProps {
@@ -67,10 +63,6 @@ export interface ScratchPickerProps {
     interactionDisabled: boolean
   ) => React.ReactNode
   renderDetails?: (
-    scratch: ScratchSummary,
-    interactionDisabled: boolean
-  ) => React.ReactNode
-  renderRowContextMenu?: (
     scratch: ScratchSummary,
     interactionDisabled: boolean
   ) => React.ReactNode
@@ -102,6 +94,13 @@ interface ScratchPreviewState {
   error: string | null
   preview: ScratchPreviewDocument | null
   scratchId: string | null
+}
+
+function preventBaseUiHandler(event: React.KeyboardEvent<HTMLInputElement>) {
+  const baseUiEvent = event as React.KeyboardEvent<HTMLInputElement> & {
+    preventBaseUIHandler?: () => void
+  }
+  baseUiEvent.preventBaseUIHandler?.()
 }
 
 function useScratchPreview(
@@ -261,21 +260,15 @@ export function ScratchSourcePreview({
 interface VirtualScratchListProps {
   entries: readonly ScratchSummary[]
   interactive: boolean
-  listboxId: string
-  renderRowContextMenu?: ScratchPickerProps["renderRowContextMenu"]
   selectedId: string | null
-  onFocusSearch: () => void
-  onSelect: (scratchId: string) => void
+  onSelectedIdChange: (scratchId: string) => void
 }
 
 function VirtualScratchList({
   entries,
   interactive,
-  listboxId,
-  renderRowContextMenu,
   selectedId,
-  onFocusSearch,
-  onSelect,
+  onSelectedIdChange,
 }: VirtualScratchListProps) {
   const listRef = React.useRef<HTMLDivElement>(null)
   const scrollTopRef = React.useRef(0)
@@ -343,12 +336,10 @@ function VirtualScratchList({
   )
 
   return (
-    <div
+    <AutocompletePrimitive.List
       ref={listRef}
-      id={listboxId}
       aria-label="Scratches"
       className="no-scrollbar min-h-0 overflow-x-hidden overflow-y-auto p-1"
-      role="listbox"
       onScroll={(event) => {
         scrollTopRef.current = event.currentTarget.scrollTop
         if (scrollFrameRef.current !== null) return
@@ -368,43 +359,6 @@ function VirtualScratchList({
           scratch.excerpt.trim() ||
           (scratch.byteLength === 0 ? "Empty scratch" : "No text preview")
 
-        const row = (
-          <button
-            id={`${listboxId}-option-${entryIndex}`}
-            aria-posinset={entryIndex + 1}
-            aria-selected={selected}
-            aria-setsize={entries.length}
-            className="grid h-[5.25rem] w-full content-center gap-1 rounded-md px-3 py-2 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring/40 data-[selected=true]:bg-accent"
-            data-scratch-id={scratch.scratchId}
-            data-selected={selected || undefined}
-            disabled={!interactive}
-            role="option"
-            type="button"
-            onClick={() => onSelect(scratch.scratchId)}
-            onPointerDown={(event) => {
-              if (event.button !== 0) return
-              event.preventDefault()
-              onFocusSearch()
-            }}
-          >
-            <span className="flex min-w-0 items-center gap-2">
-              <span className="min-w-0 flex-1 truncate text-sm font-medium">
-                {scratchTitle(scratch)}
-              </span>
-              {scratch.open ? (
-                <span
-                  aria-label="Open"
-                  className="size-1.5 shrink-0 rounded-full bg-ring"
-                  data-corner-shape="round"
-                />
-              ) : null}
-            </span>
-            <span className="line-clamp-2 min-w-0 text-xs leading-4 text-muted-foreground">
-              {excerpt}
-            </span>
-          </button>
-        )
-
         return (
           <React.Fragment key={scratch.scratchId}>
             {gapBefore > 0 ? (
@@ -413,19 +367,40 @@ function VirtualScratchList({
                 style={{ height: gapBefore * SCRATCH_ROW_HEIGHT }}
               />
             ) : null}
-            {renderRowContextMenu ? (
-              <ContextMenu>
-                <ContextMenuTrigger render={row} />
-                <ContextMenuContent
-                  aria-label={`Actions for ${scratchTitle(scratch)}`}
-                  className="min-w-44"
-                >
-                  {renderRowContextMenu(scratch, !interactive)}
-                </ContextMenuContent>
-              </ContextMenu>
-            ) : (
-              row
-            )}
+            <AutocompletePrimitive.Item
+              aria-selected={selected}
+              aria-posinset={entryIndex + 1}
+              aria-setsize={entries.length}
+              className="grid h-[5.25rem] w-full content-center gap-1 rounded-md px-3 py-2 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring/40 data-[selected=true]:bg-accent"
+              data-scratch-id={scratch.scratchId}
+              data-selected={selected || undefined}
+              disabled={!interactive}
+              index={entryIndex}
+              tabIndex={-1}
+              value={scratch}
+              onClick={(event) => {
+                event.preventBaseUIHandler()
+                onSelectedIdChange(scratch.scratchId)
+              }}
+              onMouseDown={(event) => event.preventBaseUIHandler()}
+              onPointerDownCapture={(event) => event.preventBaseUIHandler()}
+            >
+              <span className="flex min-w-0 items-center gap-2">
+                <span className="min-w-0 flex-1 truncate text-sm font-medium">
+                  {scratchTitle(scratch)}
+                </span>
+                {scratch.open ? (
+                  <span
+                    aria-label="Open"
+                    className="size-1.5 shrink-0 rounded-full bg-ring"
+                    data-corner-shape="round"
+                  />
+                ) : null}
+              </span>
+              <span className="line-clamp-2 min-w-0 text-xs leading-4 text-muted-foreground">
+                {excerpt}
+              </span>
+            </AutocompletePrimitive.Item>
           </React.Fragment>
         )
       })}
@@ -439,7 +414,7 @@ function VirtualScratchList({
           }}
         />
       ) : null}
-    </div>
+    </AutocompletePrimitive.List>
   )
 }
 
@@ -456,7 +431,6 @@ export function ScratchPicker({
   onEscapeWhenEmpty,
   renderActions,
   renderDetails,
-  renderRowContextMenu,
   renderPreview = ScratchSourcePreview,
   className,
   emptyMessage = "No scratches yet.",
@@ -470,7 +444,6 @@ export function ScratchPicker({
   const ownInputRef = React.useRef<HTMLInputElement>(null)
   const pendingCyclesRef = React.useRef<(1 | -1)[]>([])
   const inputRef = providedInputRef ?? ownInputRef
-  const listboxId = React.useId()
   const visibleScratches = scratches
   const effectiveSelectedId = visibleScratches.some(
     (scratch) => scratch.scratchId === selectedId
@@ -488,19 +461,6 @@ export function ScratchPicker({
       onSelectedIdChange(effectiveSelectedId)
     }
   }, [effectiveSelectedId, onSelectedIdChange, resultsCurrent, selectedId])
-
-  const selectRelative = React.useCallback(
-    (direction: 1 | -1) => {
-      if (!resultsCurrent || visibleScratches.length === 0) return
-      const nextIndex = nextScratchIndex(
-        visibleScratches.length,
-        selectedIndex,
-        direction
-      )
-      onSelectedIdChange(visibleScratches[nextIndex]!.scratchId)
-    },
-    [onSelectedIdChange, resultsCurrent, selectedIndex, visibleScratches]
-  )
 
   React.useLayoutEffect(() => {
     if (!resultsCurrent || pendingCyclesRef.current.length === 0) {
@@ -536,20 +496,30 @@ export function ScratchPicker({
       if (!action) return
       if (action.kind === "cycle") {
         event.preventDefault()
-        if (resultsCurrent) {
-          selectRelative(action.direction)
-        } else if (pendingCyclesRef.current.length < 32) {
-          pendingCyclesRef.current.push(action.direction)
+        preventBaseUiHandler(event)
+        if (!resultsCurrent) {
+          if (pendingCyclesRef.current.length < 32) {
+            pendingCyclesRef.current.push(action.direction)
+          }
+        } else if (visibleScratches.length > 0) {
+          const nextIndex = nextScratchIndex(
+            visibleScratches.length,
+            selectedIndex,
+            action.direction
+          )
+          onSelectedIdChange(visibleScratches[nextIndex]!.scratchId)
         }
         return
       }
       if (!scratchPickerActionAllowed(action, resultsCurrent)) {
         event.preventDefault()
+        preventBaseUiHandler(event)
         return
       }
       if (action.kind === "clear-query" || action.kind === "close") {
         event.preventDefault()
         event.stopPropagation()
+        preventBaseUiHandler(event)
         if (action.kind === "clear-query") {
           onQueryChange("")
         } else {
@@ -559,16 +529,19 @@ export function ScratchPicker({
       }
       if (!selectedScratch || !onActivate) return
       event.preventDefault()
+      preventBaseUiHandler(event)
       onActivate(selectedScratch, action.disposition)
     },
     [
       onActivate,
       onEscapeWhenEmpty,
       onQueryChange,
+      onSelectedIdChange,
       query,
       resultsCurrent,
-      selectRelative,
+      selectedIndex,
       selectedScratch,
+      visibleScratches,
     ]
   )
 
@@ -585,151 +558,155 @@ export function ScratchPicker({
       : null
 
   return (
-    <div
-      aria-busy={loading}
-      className={cn("flex min-h-0 flex-1 flex-col gap-3", className)}
-      data-scratch-picker=""
-      data-results-current={resultsCurrent}
+    <AutocompletePrimitive.Root<ScratchSummary>
+      filter={null}
+      filteredItems={visibleScratches}
+      highlightItemOnHover={false}
+      inline
+      itemToStringValue={(scratch) => scratch.scratchId}
+      items={visibleScratches}
+      mode="none"
+      open
+      value={query}
+      virtualized
+      onValueChange={(inputValue, { reason }) => {
+        if (reason === "input-change" || reason === "input-clear") {
+          onQueryChange(inputValue)
+        }
+      }}
     >
-      {loading ? (
-        <span className="sr-only" role="status">
-          Searching scratches…
-        </span>
-      ) : null}
       <div
-        className="flex shrink-0 items-center gap-2 max-sm:flex-wrap"
-        data-scratch-picker-controls=""
+        aria-busy={loading}
+        className={cn("flex min-h-0 flex-1 flex-col gap-3", className)}
+        data-scratch-picker=""
+        data-results-current={resultsCurrent}
       >
-        <div className="relative min-w-48 flex-1" data-scratch-picker-search="">
-          <SearchIcon
-            aria-hidden="true"
-            className="pointer-events-none absolute top-1/2 left-3 z-10 size-4 -translate-y-1/2 text-muted-foreground"
-          />
-          <Input
-            ref={inputRef}
-            aria-activedescendant={
-              resultsCurrent && selectedIndex >= 0
-                ? `${listboxId}-option-${selectedIndex}`
-                : undefined
-            }
-            aria-autocomplete="list"
-            aria-controls={listboxId}
-            aria-expanded="true"
-            aria-label="Search scratches"
-            autoComplete="off"
-            className="pl-9"
-            maxLength={MAX_SCRATCH_QUERY_LENGTH}
-            placeholder="Search scratches…"
-            role="combobox"
-            type="search"
-            value={query}
-            onChange={(event) => onQueryChange(event.currentTarget.value)}
-            onKeyDown={handleSearchKeyDown}
-          />
-        </div>
-        <Select
-          value={sort}
-          onValueChange={(value) => onSortChange(value as ScratchSort)}
+        {loading ? (
+          <span className="sr-only" role="status">
+            Searching scratches…
+          </span>
+        ) : null}
+        <div
+          className="flex shrink-0 items-center gap-2 max-sm:flex-wrap"
+          data-scratch-picker-controls=""
         >
-          <SelectTrigger
-            aria-label="Sort scratches"
-            className="w-44 shrink-0"
-            data-scratch-picker-sort=""
+          <div
+            className="relative min-w-48 flex-1"
+            data-scratch-picker-search=""
           >
-            <SelectValue>{SCRATCH_SORT_LABELS[sort]}</SelectValue>
-          </SelectTrigger>
-          <SelectContent align="end">
-            <SelectGroup>
-              {SCRATCH_SORT_OPTIONS.map((option) => (
-                <SelectItem key={option} value={option}>
-                  {SCRATCH_SORT_LABELS[option]}
-                </SelectItem>
-              ))}
-            </SelectGroup>
-          </SelectContent>
-        </Select>
-      </div>
-
-      {errorMessage ? (
-        <div
-          className="shrink-0 rounded-md border border-destructive/30 bg-destructive/8 px-3 py-2 text-sm text-destructive"
-          role="alert"
-        >
-          {errorMessage}
-        </div>
-      ) : null}
-
-      {inventoryError ? (
-        <div
-          className="flex shrink-0 flex-wrap items-center gap-2 rounded-md border border-destructive/30 bg-destructive/8 px-3 py-2 text-sm text-destructive"
-          role="alert"
-        >
-          <span className="min-w-0 flex-1">{inventoryError}</span>
-          {onRetryInventory ? (
-            <Button
-              disabled={loading}
-              size="xs"
-              type="button"
-              variant="outline"
-              onClick={onRetryInventory}
-            >
-              {loading ? "Retrying…" : "Retry"}
-            </Button>
-          ) : null}
-        </div>
-      ) : null}
-
-      <div
-        className="grid min-h-0 flex-1 grid-cols-[minmax(13rem,0.36fr)_minmax(0,1fr)] overflow-hidden rounded-md border border-border/70 bg-muted/20 max-sm:grid-cols-1 max-sm:grid-rows-[minmax(10rem,0.42fr)_minmax(0,1fr)]"
-        data-scratch-picker-workspace=""
-      >
-        <div
-          className="grid min-h-0 border-r border-border/70 max-sm:border-r-0 max-sm:border-b"
-          data-scratch-picker-list=""
-        >
-          {visibleScratches.length > 0 ? (
-            <VirtualScratchList
-              entries={visibleScratches}
-              interactive={resultsCurrent}
-              listboxId={listboxId}
-              renderRowContextMenu={renderRowContextMenu}
-              selectedId={effectiveSelectedId}
-              onFocusSearch={() =>
-                inputRef.current?.focus({ preventScroll: true })
-              }
-              onSelect={onSelectedIdChange}
+            <SearchIcon
+              aria-hidden="true"
+              className="pointer-events-none absolute top-1/2 left-3 z-10 size-4 -translate-y-1/2 text-muted-foreground"
             />
-          ) : loading ? (
-            <div
-              className="grid min-h-32 place-items-center p-5 text-center text-sm text-muted-foreground"
-              role="status"
+            <AutocompletePrimitive.Input
+              ref={inputRef}
+              aria-label="Search scratches"
+              autoComplete="off"
+              className="pl-9"
+              maxLength={MAX_SCRATCH_QUERY_LENGTH}
+              placeholder="Search scratches…"
+              render={<Input />}
+              type="search"
+              onKeyDown={handleSearchKeyDown}
+            />
+          </div>
+          <Select
+            value={sort}
+            onValueChange={(value) => onSortChange(value as ScratchSort)}
+          >
+            <SelectTrigger
+              aria-label="Sort scratches"
+              className="w-44 shrink-0"
+              data-scratch-picker-sort=""
             >
-              Searching…
-            </div>
-          ) : inventoryError ? (
-            <div className="grid min-h-32 place-items-center p-5 text-center text-sm text-muted-foreground">
-              Scratch list unavailable.
-            </div>
-          ) : (
-            <div className="grid min-h-32 place-items-center p-5 text-center text-sm text-muted-foreground">
-              {query ? "No matching scratches." : emptyMessage}
-            </div>
-          )}
+              <SelectValue>{SCRATCH_SORT_LABELS[sort]}</SelectValue>
+            </SelectTrigger>
+            <SelectContent align="end">
+              <SelectGroup>
+                {SCRATCH_SORT_OPTIONS.map((option) => (
+                  <SelectItem key={option} value={option}>
+                    {SCRATCH_SORT_LABELS[option]}
+                  </SelectItem>
+                ))}
+              </SelectGroup>
+            </SelectContent>
+          </Select>
         </div>
 
-        <section
-          aria-label="Scratch preview"
-          className={cn(
-            "grid min-h-0 overflow-hidden max-sm:overflow-y-auto",
-            renderDetails
-              ? "grid-rows-[auto_auto_minmax(0,1fr)] max-sm:grid-rows-[auto_auto_minmax(12rem,1fr)]"
-              : "grid-rows-[auto_minmax(0,1fr)] max-sm:grid-rows-[auto_minmax(12rem,1fr)]"
-          )}
-          data-has-selection={selectedScratch ? "true" : undefined}
-          data-scratch-picker-preview=""
+        {errorMessage ? (
+          <div
+            className="shrink-0 rounded-md border border-destructive/30 bg-destructive/8 px-3 py-2 text-sm text-destructive"
+            role="alert"
+          >
+            {errorMessage}
+          </div>
+        ) : null}
+
+        {inventoryError ? (
+          <div
+            className="flex shrink-0 flex-wrap items-center gap-2 rounded-md border border-destructive/30 bg-destructive/8 px-3 py-2 text-sm text-destructive"
+            role="alert"
+          >
+            <span className="min-w-0 flex-1">{inventoryError}</span>
+            {onRetryInventory ? (
+              <Button
+                disabled={loading}
+                size="xs"
+                type="button"
+                variant="outline"
+                onClick={onRetryInventory}
+              >
+                {loading ? "Retrying…" : "Retry"}
+              </Button>
+            ) : null}
+          </div>
+        ) : null}
+
+        <div
+          className="grid min-h-0 flex-1 grid-cols-[minmax(13rem,0.36fr)_minmax(0,1fr)] overflow-hidden rounded-md border border-border/70 bg-muted/20 max-sm:grid-cols-1 max-sm:grid-rows-[minmax(10rem,0.42fr)_minmax(0,1fr)]"
+          data-scratch-picker-workspace=""
         >
-          {selectedScratch ? (
-            <>
+          <div
+            className="grid min-h-0 border-r border-border/70 max-sm:border-r-0 max-sm:border-b"
+            data-scratch-picker-list=""
+          >
+            {visibleScratches.length > 0 ? (
+              <VirtualScratchList
+                entries={visibleScratches}
+                interactive={resultsCurrent}
+                selectedId={effectiveSelectedId}
+                onSelectedIdChange={onSelectedIdChange}
+              />
+            ) : loading ? (
+              <div
+                className="grid min-h-32 place-items-center p-5 text-center text-sm text-muted-foreground"
+                role="status"
+              >
+                Searching…
+              </div>
+            ) : inventoryError ? (
+              <div className="grid min-h-32 place-items-center p-5 text-center text-sm text-muted-foreground">
+                Scratch list unavailable.
+              </div>
+            ) : (
+              <div className="grid min-h-32 place-items-center p-5 text-center text-sm text-muted-foreground">
+                {query ? "No matching scratches." : emptyMessage}
+              </div>
+            )}
+          </div>
+
+          <section
+            aria-label="Scratch preview"
+            className={cn(
+              "grid min-h-0 overflow-hidden max-sm:overflow-y-auto",
+              renderDetails
+                ? "grid-rows-[auto_auto_minmax(0,1fr)] max-sm:grid-rows-[auto_auto_minmax(12rem,1fr)]"
+                : "grid-rows-[auto_minmax(0,1fr)] max-sm:grid-rows-[auto_minmax(12rem,1fr)]"
+            )}
+            data-has-selection={selectedScratch ? "true" : undefined}
+            data-scratch-picker-preview=""
+          >
+            {selectedScratch ? (
               <header
                 className="flex min-w-0 items-start gap-3 border-b border-border/70 px-4 py-3"
                 data-scratch-picker-preview-header=""
@@ -772,34 +749,37 @@ export function ScratchPicker({
                   </div>
                 ) : null}
               </header>
-              {renderDetails ? (
-                <div
-                  className="border-b border-border/70 p-4"
-                  data-scratch-picker-details=""
-                >
-                  {renderDetails(selectedScratch, !resultsCurrent)}
-                </div>
-              ) : null}
+            ) : null}
+            {selectedScratch && renderDetails ? (
               <div
-                className="min-h-0 overflow-auto bg-background/50 max-sm:min-h-48"
-                data-scratch-picker-preview-body=""
+                className="border-b border-border/70 p-4"
+                data-scratch-picker-details=""
               >
-                {renderPreview({
-                  error: previewError,
-                  loading: previewLoading,
-                  preview: previewForSelection,
-                  scratch: selectedScratch,
-                })}
+                {renderDetails(selectedScratch, !resultsCurrent)}
               </div>
-            </>
-          ) : (
-            <div className="col-span-full grid min-h-40 place-items-center p-5 text-sm text-muted-foreground">
-              Select a scratch to preview it.
+            ) : null}
+            <div
+              key="scratch-preview-body"
+              className="min-h-0 overflow-auto bg-background/50 max-sm:min-h-48"
+              data-scratch-picker-preview-body=""
+              hidden={!selectedScratch}
+            >
+              {renderPreview({
+                error: selectedScratch ? previewError : null,
+                loading: selectedScratch ? previewLoading : false,
+                preview: selectedScratch ? previewForSelection : null,
+                scratch: selectedScratch,
+              })}
             </div>
-          )}
-        </section>
+            {!selectedScratch ? (
+              <div className="col-span-full grid min-h-40 place-items-center p-5 text-sm text-muted-foreground">
+                Select a scratch to preview it.
+              </div>
+            ) : null}
+          </section>
+        </div>
       </div>
-    </div>
+    </AutocompletePrimitive.Root>
   )
 }
 

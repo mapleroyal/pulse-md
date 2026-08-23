@@ -6,6 +6,7 @@ import {
   CopyIcon,
   EyeIcon,
   EyeOffIcon,
+  FilePenLineIcon,
   FileWarningIcon,
   FolderOpenIcon,
   HashIcon,
@@ -177,6 +178,7 @@ interface TopChromeProps {
   onHideTopControls: (controls: readonly TopRightControlKey[]) => void
   onNavigateBack: () => void
   onNavigateForward: () => void
+  onEditScratch: (scratchId: string) => void
   onOpenSettings: () => void
   onOpenOutline: () => void
   onResponsiveControlsDrawerLayoutChange: (layout: {
@@ -238,21 +240,23 @@ function topControlGroupWidth(buttonCount: number, hasSeparator: boolean) {
   )
 }
 
-function PathContextMenu({
+function DocumentContextMenu({
   children,
-  enabled,
   finalFocus,
+  pathActionsEnabled,
   platform,
   trigger,
   onCopyPath,
+  onEditScratch,
   onRevealPath,
 }: {
   children: React.ReactNode
-  enabled: boolean
   finalFocus?: React.ComponentProps<typeof ContextMenuContent>["finalFocus"]
+  pathActionsEnabled: boolean
   platform: AppPlatform
   trigger: React.ReactElement
   onCopyPath: () => void
+  onEditScratch?: () => void
   onRevealPath: () => void
 }) {
   const revealLabel =
@@ -263,18 +267,28 @@ function PathContextMenu({
         : "Show in File Manager"
 
   return (
-    <ContextMenu disabled={!enabled}>
+    <ContextMenu disabled={!pathActionsEnabled && !onEditScratch}>
       <ContextMenuTrigger render={trigger}>{children}</ContextMenuTrigger>
-      {enabled ? (
+      {pathActionsEnabled || onEditScratch ? (
         <ContextMenuContent className="min-w-48" finalFocus={finalFocus}>
-          <ContextMenuItem onClick={onCopyPath}>
-            <CopyIcon />
-            Copy Path
-          </ContextMenuItem>
-          <ContextMenuItem onClick={onRevealPath}>
-            <FolderOpenIcon />
-            {revealLabel}
-          </ContextMenuItem>
+          {onEditScratch ? (
+            <ContextMenuItem onClick={onEditScratch}>
+              <FilePenLineIcon />
+              Edit Scratch
+            </ContextMenuItem>
+          ) : null}
+          {pathActionsEnabled ? (
+            <>
+              <ContextMenuItem onClick={onCopyPath}>
+                <CopyIcon />
+                Copy Path
+              </ContextMenuItem>
+              <ContextMenuItem onClick={onRevealPath}>
+                <FolderOpenIcon />
+                {revealLabel}
+              </ContextMenuItem>
+            </>
+          ) : null}
         </ContextMenuContent>
       ) : null}
     </ContextMenu>
@@ -323,6 +337,7 @@ function TabChip({
   onCopyPath,
   onDragEnd,
   onDragStart,
+  onEditScratch,
   onRevealPath,
   platform,
   windowZoomFactor,
@@ -340,12 +355,14 @@ function TabChip({
   onCopyPath: () => void
   onDragEnd: (event: React.DragEvent<HTMLDivElement>, token: string) => void
   onDragStart: (tabId: TabId) => void
+  onEditScratch?: () => void
   onRevealPath: () => void
   platform: AppPlatform
   windowZoomFactor: number
 }) {
   const label = splitPath(tab.filePath, tab.displayName)
   const contextMenuFocusRef = React.useRef<HTMLElement | null>(null)
+  const contextMenuFocusTransferredRef = React.useRef(false)
   const dragTokenRef = React.useRef("")
   const dragVisualRef = React.useRef<{
     carrier: HTMLElement
@@ -404,14 +421,18 @@ function TabChip({
 
   return (
     <>
-      <PathContextMenu
-        enabled={tab.filePath !== null}
+      <DocumentContextMenu
         finalFocus={(interactionType) => {
           const focusTarget = contextMenuFocusRef.current
           contextMenuFocusRef.current = null
+          if (contextMenuFocusTransferredRef.current) {
+            contextMenuFocusTransferredRef.current = false
+            return false
+          }
           if (interactionType === "keyboard") return true
           return focusTarget?.isConnected ? focusTarget : false
         }}
+        pathActionsEnabled={tab.filePath !== null}
         platform={platform}
         trigger={
           <div
@@ -533,6 +554,14 @@ function TabChip({
           />
         }
         onCopyPath={onCopyPath}
+        onEditScratch={
+          onEditScratch
+            ? () => {
+                contextMenuFocusTransferredRef.current = true
+                onEditScratch()
+              }
+            : undefined
+        }
         onRevealPath={onRevealPath}
       >
         <ActiveTabIndicator />
@@ -589,7 +618,7 @@ function TabChip({
         >
           <span aria-hidden="true">×</span>
         </button>
-      </PathContextMenu>
+      </DocumentContextMenu>
       {pathPopover.open ? (
         <DeferredLongTextPopover
           anchor={pathPopover.anchor}
@@ -638,6 +667,7 @@ export function TopChrome({
   onHideTopControls,
   onNavigateBack,
   onNavigateForward,
+  onEditScratch,
   onOpenSettings,
   onOpenOutline,
   onResponsiveControlsDrawerLayoutChange,
@@ -1551,8 +1581,8 @@ export function TopChrome({
             style={hiddenForWindowsMenuStyle}
             onPointerEnter={() => onHoverLatchedChange(true)}
           >
-            <PathContextMenu
-              enabled={activeTab.filePath !== null}
+            <DocumentContextMenu
+              pathActionsEnabled={activeTab.filePath !== null}
               platform={platform}
               trigger={<span className="centered-file-surface" />}
               onCopyPath={() => onCopyPath(activeTab.id)}
@@ -1564,7 +1594,7 @@ export function TopChrome({
                 displayName={activeTab.displayName}
                 filePath={activeTab.filePath}
               />
-            </PathContextMenu>
+            </DocumentContextMenu>
           </div>
         ) : null}
 
@@ -1610,6 +1640,11 @@ export function TopChrome({
                       dragChipBoundsRef.current = null
                       setDraggingTabId(tabId)
                     }}
+                    onEditScratch={
+                      tab.scratchId
+                        ? () => onEditScratch(tab.scratchId!)
+                        : undefined
+                    }
                     onDragEnd={(event, dragToken) => {
                       const dropped = event.dataTransfer.dropEffect === "move"
                       const cancelled = dragCancelledRef.current

@@ -150,7 +150,7 @@ test("scratch picker keeps search-first keyboard and pointer interactions", asyn
   try {
     const page = await app.firstWindow()
     await page.locator(".cm-editor").waitFor()
-    await page.keyboard.press(`${primaryModifier}+P`)
+    await clickMenuItem(app, "file-open-scratch")
 
     const picker = page.getByRole("dialog", { name: "Open Scratch" })
     const pickerSurface = picker.locator("[data-scratch-picker]")
@@ -162,14 +162,69 @@ test("scratch picker keeps search-first keyboard and pointer interactions", asyn
     const [alpha, beta, gamma] = scratchFixtures
 
     await expect(picker).toBeVisible()
+    const initialSearchNode = await search.elementHandle()
+    expect(initialSearchNode).not.toBeNull()
+    if (process.platform === "darwin") {
+      await app.evaluate(({ BrowserWindow }) => {
+        const window =
+          BrowserWindow.getFocusedWindow() ??
+          BrowserWindow.getAllWindows().find(
+            (candidate) => !candidate.isDestroyed() && candidate.isVisible()
+          )
+        const contents = window?.webContents
+        if (!contents) throw new Error("The scratch window is unavailable")
+        contents.sendInputEvent({ type: "keyDown", keyCode: "x" })
+        contents.sendInputEvent({ type: "char", keyCode: "x" })
+        contents.sendInputEvent({ type: "keyUp", keyCode: "x" })
+      })
+      await expect(search).toHaveValue("x")
+      await page.keyboard.press("Backspace")
+    }
+    await page.keyboard.type("s")
+    await expect(search).toHaveValue("s")
+    await expect(search).toBeFocused()
+    await page.keyboard.press("ArrowDown")
+    await expect(option(beta.id)).toHaveAttribute("aria-selected", "true")
+    await page.keyboard.type("c")
+    await expect(search).toHaveValue("sc")
+    await expect(search).toBeFocused()
+    await page.keyboard.press("ArrowUp")
+    await expect(option(alpha.id)).toHaveAttribute("aria-selected", "true")
+    await page.keyboard.type("r")
+    await expect(search).toHaveValue("scr")
+    await expect(picker).toBeVisible()
     await expect(search).toBeFocused()
     await expect(option(alpha.id)).toHaveAttribute("aria-selected", "true")
+    expect(
+      await initialSearchNode?.evaluate(
+        (node) =>
+          node.isConnected &&
+          node === document.activeElement &&
+          node ===
+            document.querySelector(
+              '[role="combobox"][aria-label="Search scratches"]'
+            )
+      )
+    ).toBe(true)
+    await page.keyboard.press("Escape")
+    await expect(search).toHaveValue("")
+    await expect(option(alpha.id)).toHaveAttribute("aria-selected", "true")
+    const renderedPreviewContent = picker.locator(
+      "[data-scratch-markdown-preview] .cm-content"
+    )
+    await expect(renderedPreviewContent).toHaveAttribute(
+      "contenteditable",
+      "false"
+    )
+    const initialPreviewContentNode =
+      await renderedPreviewContent.elementHandle()
+    expect(initialPreviewContentNode).not.toBeNull()
 
     const initialTabId = await page
       .locator(".document-tab[data-active]")
       .getAttribute("data-tab-id")
-    await search.pressSequentially("Gamma")
-    await search.press("Enter")
+    await page.keyboard.type("Gamma")
+    await page.keyboard.press("Enter")
     await expect(picker).toBeVisible()
     await expect(search).toBeFocused()
     await expect(page.locator(".document-tab[data-active]")).toHaveAttribute(
@@ -201,8 +256,16 @@ test("scratch picker keeps search-first keyboard and pointer interactions", asyn
 
     await option(gamma.id).click()
     await expect(option(gamma.id)).toHaveAttribute("aria-selected", "true")
-    await expect(search).toBeFocused()
+    await expect(option(gamma.id)).toBeFocused()
 
+    await search.fill("No matching scratch")
+    await expect(picker.getByRole("option")).toHaveCount(0)
+    expect(
+      await initialPreviewContentNode?.evaluate(
+        (node) => node.isConnected && node.matches(".cm-content")
+      )
+    ).toBe(true)
+    await search.press("Escape")
     await search.fill("Alpha")
     await expect(picker.getByRole("option")).toHaveCount(1)
     await search.press("Escape")
@@ -213,7 +276,7 @@ test("scratch picker keeps search-first keyboard and pointer interactions", asyn
     await search.press("Escape")
     await expect(picker).toBeHidden()
 
-    await page.keyboard.press(`${primaryModifier}+P`)
+    await clickMenuItem(app, "file-open-scratch")
     await search.fill("Alpha")
     await expect(option(alpha.id)).toBeVisible()
     await expect(pickerSurface).toHaveAttribute("data-results-current", "true")
@@ -222,7 +285,7 @@ test("scratch picker keeps search-first keyboard and pointer interactions", asyn
     await expect(page.locator(".document-tab")).toHaveCount(1)
     await expect(page).toHaveTitle("Alpha")
 
-    await page.keyboard.press(`${primaryModifier}+P`)
+    await clickMenuItem(app, "file-open-scratch")
     await search.fill("Alpha")
     await expect(option(alpha.id)).toBeVisible()
     await expect(pickerSurface).toHaveAttribute("data-results-current", "true")
@@ -231,7 +294,7 @@ test("scratch picker keeps search-first keyboard and pointer interactions", asyn
     await expect(page.getByRole("tab")).toHaveCount(1)
     await expect(page).toHaveTitle("Alpha")
 
-    await page.keyboard.press(`${primaryModifier}+P`)
+    await clickMenuItem(app, "file-open-scratch")
     await search.fill("Beta")
     await expect(option(beta.id)).toBeVisible()
     await expect(pickerSurface).toHaveAttribute("data-results-current", "true")
@@ -308,22 +371,35 @@ test("scratch picker preserves immediate arrows and search focus while empty pre
       )
     }, inventory)
 
-    await page.keyboard.press(`${primaryModifier}+P`)
+    await clickMenuItem(app, "file-open-scratch")
     const picker = page.getByRole("dialog", { name: "Open Scratch" })
     const search = picker.getByRole("combobox", {
       name: "Search scratches",
     })
     const option = (scratchId: string) =>
       picker.locator(`[role="option"][data-scratch-id="${scratchId}"]`)
-    const [alpha, beta] = scratchFixtures
+    const [, beta, gamma] = scratchFixtures
 
-    await expect(search).toBeFocused()
+    await expect(picker).toBeVisible()
+    const initialSearchNode = await search.elementHandle()
+    expect(initialSearchNode).not.toBeNull()
     await page.keyboard.press("ArrowDown")
-    await releaseInventory()
-    await expect(option(alpha.id)).toHaveAttribute("aria-selected", "true")
+    await page.keyboard.type("s")
+    await page.keyboard.press("ArrowDown")
+    await page.keyboard.type("c")
+    await expect(search).toHaveValue("sc")
     await expect(search).toBeFocused()
+    await releaseInventory()
+    await expect(option(gamma.id)).toHaveAttribute("aria-selected", "true")
+    await expect(search).toBeFocused()
+    expect(
+      await initialSearchNode?.evaluate(
+        (node) => node.isConnected && node === document.activeElement
+      )
+    ).toBe(true)
 
-    await search.fill("Empty")
+    await page.keyboard.press("Escape")
+    await page.keyboard.type("Empty")
     await expect(option(emptyScratch.id)).toHaveAttribute(
       "aria-selected",
       "true"
@@ -333,12 +409,20 @@ test("scratch picker preserves immediate arrows and search focus while empty pre
       .waitFor()
     await expect(search).toBeFocused()
 
-    await search.fill("B")
+    await page.keyboard.press("Escape")
+    await page.keyboard.type("B")
     await expect(option(beta.id)).toHaveAttribute("aria-selected", "true")
     await expect(search).toBeFocused()
     await page.keyboard.press("ArrowDown")
     await page.keyboard.type("e")
     await expect(search).toHaveValue("Be")
+    await page.keyboard.press("ArrowUp")
+    await page.keyboard.type("t")
+    await expect(search).toHaveValue("Bet")
+    await page.keyboard.press("ArrowDown")
+    await page.keyboard.press("Backspace")
+    await page.keyboard.type("t")
+    await expect(search).toHaveValue("Bet")
     await expect(option(beta.id)).toHaveAttribute("aria-selected", "true")
     await expect(search).toBeFocused()
   } finally {
@@ -348,7 +432,7 @@ test("scratch picker preserves immediate arrows and search focus while empty pre
   }
 })
 
-test("open scratch offers metadata editing from the row menu and preview actions", async () => {
+test("scratch tabs and preview actions edit metadata and return to their origin", async () => {
   const userData = await mkdtemp(
     path.join(os.tmpdir(), "pulse-md-scratch-picker-edit-e2e-")
   )
@@ -363,36 +447,57 @@ test("open scratch offers metadata editing from the row menu and preview actions
     await page.locator(".cm-editor").waitFor()
     const [, beta, gamma] = scratchFixtures
 
-    await page.keyboard.press(`${primaryModifier}+P`)
+    await clickMenuItem(app, "file-open-scratch")
     let picker = page.getByRole("dialog", { name: "Open Scratch" })
     const betaOption = picker.locator(
       `[role="option"][data-scratch-id="${beta.id}"]`
     )
-    await betaOption.click({ button: "right" })
-    const betaMenu = page.getByRole("menu", { name: "Actions for Beta" })
-    await expect(betaMenu).toBeVisible()
-    await betaMenu.getByRole("menuitem", { name: "Edit Scratch" }).click()
+    await betaOption.click()
+    await picker
+      .getByRole("button", { name: "Open Scratch in New Tab" })
+      .click()
+    await expect(picker).toBeHidden()
+    const betaTab = page.locator(".document-tab[data-active]")
+    await expect(betaTab.getByRole("tab")).toHaveAccessibleName("Beta")
+    await betaTab.click({ button: "right" })
+    await page.getByRole("menuitem", { name: "Edit Scratch" }).click()
 
     let workspace = page.getByRole("region", {
       name: "Scratches Workspace",
     })
-    await expect(picker).toBeHidden()
     await expect(workspace.getByRole("textbox", { name: "Title" })).toHaveValue(
       "Beta"
     )
     await expect(
       workspace.locator(`[role="option"][data-scratch-id="${beta.id}"]`)
     ).toHaveAttribute("aria-selected", "true")
+    await expect
+      .poll(() =>
+        workspace.evaluate((element) =>
+          element.contains(document.activeElement)
+        )
+      )
+      .toBe(true)
 
-    await workspace.getByRole("button", { name: "Back to Settings" }).click()
-    const settings = page.getByRole("dialog", { name: "Settings" })
-    await settings.getByRole("button", { name: "Close" }).click()
+    await page.keyboard.press("Escape")
+    await expect(workspace).toBeHidden()
+    await expect(page.getByRole("dialog", { name: "Settings" })).toHaveCount(0)
+    await expect(
+      page.getByRole("dialog", { name: "Open Scratch" })
+    ).toHaveCount(0)
+    await expect(betaTab).toHaveAttribute("data-active", "true")
+    await expect(page.locator(".cm-content")).toBeFocused()
 
-    await page.keyboard.press(`${primaryModifier}+P`)
+    await clickMenuItem(app, "file-open-scratch")
     picker = page.getByRole("dialog", { name: "Open Scratch" })
-    await picker
-      .locator(`[role="option"][data-scratch-id="${gamma.id}"]`)
-      .click()
+    const search = picker.getByRole("combobox", { name: "Search scratches" })
+    const gammaOption = picker.locator(
+      `[role="option"][data-scratch-id="${gamma.id}"]`
+    )
+    await expect(picker).toBeVisible()
+    await expect(search).toBeFocused()
+    await page.keyboard.type("Gamma")
+    await expect(gammaOption).toHaveAttribute("aria-selected", "true")
     await picker.getByRole("button", { name: "Edit", exact: true }).click()
 
     workspace = page.getByRole("region", { name: "Scratches Workspace" })
@@ -402,6 +507,15 @@ test("open scratch offers metadata editing from the row menu and preview actions
     await expect(
       workspace.locator(`[role="option"][data-scratch-id="${gamma.id}"]`)
     ).toHaveAttribute("aria-selected", "true")
+    await workspace
+      .getByRole("button", { name: "Back to Open Scratch" })
+      .click()
+    await expect(workspace).toBeHidden()
+    await expect(picker).toBeVisible()
+    await expect(search).toHaveValue("Gamma")
+    await expect(search).toBeFocused()
+    await expect(gammaOption).toHaveAttribute("aria-selected", "true")
+    await expect(page.getByRole("dialog", { name: "Settings" })).toHaveCount(0)
   } finally {
     await exitApplication(app)
     await rm(userData, { force: true, recursive: true })
@@ -425,7 +539,7 @@ test("scratch picker keeps its selected result actions reachable at minimum size
     await setWindowContentSize(app, 480, 320)
     await expect.poll(() => page.evaluate(() => innerWidth)).toBe(480)
     await expect.poll(() => page.evaluate(() => innerHeight)).toBe(320)
-    await page.keyboard.press(`${primaryModifier}+P`)
+    await clickMenuItem(app, "file-open-scratch")
 
     const picker = page.getByRole("dialog", { name: "Open Scratch" })
     const search = picker.getByRole("combobox", {
@@ -461,7 +575,7 @@ test("scratch picker keeps its selected result actions reachable at minimum size
     await page.evaluate(() => window.pulseMd.previewWindowZoom(2))
     await expect.poll(() => page.evaluate(() => innerWidth)).toBe(240)
     await expect.poll(() => page.evaluate(() => innerHeight)).toBe(160)
-    await page.keyboard.press(`${primaryModifier}+P`)
+    await clickMenuItem(app, "file-open-scratch")
     await expectCompactPickerReachable()
 
     await open.click()
@@ -497,7 +611,7 @@ test("a failed scratch inventory stays distinct from empty and can be retried", 
       })
     })
 
-    await page.keyboard.press(`${primaryModifier}+P`)
+    await clickMenuItem(app, "file-open-scratch")
     const browser = page.getByRole("dialog", { name: "Open Scratch" })
     await expect(
       browser.getByRole("alert").filter({
@@ -822,7 +936,7 @@ test("a failed scratch open keeps the picker open with an actionable error", asy
         response: 0,
       })) as typeof dialog.showMessageBox
     })
-    await page.keyboard.press(`${primaryModifier}+P`)
+    await clickMenuItem(app, "file-open-scratch")
 
     const picker = page.getByRole("dialog", { name: "Open Scratch" })
     const search = picker.getByRole("combobox", {
@@ -1046,6 +1160,11 @@ test("File menu creates scratches and backs a dirty pathless tab in place", asyn
     if (!savedScratch) throw new Error("The saved scratch is unavailable")
     expect(savedScratch.fileName).toMatch(automaticScratchFileName)
     expect(savedScratch.open).toBe(true)
+    await pathlessTab.click({ button: "right" })
+    await expect(
+      page.getByRole("menuitem", { name: "Edit Scratch" })
+    ).toBeVisible()
+    await page.keyboard.press("Escape")
     await expect
       .poll(() =>
         readFile(path.join(scratchDirectory, savedScratch.fileName), "utf8")

@@ -1725,6 +1725,7 @@ export class MarkdownEditorController implements MarkdownEditorHandle {
     this.checkSpelling = options.checkSpelling ?? (() => [])
     this.spellCheckEnabled =
       options.spellCheck === true && options.checkSpelling !== undefined
+    this.readOnly = options.readOnly ?? false
     this.currentSpellCheckExtension = this.spellCheckEnabled
       ? spellCheckExtension(this.checkSpelling)
       : []

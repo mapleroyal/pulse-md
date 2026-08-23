@@ -4330,6 +4330,9 @@ function tabDescriptor(tab: TabState): TabDescriptor {
     fileMissing: tab.fileMissing,
     filePath: tab.document.filePath,
     kind: tab.document.kind,
+    ...(tab.scratchIdentity
+      ? { scratchId: tab.scratchIdentity.scratchId }
+      : {}),
   }
 }
 
@@ -4617,7 +4620,8 @@ function tabDescriptorsMatch(
     left.displayName === right.displayName &&
     left.fileMissing === right.fileMissing &&
     left.filePath === right.filePath &&
-    left.kind === right.kind
+    left.kind === right.kind &&
+    left.scratchId === right.scratchId
   )
 }
 

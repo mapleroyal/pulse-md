@@ -11,7 +11,6 @@ import {
   type ScratchPreviewRenderState,
 } from "@/app/ScratchPicker"
 import { Button } from "@/components/ui/button"
-import { ContextMenuItem } from "@/components/ui/context-menu"
 import {
   Dialog,
   DialogContent,
@@ -127,6 +126,7 @@ export function ScratchBrowser({
           aria-label="Open Scratch"
           className="h-[min(44rem,calc(100vh-2rem))] grid-rows-[auto_minmax(0,1fr)] gap-4 overflow-hidden p-5 sm:max-w-5xl"
           data-scratch-browser=""
+          finalFocus={false}
           initialFocus={inputRef}
         >
           <DialogHeader className="pr-10">
@@ -202,15 +202,6 @@ export function ScratchBrowser({
                   <TooltipContent>Open in New Tab</TooltipContent>
                 </Tooltip>
               </>
-            )}
-            renderRowContextMenu={(scratch, interactionDisabled) => (
-              <ContextMenuItem
-                disabled={pending || interactionDisabled}
-                onClick={() => editScratch(scratch.scratchId)}
-              >
-                <FilePenLineIcon />
-                Edit Scratch
-              </ContextMenuItem>
             )}
           />
         </DialogContent>

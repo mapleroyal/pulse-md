@@ -663,17 +663,38 @@ type ScratchBrowserSurfaceComponent =
 const loadScratchSurfacesModule = createRetryableDynamicImport(
   () => import("@/app/ScratchSurfaces")
 )
-const [ScratchBrowserSurface] = createDeferredComponent<
-  React.ComponentProps<ScratchBrowserSurfaceComponent>,
-  typeof import("@/app/ScratchSurfaces")
->(loadScratchSurfacesModule, (props, retry) => (
-  <DeferredDialogFailure
-    description="The scratch browser could not be loaded."
-    title="Open Scratch"
-    onCancel={() => props.onOpenChange(false)}
-    onRetry={retry}
-  />
-))
+type ScratchBrowserSurfaceProps =
+  React.ComponentProps<ScratchBrowserSurfaceComponent>
+const scratchBrowserSurfaceLoader = createRetryableDeferredLoader(
+  loadScratchSurfacesModule
+)
+
+function ScratchBrowserSurface(props: ScratchBrowserSurfaceProps) {
+  const {
+    error,
+    retry,
+    value: module,
+  } = useDeferredValue(scratchBrowserSurfaceLoader)
+  const renderFailure = (retryAction: () => void) => (
+    <DeferredDialogFailure
+      description="The scratch browser could not be loaded."
+      title="Open Scratch"
+      onCancel={() => props.onOpenChange(false)}
+      onRetry={retryAction}
+    />
+  )
+  if (!module) {
+    return error && props.open ? renderFailure(retry) : null
+  }
+  const Surface = module.default
+  return (
+    <DeferredSurfaceErrorBoundary
+      fallback={(_renderError, retryRender) => renderFailure(retryRender)}
+    >
+      <Surface {...props} />
+    </DeferredSurfaceErrorBoundary>
+  )
+}
 
 interface RendererTab {
   id: TabId
@@ -715,6 +736,7 @@ interface WindowProfilesWorkspaceState {
 }
 
 interface ScratchesWorkspaceState {
+  origin: "editor" | "scratch-browser" | "settings"
   parentDraft: AppSettings
   selectedScratchId?: string
 }
@@ -2688,6 +2710,7 @@ export function App() {
       settingsOpenRef.current = false
       setSettingsOpen(false)
       setScratchesWorkspace({
+        origin: workspace.origin,
         parentDraft: cloneAppSettings(workspace.parentDraft),
         ...(workspace.selectedScratchId
           ? { selectedScratchId: workspace.selectedScratchId }
@@ -2705,13 +2728,15 @@ export function App() {
       if (windowZoomFactorRef.current !== null) {
         parentDraft.zoomFactor = windowZoomFactorRef.current
       }
-      if (!activateScratchesWorkspace({ parentDraft })) return
+      if (!activateScratchesWorkspace({ origin: "settings", parentDraft })) {
+        return
+      }
       pushSettingsNavigationRoute({ kind: "scratches" })
     },
     [activateScratchesWorkspace, pushSettingsNavigationRoute]
   )
 
-  const editScratchDetails = React.useCallback(
+  const editScratchFromBrowser = React.useCallback(
     (scratchId: string) => {
       if (!scratchBrowserOpenRef.current) return
       const parentDraft = cloneAppSettings(settingsRef.current)
@@ -2720,6 +2745,7 @@ export function App() {
       }
       if (
         !activateScratchesWorkspace({
+          origin: "scratch-browser",
           parentDraft,
           selectedScratchId: scratchId,
         })
@@ -2740,6 +2766,39 @@ export function App() {
     ]
   )
 
+  const editScratchFromTab = React.useCallback(
+    (scratchId: string) => {
+      if (
+        settingsOpenRef.current ||
+        settingsWorkspaceOpenRef.current ||
+        softwareLicensesOpenRef.current ||
+        scratchBrowserOpenRef.current
+      ) {
+        return
+      }
+      const parentDraft = cloneAppSettings(settingsRef.current)
+      if (windowZoomFactorRef.current !== null) {
+        parentDraft.zoomFactor = windowZoomFactorRef.current
+      }
+      if (
+        !activateScratchesWorkspace({
+          origin: "editor",
+          parentDraft,
+          selectedScratchId: scratchId,
+        })
+      ) {
+        return
+      }
+      resetSettingsNavigationHistory()
+      pushSettingsNavigationRoute({ kind: "scratches" })
+    },
+    [
+      activateScratchesWorkspace,
+      pushSettingsNavigationRoute,
+      resetSettingsNavigationHistory,
+    ]
+  )
+
   const returnFromScratchesWorkspace = React.useCallback(() => {
     const workspace = scratchesWorkspace
     if (!workspace) return false
@@ -2751,12 +2810,31 @@ export function App() {
     if (windowZoomFactorRef.current !== null) {
       parentDraft.zoomFactor = windowZoomFactorRef.current
     }
-    setSettingsDialogSettings(parentDraft)
-    previewSettings(parentDraft)
-    settingsOpenRef.current = true
-    setSettingsOpen(true)
+    if (workspace.origin === "settings") {
+      setSettingsDialogSettings(parentDraft)
+      previewSettings(parentDraft)
+      settingsOpenRef.current = true
+      setSettingsOpen(true)
+      return true
+    }
+
+    setScratchesWorkspace(null)
+    resetSettingsNavigationHistory()
+    if (workspace.origin === "scratch-browser") {
+      scratchBrowserOpenRef.current = true
+      setScratchBrowserOpen(true)
+      reportEditorMenuState()
+    } else {
+      window.requestAnimationFrame(() => controllerRef.current?.focusSurface())
+    }
     return true
-  }, [previewSettings, restoreActiveDocumentSession, scratchesWorkspace])
+  }, [
+    previewSettings,
+    reportEditorMenuState,
+    resetSettingsNavigationHistory,
+    restoreActiveDocumentSession,
+    scratchesWorkspace,
+  ])
 
   const handleScratchesNavigationBlockedChange = React.useCallback(
     (blocked: boolean) => {
@@ -3637,6 +3715,7 @@ export function App() {
             fileMissing: savedDescriptor.fileMissing,
             filePath: savedDescriptor.filePath,
             kind: savedDescriptor.kind,
+            scratchId: savedDescriptor.scratchId,
           })
           if (!current) window.pulseMd.setDirty(tab.id, true)
           if (activeTabIdRef.current === tab.id) {
@@ -4938,6 +5017,15 @@ export function App() {
   const navigateAppHistory = React.useCallback(
     (direction: "back" | "forward") => {
       if (
+        scratchesWorkspaceOpenRef.current &&
+        scratchesWorkspace?.origin !== "settings"
+      ) {
+        if (direction !== "back" || scratchesNavigationBlockedRef.current) {
+          return false
+        }
+        return returnFromScratchesWorkspace()
+      }
+      if (
         settingsOpenRef.current ||
         settingsWorkspaceOpenRef.current ||
         softwareLicensesOpenRef.current ||
@@ -4949,7 +5037,12 @@ export function App() {
       }
       return navigateDocumentHistory(direction)
     },
-    [navigateDocumentHistory, navigateSettingsHistory]
+    [
+      navigateDocumentHistory,
+      navigateSettingsHistory,
+      returnFromScratchesWorkspace,
+      scratchesWorkspace,
+    ]
   )
 
   const focusEditor = React.useCallback(
@@ -6496,7 +6589,7 @@ export function App() {
         editorReadyFrameRef.current = window.requestAnimationFrame(() => {
           editorReadyFrameRef.current = null
           if (disposed || controllerRef.current !== controller) return
-          controller.focusSurface()
+          focusInitialEditorIfReady()
           window.pulseMd.editorReady()
           activateDeferredEditorChrome()
           codeLanguageSupportIdleCallback = window.requestIdleCallback(() => {
@@ -7112,6 +7205,7 @@ export function App() {
           onHideTopControls={(controls) => void hideTopControls(controls)}
           onNavigateBack={() => navigateDocumentHistory("back")}
           onNavigateForward={() => navigateDocumentHistory("forward")}
+          onEditScratch={editScratchFromTab}
           onOpenOutline={openOutline}
           onResponsiveControlsDrawerLayoutChange={
             handleResponsiveControlsDrawerLayoutChange
@@ -7300,10 +7394,12 @@ export function App() {
         />
       ) : null}
 
-      {platform && scratchBrowserOpen ? (
+      {platform &&
+      (scratchBrowserOpen ||
+        scratchesWorkspace?.origin === "scratch-browser") ? (
         <ScratchBrowserSurface
-          editScratch={editScratchDetails}
-          open
+          editScratch={editScratchFromBrowser}
+          open={scratchBrowserOpen}
           openScratch={openScratchById}
           platform={platform}
           settings={appSettings}
@@ -7396,12 +7492,21 @@ export function App() {
           workspace={{
             kind: "scratches",
             props: {
+              backLabel:
+                scratchesWorkspace.origin === "settings"
+                  ? "Back to Settings"
+                  : scratchesWorkspace.origin === "scratch-browser"
+                    ? "Back to Open Scratch"
+                    : "Back to Editor",
               newScratch: createScratchFromSettings,
               openScratch: openScratchById,
               platform,
               initialSelectedId: scratchesWorkspace.selectedScratchId,
               settings: scratchesWorkspace.parentDraft,
-              onBack: () => navigateSettingsHistory("back"),
+              onBack:
+                scratchesWorkspace.origin === "settings"
+                  ? () => navigateSettingsHistory("back")
+                  : () => returnFromScratchesWorkspace(),
               onNavigationBlockedChange: handleScratchesNavigationBlockedChange,
             },
           }}

@@ -49,6 +49,7 @@ import {
 const MAX_SCRATCH_TITLE_LENGTH = 256
 
 export interface ScratchesWorkspaceProps {
+  backLabel?: string
   initialSelectedId?: string
   getScratches: GetScratchInventory
   getScratchPreview: (scratchId: string) => Promise<ScratchPreviewDocument>
@@ -187,6 +188,7 @@ function ScratchDetailsForm({
 }
 
 export function ScratchesWorkspace({
+  backLabel = "Back to Settings",
   initialSelectedId,
   getScratches,
   getScratchPreview,
@@ -451,7 +453,7 @@ export function ScratchesWorkspace({
         <header className="shrink-0 border-b border-border/70 bg-[var(--document-background)]">
           <div className="mx-auto flex min-h-14 w-full max-w-6xl items-center gap-3 px-5 py-2">
             <Button
-              aria-label="Back to Settings"
+              aria-label={backLabel}
               className="-ml-2"
               disabled={operationBlocked}
               size="sm"

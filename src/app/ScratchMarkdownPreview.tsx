@@ -69,6 +69,7 @@ function requestOptionalPreviewSupport(
 }
 
 interface PreviewControllerConfig {
+  platform: AppPlatform
   preview: NonNullable<ScratchPreviewRenderState["preview"]>
   scheme: "dark" | "light"
   settings: AppSettings
@@ -85,13 +86,17 @@ function applyControllerConfig(
   config: PreviewControllerConfig,
   appliedDocument: React.MutableRefObject<AppliedPreviewDocument | null>
 ) {
-  const { preview, scheme, settings } = config
+  const { platform, preview, scheme, settings } = config
   const previous = appliedDocument.current
-  if (
+  const documentChanged =
     previous?.scratchId !== preview.scratchId ||
     previous.modifiedAt !== preview.modifiedAt ||
     previous.content !== preview.content
-  ) {
+  const activeTextControl =
+    documentChanged && platform === "darwin"
+      ? controller.view.dom.ownerDocument.activeElement
+      : null
+  if (documentChanged) {
     controller.setDocumentIdentity(null, "markdown")
     controller.setDocument(preview.content, {
       addToHistory: false,
@@ -122,6 +127,18 @@ function applyControllerConfig(
   controller.view.dom.dataset.scratchPreviewId = preview.scratchId
   requestOptionalPreviewSupport(controller, settings.markdownExtensions)
   controller.refreshContentGeometry(true)
+  if (
+    (activeTextControl instanceof HTMLInputElement ||
+      activeTextControl instanceof HTMLTextAreaElement) &&
+    activeTextControl.isConnected &&
+    activeTextControl.ownerDocument.activeElement === activeTextControl
+  ) {
+    // Updating a secondary CodeMirror view can invalidate Chromium's macOS
+    // text client without changing document.activeElement. Restore the same
+    // control synchronously so the caret and native text input stay live.
+    activeTextControl.blur()
+    activeTextControl.focus({ preventScroll: true })
+  }
 }
 
 export interface ScratchMarkdownPreviewProps {
@@ -170,8 +187,9 @@ export function ScratchMarkdownPreview({
       : null
   const shouldRender = eligible && matchingControllerError === null
   const config = React.useMemo<PreviewControllerConfig | null>(
-    () => (preview && eligible ? { preview, scheme, settings } : null),
-    [eligible, preview, scheme, settings]
+    () =>
+      preview && eligible ? { platform, preview, scheme, settings } : null,
+    [eligible, platform, preview, scheme, settings]
   )
 
   React.useLayoutEffect(() => {
@@ -213,6 +231,7 @@ export function ScratchMarkdownPreview({
           openLink: (activation) => openLinkRef.current?.(activation),
           parent: host,
           platform,
+          readOnly: true,
           sourceIndentation: latestConfig.settings.sourceIndentation,
           sourceIndentSize: latestConfig.settings.sourceIndentSize,
           spellCheck: false,
@@ -255,9 +274,13 @@ export function ScratchMarkdownPreview({
     <div className="h-full min-h-0">
       <div
         ref={hostRef}
-        aria-label={`Rendered preview of ${state.scratch.displayTitle}`}
+        aria-label={
+          state.scratch
+            ? `Rendered preview of ${state.scratch.displayTitle}`
+            : "Rendered scratch preview"
+        }
         className="h-full min-h-0 overflow-hidden [--editor-content-top-padding:1.25rem] [--window-chrome-height:0px]"
-        data-scratch-markdown-preview={state.scratch.scratchId}
+        data-scratch-markdown-preview={state.scratch?.scratchId}
         hidden={!shouldRender}
         role="region"
       />
