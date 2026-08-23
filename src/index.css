@@ -453,13 +453,19 @@ html[data-formatting-animations] .app-shell .editor-mount .cm-content {
   transition: padding-top 150ms ease-out;
 }
 
-.app-shell:is([data-formatting-bar], [data-tab-drag-shelf]) .editor-mount {
+.app-shell:is(
+    [data-formatting-bar],
+    [data-tab-drag-shelf],
+    [data-responsive-controls-drawer]
+  )
+  .editor-mount {
   --editor-clip-top: var(--top-drawer-height);
 }
 
 .app-shell[data-top-drawer-compensated]:is(
     [data-formatting-bar],
-    [data-tab-drag-shelf]
+    [data-tab-drag-shelf],
+    [data-responsive-controls-drawer]
   ) {
   --editor-content-top-padding: calc(var(--top-drawer-height) + 12px);
 }
@@ -1798,7 +1804,12 @@ html[data-formatting-animations] .app-shell .formatting-toolbar {
   -webkit-app-region: no-drag;
 }
 
-.app-shell:is([data-formatting-bar], [data-tab-drag-shelf]) .search-overlay {
+.app-shell:is(
+    [data-formatting-bar],
+    [data-tab-drag-shelf],
+    [data-responsive-controls-drawer]
+  )
+  .search-overlay {
   top: calc(var(--top-drawer-height) + 4px);
   max-height: calc(100dvh - var(--top-drawer-height) - 8px);
 }
@@ -1934,8 +1945,8 @@ html[data-formatting-animations] .app-shell .formatting-toolbar {
     flex: 1 0 100%;
   }
 
-  .search-find-group input,
-  .search-replace-group input {
+  .search-find-group :is(input, textarea),
+  .search-replace-group :is(input, textarea) {
     min-width: 0 !important;
   }
 

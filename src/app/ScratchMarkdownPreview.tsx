@@ -203,6 +203,7 @@ export function ScratchMarkdownPreview({
           appearanceProfile:
             latestConfig.settings.themeByScheme[latestConfig.scheme],
           autofocus: false,
+          focusWhenEmpty: false,
           content: latestConfig.preview.content,
           documentKind: "markdown",
           lineWrapping: latestConfig.settings.lineWrapping,

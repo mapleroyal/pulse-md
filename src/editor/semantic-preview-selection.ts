@@ -11,6 +11,39 @@ export interface SourceLinePointerPosition {
   readonly pos: number
 }
 
+function isEmptyReplacementBoundary(node: Node) {
+  return (
+    node instanceof Element &&
+    (node.classList.contains("cm-widgetBuffer") ||
+      (node.getAttribute("contenteditable") === "false" &&
+        node.childNodes.length === 0))
+  )
+}
+
+function trailingSourcePositionAtDOMCaret(
+  view: EditorView,
+  line: HTMLElement,
+  caret: Range | null | undefined
+) {
+  if (!caret || caret.startContainer !== line) return null
+  // Decoration.replace leaves zero-width boundary nodes around collapsed
+  // source. Chromium can place a whitespace caret between those nodes rather
+  // than after them, which makes a held drag alternate across the hidden
+  // closing delimiter as the pointer moves.
+  const trailingNodes = Array.from(line.childNodes).slice(caret.startOffset)
+  if (
+    trailingNodes.length === 0 ||
+    !trailingNodes.every(isEmptyReplacementBoundary)
+  ) {
+    return null
+  }
+  try {
+    return view.posAtDOM(line, line.childNodes.length)
+  } catch {
+    return null
+  }
+}
+
 /** Keeps a pointer hit on a mounted source row within that row's DOM range. */
 export function sourceLinePointerPosition(
   view: EditorView,
@@ -56,10 +89,6 @@ export function sourceLinePointerPosition(
     const last = view.posAtDOM(line, line.childNodes.length)
     const from = Math.min(first, last)
     const to = Math.max(first, last)
-    if (raw.pos >= from && raw.pos <= to) {
-      return { ...raw, clamped: false }
-    }
-
     const caretDocument = line.ownerDocument as Document & {
       caretRangeFromPoint?(x: number, y: number): Range | null
     }
@@ -67,6 +96,19 @@ export function sourceLinePointerPosition(
       event.clientX,
       event.clientY
     )
+    const trailingPosition = trailingSourcePositionAtDOMCaret(view, line, caret)
+    if (
+      trailingPosition != null &&
+      trailingPosition >= from &&
+      trailingPosition <= to &&
+      trailingPosition > raw.pos
+    ) {
+      return { assoc: -1, clamped: true, pos: trailingPosition }
+    }
+    if (raw.pos >= from && raw.pos <= to) {
+      return { ...raw, clamped: false }
+    }
+
     const caretParent =
       caret?.startContainer instanceof Element
         ? caret.startContainer

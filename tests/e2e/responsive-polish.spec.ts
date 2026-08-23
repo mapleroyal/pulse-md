@@ -15,6 +15,7 @@ import {
   openSettingsSection,
   setWindowContentSize,
 } from "./electron-helpers"
+import { DEFAULT_APP_SETTINGS } from "../../src/shared/contracts"
 
 const projectRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -22,6 +23,7 @@ const projectRoot = path.resolve(
 )
 const samplePath = path.join(projectRoot, "tests/fixtures/sample.md")
 const primaryModifier = process.platform === "darwin" ? "Meta" : "Control"
+const WINDOWS_CAPTION_CONTROLS_WIDTH = 138
 
 async function expectHorizontallyReachable(surface: Locator) {
   await expect(surface).toBeVisible()
@@ -168,6 +170,165 @@ test("Windows bare Alt exposes and light-dismisses the application menu @rendere
   }
 })
 
+test("app controls trail tabs when wide and share the lower drawer when narrow @renderer-isolated", async () => {
+  const userData = await mkdtemp(
+    path.join(os.tmpdir(), "pulse-md-responsive-app-controls-")
+  )
+  await writeFile(
+    path.join(userData, "settings.json"),
+    JSON.stringify({
+      ...DEFAULT_APP_SETTINGS,
+      chrome: {
+        ...DEFAULT_APP_SETTINGS.chrome,
+        alwaysShowTopControls: true,
+        formattingBarPosition: "right",
+        showFormattingBar: true,
+        tabVisibility: "always",
+      },
+    })
+  )
+  const app = await electron.launch({
+    args: [projectRoot, `--user-data-dir=${userData}`, samplePath],
+    cwd: projectRoot,
+  })
+
+  try {
+    const page = await app.firstWindow()
+    await page.locator(".cm-editor").waitFor()
+    await setWindowContentSize(app, 900, 720)
+    await expect.poll(() => page.evaluate(() => innerWidth)).toBe(900)
+
+    const appShell = page.locator(".app-shell")
+    const chrome = page.locator(".top-chrome")
+    const controls = page.locator(".top-chrome-controls")
+    const toolbarSurface = page.locator(".formatting-toolbar[data-visible]")
+    const toolbar = page.getByRole("toolbar", { name: "Formatting toolbar" })
+
+    await expect(controls).toBeVisible()
+    await expect(toolbar).toBeVisible()
+    await expect(chrome).not.toHaveAttribute("data-controls-in-drawer", "true")
+    const wideGeometry = await page.evaluate(() => {
+      const controlsElement = document.querySelector<HTMLElement>(
+        ".top-chrome-controls"
+      )
+      const stripElement = document.querySelector<HTMLElement>(
+        ".document-tab-strip"
+      )
+      const toolbarElement = document.querySelector<HTMLElement>(
+        '.formatting-toolbar [role="toolbar"]'
+      )
+      if (!controlsElement || !stripElement || !toolbarElement) {
+        throw new Error("The wide chrome geometry is unavailable")
+      }
+      const controlsBounds = controlsElement.getBoundingClientRect()
+      const stripBounds = stripElement.getBoundingClientRect()
+      return {
+        controlsCenterY: controlsBounds.top + controlsBounds.height / 2,
+        controlsRight: controlsBounds.right,
+        stripRight: stripBounds.right,
+        toolbarJustify: getComputedStyle(toolbarElement).justifyContent,
+        viewportWidth: innerWidth,
+      }
+    })
+    const wideControlsInset =
+      process.platform === "win32" ? WINDOWS_CAPTION_CONTROLS_WIDTH + 8 : 16
+    expect(wideGeometry.controlsRight).toBeCloseTo(
+      wideGeometry.viewportWidth - wideControlsInset,
+      0
+    )
+    expect(wideGeometry.stripRight).toBeCloseTo(
+      wideGeometry.controlsRight -
+        (await controls.evaluate(
+          (element) => element.getBoundingClientRect().width
+        )) -
+        8,
+      0
+    )
+    expect(wideGeometry.controlsCenterY).toBeCloseTo(23, 0)
+    expect(wideGeometry.toolbarJustify).toBe("flex-end")
+
+    await setWindowContentSize(app, 700, 720)
+    await expect.poll(() => page.evaluate(() => innerWidth)).toBe(700)
+    await expect(chrome).toHaveAttribute("data-controls-in-drawer", "true")
+    await expect(appShell).toHaveAttribute(
+      "data-responsive-controls-drawer",
+      "true"
+    )
+    const narrowGeometry = await page.evaluate(() => {
+      const controlsElement = document.querySelector<HTMLElement>(
+        ".top-chrome-controls"
+      )
+      const stripElement = document.querySelector<HTMLElement>(
+        ".document-tab-strip"
+      )
+      const toolbarElement = document.querySelector<HTMLElement>(
+        ".formatting-toolbar[data-visible]"
+      )
+      const toolbarActions =
+        toolbarElement?.querySelector<HTMLElement>('[role="toolbar"]')
+      if (
+        !controlsElement ||
+        !stripElement ||
+        !toolbarElement ||
+        !toolbarActions
+      ) {
+        throw new Error("The responsive chrome geometry is unavailable")
+      }
+      const controlsBounds = controlsElement.getBoundingClientRect()
+      const stripBounds = stripElement.getBoundingClientRect()
+      const toolbarBounds = toolbarElement.getBoundingClientRect()
+      return {
+        controlsCenterY: controlsBounds.top + controlsBounds.height / 2,
+        controlsLeft: controlsBounds.left,
+        controlsRight: controlsBounds.right,
+        stripCenterY: stripBounds.top + stripBounds.height / 2,
+        stripRightInset: innerWidth - stripBounds.right,
+        toolbarJustify: getComputedStyle(toolbarActions).justifyContent,
+        toolbarRight: toolbarBounds.right,
+        viewportWidth: innerWidth,
+      }
+    })
+    expect(narrowGeometry.controlsCenterY).toBeCloseTo(56, 0)
+    expect(narrowGeometry.stripCenterY).toBeCloseTo(23, 0)
+    expect(narrowGeometry.controlsRight).toBeCloseTo(
+      narrowGeometry.viewportWidth - 8,
+      0
+    )
+    expect(narrowGeometry.toolbarRight).toBeCloseTo(
+      narrowGeometry.controlsLeft - 8,
+      0
+    )
+    expect(narrowGeometry.toolbarJustify).toBe("flex-start")
+    expect(narrowGeometry.stripRightInset).toBeCloseTo(
+      process.platform === "win32" ? WINDOWS_CAPTION_CONTROLS_WIDTH + 8 : 8,
+      0
+    )
+
+    await page
+      .getByRole("button", { name: "Formatting toolbar", exact: true })
+      .click()
+    await expect(toolbarSurface).toHaveCount(0)
+    await expect(appShell).not.toHaveAttribute("data-formatting-bar", "true")
+    await expect(appShell).toHaveAttribute(
+      "data-responsive-controls-drawer",
+      "true"
+    )
+    await page.keyboard.press(`${primaryModifier}+F`)
+    const search = page.getByRole("form", {
+      name: "Find and replace in document",
+    })
+    await expect(search).toBeVisible()
+    await expect
+      .poll(() =>
+        search.evaluate((element) => element.getBoundingClientRect().top)
+      )
+      .toBeCloseTo(78, 0)
+  } finally {
+    await exitApplication(app)
+    await rm(userData, { force: true, recursive: true })
+  }
+})
+
 test("search and outline stay below the complete top chrome @renderer-isolated", async () => {
   const userData = await mkdtemp(
     path.join(os.tmpdir(), "pulse-md-overlay-position-")
@@ -192,7 +353,14 @@ test("search and outline stay below the complete top chrome @renderer-isolated",
               ".formatting-toolbar[data-visible]"
             )
             const chrome = document.querySelector<HTMLElement>(".top-chrome")
-            const boundary = toolbar ?? chrome
+            const drawer = document.querySelector<HTMLElement>(
+              ".top-chrome-tab-drag-shelf"
+            )
+            const boundary =
+              toolbar ??
+              (drawer && drawer.getBoundingClientRect().height > 0
+                ? drawer
+                : chrome)
             if (!boundary) throw new Error("Top chrome is unavailable")
             return Math.abs(
               element.getBoundingClientRect().top -

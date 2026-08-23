@@ -493,9 +493,7 @@ test("Settings search reveals matching controls across collapsed sections", asyn
       settings.getByRole("button", { name: "Theme", exact: true })
     ).toBeHidden()
 
-    await search.fill(
-      process.platform === "win32" ? "top left find" : "top right find"
-    )
+    await search.fill("top right find")
     await expect(
       settings.getByRole("switch", { name: "Find", exact: true })
     ).toBeVisible()

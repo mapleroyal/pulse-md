@@ -49,6 +49,7 @@ import {
 const MAX_SCRATCH_TITLE_LENGTH = 256
 
 export interface ScratchesWorkspaceProps {
+  initialSelectedId?: string
   getScratches: GetScratchInventory
   getScratchPreview: (scratchId: string) => Promise<ScratchPreviewDocument>
   newScratch: () => Promise<unknown> | unknown
@@ -186,6 +187,7 @@ function ScratchDetailsForm({
 }
 
 export function ScratchesWorkspace({
+  initialSelectedId,
   getScratches,
   getScratchPreview,
   newScratch,
@@ -201,7 +203,9 @@ export function ScratchesWorkspace({
   const didInitialFocusRef = React.useRef(false)
   const [query, setQuery] = React.useState("")
   const [sort, setSort] = React.useState<ScratchSort>("last-opened")
-  const [selectedId, setSelectedId] = React.useState<string | null>(null)
+  const [selectedId, setSelectedId] = React.useState<string | null>(
+    initialSelectedId ?? null
+  )
   const [pendingAction, setPendingAction] = React.useState<string | null>(null)
   const [error, setError] = React.useState<string | null>(null)
   const [deleteError, setDeleteError] = React.useState<string | null>(null)

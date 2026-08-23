@@ -179,9 +179,14 @@ interface TopChromeProps {
   onNavigateForward: () => void
   onOpenSettings: () => void
   onOpenOutline: () => void
+  onResponsiveControlsDrawerLayoutChange: (layout: {
+    inset: number
+    visible: boolean
+  }) => void
   outlineAnchorRef: React.RefObject<HTMLDivElement | null>
   outlineOpen: boolean
   renderOutlinePopover?: (trigger: React.ReactElement) => React.ReactNode
+  responsiveControlsDrawerVisible: boolean
   onCopyPath: (tabId: TabId) => void
   onRevealPath: (tabId: TabId) => void
   onToggleFormattingToolbar: () => void
@@ -193,6 +198,35 @@ const WINDOW_CONTROLS_SAFE_INSET = 86
 const WINDOWS_CAPTION_CONTROLS_WIDTH = 138
 const TOP_CONTROL_SIZE = 30
 const TOP_CONTROL_GAP = 4
+const RESPONSIVE_CONTROLS_DRAWER_MAX_WIDTH = 720
+const COMPACT_TOP_CONTROLS_MAX_WIDTH = 420
+
+const TOP_CONTROLS_REVEALED_SELECTOR = `:is(
+  [data-hover-chrome],
+  [data-always-show-controls],
+  [data-outline-open],
+  :focus-within,
+  :has(.document-tab[data-popup-open]),
+  :has(.document-tab-strip:hover),
+  :has(.top-control-context-target[data-popup-open]),
+  :has(.top-chrome-document-menu[data-popup-open])
+)`
+
+function useMediaQuery(query: string) {
+  const [matches, setMatches] = React.useState(() =>
+    typeof window === "undefined" ? false : window.matchMedia(query).matches
+  )
+
+  React.useLayoutEffect(() => {
+    const mediaQuery = window.matchMedia(query)
+    const update = () => setMatches(mediaQuery.matches)
+    update()
+    mediaQuery.addEventListener("change", update)
+    return () => mediaQuery.removeEventListener("change", update)
+  }, [query])
+
+  return matches
+}
 
 function topControlGroupWidth(buttonCount: number, hasSeparator: boolean) {
   const itemCount = buttonCount + (hasSeparator ? 1 : 0)
@@ -249,11 +283,9 @@ function PathContextMenu({
 
 function TopControlContextMenu({
   children,
-  platform,
   onHide,
 }: {
   children: React.ReactNode
-  platform: AppPlatform
   onHide: () => void
 }) {
   return (
@@ -264,11 +296,7 @@ function TopControlContextMenu({
         {children}
       </ContextMenuTrigger>
       <ContextMenuContent
-        aria-label={
-          platform === "win32"
-            ? "Top-left controls menu"
-            : "Top-right controls menu"
-        }
+        aria-label="Top-right controls menu"
         className="min-w-32"
         finalFocus={(interactionType) => interactionType === "keyboard"}
       >
@@ -612,10 +640,12 @@ export function TopChrome({
   onNavigateForward,
   onOpenSettings,
   onOpenOutline,
+  onResponsiveControlsDrawerLayoutChange,
   onRevealPath,
   outlineAnchorRef,
   outlineOpen,
   renderOutlinePopover,
+  responsiveControlsDrawerVisible,
   onToggleFormattingToolbar,
   onToggleMode,
   onWindowAction,
@@ -627,7 +657,17 @@ export function TopChrome({
     React.useState(false)
   const [documentActionsOpen, setDocumentActionsOpen] = React.useState(false)
   const [windowsMenuVisible, setWindowsMenuVisible] = React.useState(false)
+  const controlsDrawerViewport = useMediaQuery(
+    `(max-width: ${RESPONSIVE_CONTROLS_DRAWER_MAX_WIDTH}px)`
+  )
+  const compactControlsViewport = useMediaQuery(
+    `(max-width: ${COMPACT_TOP_CONTROLS_MAX_WIDTH}px)`
+  )
   const chromeRef = React.useRef<HTMLElement>(null)
+  const reportedControlsDrawerLayoutRef = React.useRef({
+    inset: -1,
+    visible: false,
+  })
   const dragCancelledRef = React.useRef(false)
   const dragChipBoundsRef = React.useRef<Array<{
     id: string
@@ -754,9 +794,8 @@ export function TopChrome({
       previousStripWidth = nextStripWidth
       if (!stripShrank) return
 
-      // Revealed controls move the strip's trailing edge on macOS/Linux and
-      // its leading edge on Windows. Preserve the scroll offset unless the
-      // resized viewport would clip the active tab.
+      // Revealed controls move the strip's trailing edge. Preserve the scroll
+      // offset unless the resized viewport would clip the active tab.
       const activeChip = strip.querySelector<HTMLElement>(
         ".document-tab[data-active]"
       )
@@ -947,8 +986,67 @@ export function TopChrome({
   )
   const windowsChrome = platform === "win32"
   const windowsMenuOpen = windowsChrome && !previewTitle && windowsMenuVisible
+  const controlsInDrawer =
+    controlsDrawerViewport && !previewTitle && compactControlWidth > 0
+  const controlsDrawerInset = controlsInDrawer
+    ? (compactControlsViewport ? compactControlWidth : wideControlWidth) + 16
+    : 0
   const hiddenForWindowsMenuStyle: React.CSSProperties | undefined =
     windowsMenuOpen ? { opacity: 0, pointerEvents: "none" } : undefined
+
+  React.useLayoutEffect(() => {
+    const chromeElement = chromeRef.current
+    if (!chromeElement) return
+    let frame: number | null = null
+
+    const report = () => {
+      frame = null
+      const next = {
+        inset: controlsDrawerInset,
+        visible:
+          controlsInDrawer &&
+          !windowsMenuOpen &&
+          chromeElement.matches(TOP_CONTROLS_REVEALED_SELECTOR),
+      }
+      const previous = reportedControlsDrawerLayoutRef.current
+      if (previous.inset === next.inset && previous.visible === next.visible) {
+        return
+      }
+      reportedControlsDrawerLayoutRef.current = next
+      onResponsiveControlsDrawerLayoutChange(next)
+    }
+    const scheduleReport = () => {
+      if (frame !== null) return
+      frame = requestAnimationFrame(report)
+    }
+    const popupObserver = new MutationObserver(scheduleReport)
+    popupObserver.observe(chromeElement, {
+      attributeFilter: ["data-popup-open"],
+      attributes: true,
+      subtree: true,
+    })
+    chromeElement.addEventListener("focusin", scheduleReport)
+    chromeElement.addEventListener("focusout", scheduleReport)
+    window.addEventListener("blur", scheduleReport)
+    report()
+
+    return () => {
+      if (frame !== null) cancelAnimationFrame(frame)
+      popupObserver.disconnect()
+      chromeElement.removeEventListener("focusin", scheduleReport)
+      chromeElement.removeEventListener("focusout", scheduleReport)
+      window.removeEventListener("blur", scheduleReport)
+    }
+  }, [
+    chrome.alwaysShowTopControls,
+    controlsDrawerInset,
+    controlsInDrawer,
+    documentActionsOpen,
+    hoverLatched,
+    onResponsiveControlsDrawerLayoutChange,
+    outlineOpen,
+    windowsMenuOpen,
+  ])
 
   const documentActionsFallback = (
     <Button
@@ -988,10 +1086,13 @@ export function TopChrome({
         data-formatting-bar={formattingBarVisible || undefined}
         data-markdown-controls={markdownControlsEnabled || undefined}
         data-always-show-controls={chrome.alwaysShowTopControls || undefined}
-        data-tab-drag-shelf={dragShelfVisible || undefined}
+        data-tab-drag-shelf={
+          dragShelfVisible || responsiveControlsDrawerVisible || undefined
+        }
         data-tab-drag-active={tabDragActive || undefined}
         data-drag-over={dragOver || undefined}
         data-windows-menu-open={windowsMenuOpen || undefined}
+        data-controls-in-drawer={controlsInDrawer || undefined}
         style={
           {
             "--top-chrome-controls-reserved-width": `${
@@ -1003,6 +1104,12 @@ export function TopChrome({
             "--top-chrome-compact-controls-reserved-width": `${
               compactControlWidth > 0 ? compactControlWidth + 16 : 8
             }px`,
+            "--top-chrome-windows-controls-reserved-width": `${
+              wideControlWidth > 0 ? wideControlWidth + 16 : 8
+            }px`,
+            "--top-chrome-hover-height": controlsInDrawer
+              ? "var(--top-drawer-height)"
+              : undefined,
             "--window-controls-safe-inset": `${
               platform === "darwin"
                 ? WINDOW_CONTROLS_SAFE_INSET / windowZoomFactor
@@ -1016,26 +1123,34 @@ export function TopChrome({
             "--tc-hover-right": windowsChrome
               ? "calc(var(--windows-caption-controls-inset) + 8px)"
               : "50px",
-            "--tc-left": windowsChrome ? "var(--tc-edge)" : "auto",
-            "--tc-right": windowsChrome ? "auto" : "var(--tc-edge)",
+            "--tc-left": "auto",
+            "--tc-right": windowsChrome
+              ? "calc(var(--windows-caption-controls-inset) + 8px)"
+              : "var(--tc-edge)",
             "--cf-max": windowsChrome
               ? "max(0px, calc(100% - max(var(--windows-caption-controls-inset), var(--cf-rest, 0px)) * 2 - 16px))"
               : "calc(100% - var(--window-controls-safe-inset) * 2)",
-            "--cf-active": windowsChrome
-              ? "max(0px, calc(100% - max(var(--windows-caption-controls-inset), var(--tc-current)) * 2 - 16px))"
-              : "calc(100% - var(--window-controls-safe-inset) * 2)",
+            "--cf-active": controlsInDrawer
+              ? "var(--cf-max)"
+              : windowsChrome
+                ? "max(0px, calc(100% - (var(--windows-caption-controls-inset) + var(--top-chrome-windows-controls-reserved-width)) * 2))"
+                : "calc(100% - var(--window-controls-safe-inset) * 2)",
             "--tab-left": windowsChrome
-              ? "var(--tc-current)"
+              ? "8px"
               : "var(--window-controls-safe-inset)",
             "--tab-right": windowsChrome
               ? "calc(var(--windows-caption-controls-inset) + 8px)"
               : "8px",
-            "--tab-active-left": windowsChrome
-              ? "var(--tc-current)"
-              : "var(--window-controls-safe-inset)",
-            "--tab-active-right": windowsChrome
-              ? "calc(var(--windows-caption-controls-inset) + 8px)"
-              : "var(--tc-current)",
+            "--tab-active-left": controlsInDrawer
+              ? "var(--tab-left)"
+              : windowsChrome
+                ? "8px"
+                : "var(--window-controls-safe-inset)",
+            "--tab-active-right": controlsInDrawer
+              ? "var(--tab-right)"
+              : windowsChrome
+                ? "calc(var(--windows-caption-controls-inset) + var(--top-chrome-windows-controls-reserved-width))"
+                : "var(--tc-current)",
             "--tab-inset": windowsChrome
               ? "var(--windows-caption-controls-inset)"
               : "var(--window-controls-safe-inset)",
@@ -1164,11 +1279,19 @@ export function TopChrome({
         {wideControlWidth > 0 || compactControlWidth > 0 ? (
           <div
             className="top-chrome-controls"
-            style={hiddenForWindowsMenuStyle}
+            style={{
+              ...hiddenForWindowsMenuStyle,
+              ...(controlsInDrawer
+                ? {
+                    top: "calc(var(--window-chrome-height) + 10px)",
+                    right: "8px",
+                    left: "auto",
+                  }
+                : {}),
+            }}
           >
             {showBack ? (
               <TopControlContextMenu
-                platform={platform}
                 onHide={() => onHideTopControls(["navigation"])}
               >
                 <Tooltip>
@@ -1194,7 +1317,6 @@ export function TopChrome({
             ) : null}
             {showForward ? (
               <TopControlContextMenu
-                platform={platform}
                 onHide={() => onHideTopControls(["navigation"])}
               >
                 <Tooltip>
@@ -1226,7 +1348,6 @@ export function TopChrome({
             ) : null}
             {showViewMode ? (
               <TopControlContextMenu
-                platform={platform}
                 onHide={() => onHideTopControls(["viewMode"])}
               >
                 <Tooltip>
@@ -1263,10 +1384,7 @@ export function TopChrome({
               </TopControlContextMenu>
             ) : null}
             {showFind ? (
-              <TopControlContextMenu
-                platform={platform}
-                onHide={() => onHideTopControls(["find"])}
-              >
+              <TopControlContextMenu onHide={() => onHideTopControls(["find"])}>
                 <Tooltip>
                   <TooltipTrigger
                     render={
@@ -1291,7 +1409,6 @@ export function TopChrome({
             ) : null}
             {showOutline ? (
               <TopControlContextMenu
-                platform={platform}
                 onHide={() => onHideTopControls(["outline"])}
               >
                 <Tooltip>
@@ -1338,7 +1455,6 @@ export function TopChrome({
             ) : null}
             {showFormattingToolbar ? (
               <TopControlContextMenu
-                platform={platform}
                 onHide={() => onHideTopControls(["formattingToolbar"])}
               >
                 <Tooltip>
@@ -1367,7 +1483,6 @@ export function TopChrome({
             ) : null}
             {showCompactDocumentActions ? (
               <TopControlContextMenu
-                platform={platform}
                 onHide={() => onHideTopControls(compactControlKeys)}
               >
                 {documentActionsActivated ? (
@@ -1395,7 +1510,6 @@ export function TopChrome({
             ) : null}
             {showSettings ? (
               <TopControlContextMenu
-                platform={platform}
                 onHide={() => onHideTopControls(["settings"])}
               >
                 <Tooltip>

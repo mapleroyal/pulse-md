@@ -33,8 +33,7 @@ const samplePath = path.join(projectRoot, "tests/fixtures/sample.md")
 const execFileAsync = promisify(execFile)
 const WINDOWS_CAPTION_CONTROLS_WIDTH = 138
 const TOP_CHROME_CONTENT_GAP = 8
-const TOP_CONTROLS_POSITION_LABEL =
-  process.platform === "win32" ? "Top-Left" : "Top-Right"
+const TOP_CONTROLS_POSITION_LABEL = "Top-Right"
 
 function documentSurfaceColor(opaqueColor: string, translucency = 0) {
   if (process.platform !== "darwin" || translucency <= 0) return opaqueColor
@@ -3287,17 +3286,15 @@ test("tab labels align fitted names left and feather overflowing names @renderer
     await tabStrip.hover({ position: { x: 20, y: 15 } })
     await expect
       .poll(() =>
-        tabStrip.evaluate((element, controlsOnLeft) => {
+        tabStrip.evaluate((element) => {
           const controls = document.querySelector<HTMLElement>(
             ".top-chrome-controls"
           )
           if (!controls) return false
           const stripBounds = element.getBoundingClientRect()
           const controlsBounds = controls.getBoundingClientRect()
-          return controlsOnLeft
-            ? Math.abs(stripBounds.left - (controlsBounds.right + 8)) <= 0.5
-            : Math.abs(stripBounds.right - (controlsBounds.left - 8)) <= 0.5
-        }, process.platform === "win32")
+          return Math.abs(stripBounds.right - (controlsBounds.left - 8)) <= 0.5
+        })
       )
       .toBe(true)
 
@@ -3340,11 +3337,11 @@ test("revealing top controls keeps a covered active tab against their adjacent e
     const page = await app.firstWindow()
     await page.locator(".cm-editor").waitFor()
     const tabStrip = page.locator(".document-tab-strip")
-    const controlsOnLeft = process.platform === "win32"
-    const activeTab = page.locator(".document-tab").nth(controlsOnLeft ? 3 : 6)
-    const restingRightInset = controlsOnLeft
-      ? WINDOWS_CAPTION_CONTROLS_WIDTH + TOP_CHROME_CONTENT_GAP
-      : TOP_CHROME_CONTENT_GAP
+    const activeTab = page.locator(".document-tab").nth(6)
+    const restingRightInset =
+      process.platform === "win32"
+        ? WINDOWS_CAPTION_CONTROLS_WIDTH + TOP_CHROME_CONTENT_GAP
+        : TOP_CHROME_CONTENT_GAP
     await activeTab.getByRole("tab").click()
     await page.mouse.move(450, 160)
     await expect
@@ -3355,16 +3352,14 @@ test("revealing top controls keeps a covered active tab against their adjacent e
       )
       .toBeCloseTo(restingRightInset, 0)
 
-    const restingGeometry = await tabStrip.evaluate((element, startEdge) => {
+    const restingGeometry = await tabStrip.evaluate((element) => {
       const active = element.querySelector<HTMLElement>(
         ".document-tab[data-active]"
       )
       if (!active) throw new Error("The active tab is unavailable")
       const stripBounds = element.getBoundingClientRect()
       const activeBounds = active.getBoundingClientRect()
-      element.scrollLeft += startEdge
-        ? activeBounds.left - (stripBounds.left + 24)
-        : activeBounds.right - (stripBounds.right - 24)
+      element.scrollLeft += activeBounds.right - (stripBounds.right - 24)
       const positionedActiveBounds = active.getBoundingClientRect()
       return {
         activeLeft: positionedActiveBounds.left,
@@ -3373,21 +3368,14 @@ test("revealing top controls keeps a covered active tab against their adjacent e
         stripLeft: stripBounds.left,
         stripRight: stripBounds.right,
       }
-    }, controlsOnLeft)
-    if (controlsOnLeft) {
-      expect(restingGeometry.activeLeft).toBeCloseTo(
-        restingGeometry.stripLeft + 24,
-        0
-      )
-    } else {
-      expect(restingGeometry.activeRight).toBeCloseTo(
-        restingGeometry.stripRight - 24,
-        0
-      )
-    }
+    })
+    expect(restingGeometry.activeRight).toBeCloseTo(
+      restingGeometry.stripRight - 24,
+      0
+    )
 
     const revealedGeometry = () =>
-      tabStrip.evaluate((element, startEdge) => {
+      tabStrip.evaluate((element) => {
         const active = element.querySelector<HTMLElement>(
           ".document-tab[data-active]"
         )
@@ -3402,31 +3390,21 @@ test("revealing top controls keeps a covered active tab against their adjacent e
         return {
           activeLeft: activeBounds.left,
           activeRight: activeBounds.right,
-          aligned: startEdge
-            ? Math.abs(stripBounds.left - (controlsBounds.right + 8)) <= 0.5 &&
-              Math.abs(activeBounds.left - (stripBounds.left + 24)) <= 0.5
-            : Math.abs(stripBounds.right - (controlsBounds.left - 8)) <= 0.5 &&
-              Math.abs(activeBounds.right - stripBounds.right) <= 0.5,
+          aligned:
+            Math.abs(stripBounds.right - (controlsBounds.left - 8)) <= 0.5 &&
+            Math.abs(activeBounds.right - stripBounds.right) <= 0.5,
           scrollLeft: element.scrollLeft,
           stripLeft: stripBounds.left,
           stripRight: stripBounds.right,
         }
-      }, controlsOnLeft)
+      })
 
     await tabStrip.hover({ position: { x: 20, y: 15 } })
     await expect.poll(async () => (await revealedGeometry()).aligned).toBe(true)
     const firstReveal = await revealedGeometry()
-    if (controlsOnLeft) {
-      expect(firstReveal.stripLeft).toBeCloseTo(restingGeometry.stripLeft, 5)
-      expect(firstReveal.activeLeft).toBeCloseTo(restingGeometry.activeLeft, 5)
-      expect(firstReveal.scrollLeft).toBe(restingGeometry.scrollLeft)
-    } else {
-      expect(firstReveal.stripRight).toBeLessThan(restingGeometry.stripRight)
-      expect(restingGeometry.activeRight).toBeGreaterThan(
-        firstReveal.stripRight
-      )
-      expect(firstReveal.scrollLeft).toBeGreaterThan(restingGeometry.scrollLeft)
-    }
+    expect(firstReveal.stripRight).toBeLessThan(restingGeometry.stripRight)
+    expect(restingGeometry.activeRight).toBeGreaterThan(firstReveal.stripRight)
+    expect(firstReveal.scrollLeft).toBeGreaterThan(restingGeometry.scrollLeft)
 
     const settingsShortcut =
       process.platform === "darwin" ? "Meta+," : "Control+,"
@@ -3446,16 +3424,14 @@ test("revealing top controls keeps a covered active tab against their adjacent e
         )
       )
       .toBeCloseTo(restingRightInset, 0)
-    const remountedGeometry = await tabStrip.evaluate((element, startEdge) => {
+    const remountedGeometry = await tabStrip.evaluate((element) => {
       const active = element.querySelector<HTMLElement>(
         ".document-tab[data-active]"
       )
       if (!active) throw new Error("The active tab is unavailable")
       const stripBounds = element.getBoundingClientRect()
       const activeBounds = active.getBoundingClientRect()
-      element.scrollLeft += startEdge
-        ? activeBounds.left - (stripBounds.left + 24)
-        : activeBounds.right - (stripBounds.right - 24)
+      element.scrollLeft += activeBounds.right - (stripBounds.right - 24)
       return {
         activeLeft: active.getBoundingClientRect().left,
         activeRight: active.getBoundingClientRect().right,
@@ -3463,27 +3439,18 @@ test("revealing top controls keeps a covered active tab against their adjacent e
         stripLeft: stripBounds.left,
         stripRight: stripBounds.right,
       }
-    }, controlsOnLeft)
+    })
 
     await tabStrip.hover({ position: { x: 20, y: 15 } })
     await expect.poll(async () => (await revealedGeometry()).aligned).toBe(true)
     const secondReveal = await revealedGeometry()
-    if (controlsOnLeft) {
-      expect(secondReveal.stripLeft).toBeCloseTo(remountedGeometry.stripLeft, 5)
-      expect(secondReveal.activeLeft).toBeCloseTo(
-        remountedGeometry.activeLeft,
-        5
-      )
-      expect(secondReveal.scrollLeft).toBe(remountedGeometry.scrollLeft)
-    } else {
-      expect(secondReveal.stripRight).toBeLessThan(remountedGeometry.stripRight)
-      expect(remountedGeometry.activeRight).toBeGreaterThan(
-        secondReveal.stripRight
-      )
-      expect(secondReveal.scrollLeft).toBeGreaterThan(
-        remountedGeometry.scrollLeft
-      )
-    }
+    expect(secondReveal.stripRight).toBeLessThan(remountedGeometry.stripRight)
+    expect(remountedGeometry.activeRight).toBeGreaterThan(
+      secondReveal.stripRight
+    )
+    expect(secondReveal.scrollLeft).toBeGreaterThan(
+      remountedGeometry.scrollLeft
+    )
   } finally {
     await exitApplication(app)
     await rm(userData, { force: true, recursive: true })

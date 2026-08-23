@@ -48,6 +48,13 @@ import {
   type WebContents,
 } from "electron"
 
+// Playwright's colorScheme launch option is renderer-only. Align Electron's
+// native startup appearance synchronously so the test runner's system-mode
+// windows do not expose a light native backing before their first dark paint.
+if (!app.isPackaged && process.env.PMD_E2E_FORCE_DARK_MODE === "1") {
+  nativeTheme.themeSource = "dark"
+}
+
 import {
   ACTIVE_TAB_INDICATOR_COLOR_SOURCES,
   ACTIVE_TAB_INDICATOR_POSITIONS,

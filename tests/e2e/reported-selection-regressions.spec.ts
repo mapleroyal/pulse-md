@@ -756,3 +756,135 @@ test("a source drag chooses the outer callout and keeps edge autoscrolling", asy
     await rm(userData, { recursive: true, force: true })
   }
 })
+
+test("upward drags past trailing inline code keep the line-end endpoint", async () => {
+  const userData = await mkdtemp(
+    path.join(os.tmpdir(), "pulse-md-inline-code-line-end-selection-")
+  )
+  const source = [
+    "- Repetitions: `3`",
+    "",
+    "This packet contains inputs and captured outputs only. Model, runtime, date, timing, and host identity are intentionally omitted.",
+  ].join("\n")
+  const documentPath = path.join(userData, "inline-code-line-end.md")
+  await writeFile(documentPath, source)
+  const app = await electron.launch({
+    args: [projectRoot, `--user-data-dir=${userData}`, documentPath],
+    cwd: projectRoot,
+  })
+
+  try {
+    const page = await app.firstWindow()
+    const content = page.locator(".cm-content")
+    await expect(page.locator(".cm-md-inline-code")).toHaveText("3")
+
+    const points = await content.evaluate((element) => {
+      const view = (
+        element as HTMLElement & {
+          cmTile?: {
+            view?: {
+              coordsAtPos(position: number, side?: -1 | 1): DOMRect | null
+              state: {
+                doc: {
+                  length: number
+                  line(number: number): { to: number }
+                }
+              }
+            }
+          }
+        }
+      ).cmTile?.view
+      if (!view) throw new Error("CodeMirror view is unavailable")
+      const firstLineTo = view.state.doc.line(1).to
+      const start = view.coordsAtPos(view.state.doc.length, -1)
+      const end = view.coordsAtPos(firstLineTo, -1)
+      if (!start || !end) {
+        throw new Error("Selection endpoint geometry is unavailable")
+      }
+      return {
+        end: { x: end.right + 32, y: (end.top + end.bottom) / 2 },
+        firstLineTo,
+        start: { x: start.right + 4, y: (start.top + start.bottom) / 2 },
+      }
+    })
+
+    await content.evaluate((element) => {
+      const view = (
+        element as HTMLElement & {
+          cmTile?: {
+            view?: {
+              dispatch(...specs: unknown[]): void
+              state: { selection: { main: { head: number } } }
+            }
+          }
+        }
+      ).cmTile?.view
+      if (!view) throw new Error("CodeMirror view is unavailable")
+      const ownerWindow = element.ownerDocument.defaultView as Window & {
+        inlineCodeSelectionHeads?: number[]
+        inlineCodeSelectionOriginalDispatch?: (...specs: unknown[]) => void
+      }
+      ownerWindow.inlineCodeSelectionHeads = []
+      const originalDispatch = view.dispatch.bind(view)
+      ownerWindow.inlineCodeSelectionOriginalDispatch = originalDispatch
+      view.dispatch = (...specs: unknown[]) => {
+        originalDispatch(...specs)
+        ownerWindow.inlineCodeSelectionHeads!.push(
+          view.state.selection.main.head
+        )
+      }
+    })
+
+    await page.mouse.move(points.start.x, points.start.y)
+    await page.mouse.down()
+    await page.mouse.move(points.end.x, points.end.y, { steps: 12 })
+    for (let offset = -2; offset <= 2; offset += 1) {
+      await page.mouse.move(points.end.x + offset, points.end.y)
+    }
+    await page.mouse.up()
+
+    const outcome = await content.evaluate((element) => {
+      const view = (
+        element as HTMLElement & {
+          cmTile?: {
+            view?: {
+              dispatch(...specs: unknown[]): void
+              state: {
+                doc: { sliceString(from: number, to: number): string }
+                selection: {
+                  main: { from: number; head: number; to: number }
+                }
+              }
+            }
+          }
+        }
+      ).cmTile?.view
+      if (!view) throw new Error("CodeMirror view is unavailable")
+      const ownerWindow = element.ownerDocument.defaultView as Window & {
+        inlineCodeSelectionHeads?: number[]
+        inlineCodeSelectionOriginalDispatch?: (...specs: unknown[]) => void
+      }
+      if (ownerWindow.inlineCodeSelectionOriginalDispatch) {
+        view.dispatch = ownerWindow.inlineCodeSelectionOriginalDispatch
+      }
+      const selection = view.state.selection.main
+      return {
+        head: selection.head,
+        heads: ownerWindow.inlineCodeSelectionHeads ?? [],
+        selected: view.state.doc.sliceString(selection.from, selection.to),
+      }
+    })
+    expect(outcome.head).toBe(points.firstLineTo)
+    expect(outcome.selected).toBe(source.slice(points.firstLineTo))
+    const firstLineEnd = outcome.heads.indexOf(points.firstLineTo)
+    expect(firstLineEnd).toBeGreaterThanOrEqual(0)
+    expect(
+      outcome.heads
+        .slice(firstLineEnd)
+        .every((head) => head === points.firstLineTo)
+    ).toBe(true)
+  } finally {
+    await exitApplication(app)
+    await rm(userData, { recursive: true, force: true })
+  }
+})

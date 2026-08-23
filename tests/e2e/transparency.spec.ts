@@ -117,6 +117,35 @@ function colorDistance(left: number[], right: number[]): number {
   )
 }
 
+async function macWindowServerTags(
+  app: ElectronApplication
+): Promise<[number, number]> {
+  const addonPath = path.join(
+    projectRoot,
+    "dist-native",
+    "macos-window-blur.node"
+  )
+  return app.evaluate(({ BrowserWindow }, nativeAddonPath) => {
+    const target = BrowserWindow.getAllWindows()[0]
+    if (!target) throw new Error("Pulse window is unavailable")
+    const load = process
+      .getBuiltinModule("module")
+      .createRequire(`${nativeAddonPath}.e2e.cjs`)
+    const addon = load(nativeAddonPath) as {
+      windowServerTags(nativeHandle: Buffer): unknown
+    }
+    const tags = addon.windowServerTags(target.getNativeWindowHandle())
+    if (
+      !Array.isArray(tags) ||
+      tags.length !== 2 ||
+      tags.some((word) => !Number.isInteger(word))
+    ) {
+      throw new Error("Native macOS window tags are unavailable")
+    }
+    return tags as [number, number]
+  }, addonPath)
+}
+
 test("launch reveal keeps focus and first input available while it runs", async () => {
   test.skip(
     !nativeBackgroundEffectsSupported(),
@@ -246,6 +275,20 @@ test("disabled launch transition settles without starting an animation", async (
           performance.getEntriesByName("pmd:launch-transition-started").length
       )
     ).toBe(0)
+    if (process.platform === "darwin") {
+      await expect
+        .poll(async () => {
+          const [, highTags] = await macWindowServerTags(app)
+          return {
+            neverFlattenDuringSwipes: highTags & 0x00800000,
+            spaceExclusion: highTags & 0x00010000,
+          }
+        })
+        .toEqual({
+          neverFlattenDuringSwipes: 0x00800000,
+          spaceExclusion: 0,
+        })
+    }
   } finally {
     await exitApplication(app)
     await rm(userData, { recursive: true, force: true })

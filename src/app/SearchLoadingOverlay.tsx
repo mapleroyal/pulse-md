@@ -14,17 +14,18 @@ import {
 } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
+import { insertSearchInputLineBreak } from "@/app/search-input"
 import {
   InputGroup,
   InputGroupAddon,
-  InputGroupInput,
+  InputGroupTextarea,
 } from "@/components/ui/input-group"
 
 export interface SearchLoadingOverlayProps {
   error?: boolean
   expanded: boolean
   focusRequest: number
-  inputRef: React.RefObject<HTMLInputElement | null>
+  inputRef: React.RefObject<HTMLTextAreaElement | null>
   query: string
   replacement: string
   onClose: () => void
@@ -78,16 +79,18 @@ export function SearchLoadingOverlay({
 
       <div className="search-content min-w-0 flex-1 space-y-1">
         <div className="search-find-row flex min-w-0 items-center gap-1">
-          <InputGroup className="search-find-group h-8 min-w-0 flex-1 rounded-xl bg-input/40">
-            <InputGroupInput
+          <InputGroup className="search-find-group h-auto min-h-8 min-w-0 flex-1 items-start rounded-xl bg-input/40 has-[textarea]:rounded-xl">
+            <InputGroupTextarea
               ref={inputRef}
               aria-label="Find"
-              className="h-8 min-w-[5rem] pl-2.5"
+              className="max-h-24 min-h-8 min-w-[5rem] overflow-y-auto px-2.5 py-1.5 leading-5"
               placeholder="Find"
+              rows={1}
               spellCheck={false}
               value={query}
               onChange={(event) => onQueryChange(event.currentTarget.value)}
               onKeyDown={(event) => {
+                if (insertSearchInputLineBreak(event, onQueryChange)) return
                 if (event.key !== "Enter") return
                 event.preventDefault()
                 onNavigate(event.shiftKey ? "previous" : "next")
@@ -95,7 +98,7 @@ export function SearchLoadingOverlay({
             />
             <InputGroupAddon
               align="inline-end"
-              className="shrink-0 gap-0.5 pr-1"
+              className="shrink-0 gap-0.5 py-1 pr-1"
             >
               {[CaseSensitiveIcon, WholeWordIcon, RegexIcon].map(
                 (Icon, index) => (
@@ -166,18 +169,29 @@ export function SearchLoadingOverlay({
 
         {expanded ? (
           <div className="search-replace-row flex min-w-0 items-center gap-1 pr-14">
-            <InputGroup className="search-replace-group h-8 min-w-0 flex-1 rounded-xl bg-input/40">
-              <InputGroupInput
+            <InputGroup className="search-replace-group h-auto min-h-8 min-w-0 flex-1 items-start rounded-xl bg-input/40 has-[textarea]:rounded-xl">
+              <InputGroupTextarea
                 aria-label="Replace"
-                className="h-8 min-w-[5rem] pl-2.5"
+                className="max-h-24 min-h-8 min-w-[5rem] overflow-y-auto px-2.5 py-1.5 leading-5"
                 placeholder="Replace"
+                rows={1}
                 spellCheck={false}
                 value={replacement}
                 onChange={(event) =>
                   onReplacementChange(event.currentTarget.value)
                 }
+                onKeyDown={(event) => {
+                  if (insertSearchInputLineBreak(event, onReplacementChange)) {
+                    return
+                  }
+                  if (event.key !== "Enter") return
+                  event.preventDefault()
+                }}
               />
-              <InputGroupAddon align="inline-end" className="shrink-0 pr-1">
+              <InputGroupAddon
+                align="inline-end"
+                className="shrink-0 py-1 pr-1"
+              >
                 <span
                   aria-hidden="true"
                   className="grid size-6 place-items-center text-muted-foreground/45"

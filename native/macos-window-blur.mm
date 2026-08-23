@@ -22,17 +22,25 @@ char kBackdropResizeObserverKey;
 NSString* const kBackdropRadiusAnimationKey =
     @"PulseMDBackdropRadius";
 
-constexpr std::int32_t kCGSNeverFlattenSurfacesDuringSwipesTagBit = 1 << 16;
+// AppKit applies this high-word tag while a window is live-resizing on macOS
+// 26. It is also the WindowServer opt-out used to preserve hosted backdrop
+// surfaces during Mission Control and Spaces transforms. High-word bit 16 is
+// a different, Space-affecting tag and makes ordinary document windows vanish
+// from Mission Control's Space thumbnails.
+constexpr std::int32_t kCGSNeverFlattenSurfacesDuringSwipesTagBit = 1 << 23;
 constexpr std::int32_t kCGSWindowTagBitCount = 0x40;
 
 using CGSConnectionID = std::int32_t;
 using CGSWindowID = std::int32_t;
 using CGSMainConnectionIDFunction = CGSConnectionID (*)();
+using CGSGetWindowTagsFunction = std::int32_t (*)(
+    CGSConnectionID, CGSWindowID, std::int32_t*, std::int32_t);
 using CGSSetWindowTagsFunction = std::int32_t (*)(
     CGSConnectionID, CGSWindowID, const std::int32_t*, std::int32_t);
 
 struct WindowServerFunctions {
   CGSMainConnectionIDFunction main_connection_id;
+  CGSGetWindowTagsFunction get_window_tags;
   CGSSetWindowTagsFunction set_window_tags;
 };
 
@@ -43,10 +51,14 @@ const WindowServerFunctions& GetWindowServerFunctions() {
     void* handle =
         dlopen("/System/Library/PrivateFrameworks/SkyLight.framework/SkyLight",
                RTLD_LAZY | RTLD_LOCAL);
-    if (handle == nullptr) return WindowServerFunctions{nullptr, nullptr};
+    if (handle == nullptr) {
+      return WindowServerFunctions{nullptr, nullptr, nullptr};
+    }
     return WindowServerFunctions{
         reinterpret_cast<CGSMainConnectionIDFunction>(
             dlsym(handle, "CGSMainConnectionID")),
+        reinterpret_cast<CGSGetWindowTagsFunction>(
+            dlsym(handle, "CGSGetWindowTags")),
         reinterpret_cast<CGSSetWindowTagsFunction>(
             dlsym(handle, "CGSSetWindowTags")),
     };
@@ -332,6 +344,90 @@ napi_value Boolean(napi_env env, bool value) {
   return result;
 }
 
+napi_value Null(napi_env env) {
+  napi_value result = nullptr;
+  if (napi_get_null(env, &result) != napi_ok) return nullptr;
+  return result;
+}
+
+// Keep the private tag inspection inside the main-process addon. The focused
+// compositor test uses it without exposing WindowServer state to the renderer.
+napi_value WindowServerTags(napi_env env, napi_callback_info info) {
+  size_t argument_count = 1;
+  napi_value arguments[1] = {nullptr};
+  if (napi_get_cb_info(env, info, &argument_count, arguments, nullptr,
+                       nullptr) != napi_ok) {
+    return nullptr;
+  }
+  if (argument_count != 1) {
+    napi_throw_type_error(env, nullptr,
+                          "windowServerTags requires a native handle");
+    return nullptr;
+  }
+
+  bool is_buffer = false;
+  if (napi_is_buffer(env, arguments[0], &is_buffer) != napi_ok || !is_buffer) {
+    napi_throw_type_error(env, nullptr,
+                          "The native window handle must be a Buffer");
+    return nullptr;
+  }
+
+  void* handle_bytes = nullptr;
+  size_t handle_length = 0;
+  if (napi_get_buffer_info(env, arguments[0], &handle_bytes, &handle_length) !=
+          napi_ok ||
+      handle_length < sizeof(void*)) {
+    napi_throw_type_error(env, nullptr, "The native window handle is invalid");
+    return nullptr;
+  }
+  if (![NSThread isMainThread]) {
+    napi_throw_error(env, nullptr,
+                     "Window tags must be read on the main thread");
+    return nullptr;
+  }
+
+  void* view_pointer = nullptr;
+  std::memcpy(&view_pointer, handle_bytes, sizeof(view_pointer));
+  if (view_pointer == nullptr) return Null(env);
+
+  @autoreleasepool {
+    @try {
+      NSView* view = (__bridge NSView*)view_pointer;
+      NSWindow* window = view.window;
+      const WindowServerFunctions& functions = GetWindowServerFunctions();
+      if (window == nil || window.windowNumber <= 0 ||
+          functions.main_connection_id == nullptr ||
+          functions.get_window_tags == nullptr) {
+        return Null(env);
+      }
+
+      std::int32_t tags[2] = {0, 0};
+      if (functions.get_window_tags(
+              functions.main_connection_id(),
+              static_cast<CGSWindowID>(window.windowNumber), tags,
+              kCGSWindowTagBitCount) != 0) {
+        return Null(env);
+      }
+
+      napi_value result = nullptr;
+      if (napi_create_array_with_length(env, 2, &result) != napi_ok) {
+        return nullptr;
+      }
+      for (std::uint32_t index = 0; index < 2; index += 1) {
+        napi_value word = nullptr;
+        if (napi_create_uint32(env, static_cast<std::uint32_t>(tags[index]),
+                               &word) != napi_ok ||
+            napi_set_element(env, result, index, word) != napi_ok) {
+          return nullptr;
+        }
+      }
+      return result;
+    } @catch (NSException*) {
+      return Null(env);
+    }
+  }
+}
+
 napi_value TabDragEscapeKeyPressed(napi_env env, napi_callback_info info) {
   size_t argument_count = 0;
   if (napi_get_cb_info(env, info, &argument_count, nullptr, nullptr, nullptr) !=
@@ -559,8 +655,18 @@ napi_value Initialize(napi_env env, napi_value exports) {
           napi_default,
           nullptr,
       },
+      {
+          "windowServerTags",
+          nullptr,
+          WindowServerTags,
+          nullptr,
+          nullptr,
+          nullptr,
+          napi_default,
+          nullptr,
+      },
   };
-  if (napi_define_properties(env, exports, 3, properties) != napi_ok) {
+  if (napi_define_properties(env, exports, 4, properties) != napi_ok) {
     return nullptr;
   }
   return exports;

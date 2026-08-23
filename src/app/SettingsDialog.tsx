@@ -509,9 +509,8 @@ export default function SettingsDialog({
   const [previewSchemeOverride, setPreviewSchemeOverride] =
     React.useState<ResolvedAppearance | null>(null)
   const previewScheme = previewSchemeOverride ?? activeScheme
-  const topControlsPosition = platform === "win32" ? "top-left" : "top-right"
-  const topControlsPositionLabel =
-    platform === "win32" ? "Top-Left" : "Top-Right"
+  const topControlsPosition = "top-right"
+  const topControlsPositionLabel = "Top-Right"
   const backgroundEffectControlsEnabled =
     backgroundEffectSupported && draftSettings.backgroundEffect.enabled
   const [isSaving, setIsSaving] = React.useState(false)

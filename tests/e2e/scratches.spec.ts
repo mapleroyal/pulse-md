@@ -245,6 +245,169 @@ test("scratch picker keeps search-first keyboard and pointer interactions", asyn
   }
 })
 
+test("scratch picker preserves immediate arrows and search focus while empty previews load", async () => {
+  const userData = await mkdtemp(
+    path.join(os.tmpdir(), "pulse-md-scratch-picker-focus-e2e-")
+  )
+  const emptyScratch = {
+    content: "",
+    createdAt: 1_725_000_000_400,
+    fileName: "empty.md",
+    id: "10000000-0000-4000-8000-000000000004",
+    lastOpenedAt: 1_725_000_000_400,
+    title: "Empty",
+  }
+  await seedScratchStore(userData, [...scratchFixtures, emptyScratch])
+  const app = await electron.launch({
+    args: [projectRoot, `--user-data-dir=${userData}`],
+    cwd: projectRoot,
+  })
+
+  const releaseInventory = () =>
+    app.evaluate(() => {
+      const testGlobal = globalThis as typeof globalThis & {
+        releaseScratchPickerInventory?: () => void
+      }
+      testGlobal.releaseScratchPickerInventory?.()
+      delete testGlobal.releaseScratchPickerInventory
+    })
+
+  try {
+    const page = await app.firstWindow()
+    await page.locator(".cm-editor").waitFor()
+    const inventory = await page.evaluate(() =>
+      window.pulseMd.getScratches("", "last-opened", "scratch-browser")
+    )
+    await app.evaluate(({ ipcMain }, completeInventory) => {
+      const testGlobal = globalThis as typeof globalThis & {
+        releaseScratchPickerInventory?: () => void
+      }
+      let release: () => void = () => undefined
+      const gate = new Promise<void>((resolve) => {
+        release = resolve
+      })
+      testGlobal.releaseScratchPickerInventory = release
+      ipcMain.removeHandler("pulse-md:get-scratches")
+      ipcMain.handle(
+        "pulse-md:get-scratches",
+        async (_event, rawQuery: unknown) => {
+          await gate
+          const query =
+            typeof rawQuery === "string" ? rawQuery.trim().toLowerCase() : ""
+          return {
+            ...completeInventory,
+            entries: query
+              ? completeInventory.entries.filter((entry) =>
+                  [entry.displayTitle, entry.fileName, entry.excerpt].some(
+                    (value) => value.toLowerCase().includes(query)
+                  )
+                )
+              : completeInventory.entries,
+          }
+        }
+      )
+    }, inventory)
+
+    await page.keyboard.press(`${primaryModifier}+P`)
+    const picker = page.getByRole("dialog", { name: "Open Scratch" })
+    const search = picker.getByRole("combobox", {
+      name: "Search scratches",
+    })
+    const option = (scratchId: string) =>
+      picker.locator(`[role="option"][data-scratch-id="${scratchId}"]`)
+    const [alpha, beta] = scratchFixtures
+
+    await expect(search).toBeFocused()
+    await page.keyboard.press("ArrowDown")
+    await releaseInventory()
+    await expect(option(alpha.id)).toHaveAttribute("aria-selected", "true")
+    await expect(search).toBeFocused()
+
+    await search.fill("Empty")
+    await expect(option(emptyScratch.id)).toHaveAttribute(
+      "aria-selected",
+      "true"
+    )
+    await picker
+      .locator(`[data-scratch-preview-id="${emptyScratch.id}"]`)
+      .waitFor()
+    await expect(search).toBeFocused()
+
+    await search.fill("B")
+    await expect(option(beta.id)).toHaveAttribute("aria-selected", "true")
+    await expect(search).toBeFocused()
+    await page.keyboard.press("ArrowDown")
+    await page.keyboard.type("e")
+    await expect(search).toHaveValue("Be")
+    await expect(option(beta.id)).toHaveAttribute("aria-selected", "true")
+    await expect(search).toBeFocused()
+  } finally {
+    await releaseInventory().catch(() => undefined)
+    await exitApplication(app)
+    await rm(userData, { force: true, recursive: true })
+  }
+})
+
+test("open scratch offers metadata editing from the row menu and preview actions", async () => {
+  const userData = await mkdtemp(
+    path.join(os.tmpdir(), "pulse-md-scratch-picker-edit-e2e-")
+  )
+  await seedScratchStore(userData, scratchFixtures)
+  const app = await electron.launch({
+    args: [projectRoot, `--user-data-dir=${userData}`],
+    cwd: projectRoot,
+  })
+
+  try {
+    const page = await app.firstWindow()
+    await page.locator(".cm-editor").waitFor()
+    const [, beta, gamma] = scratchFixtures
+
+    await page.keyboard.press(`${primaryModifier}+P`)
+    let picker = page.getByRole("dialog", { name: "Open Scratch" })
+    const betaOption = picker.locator(
+      `[role="option"][data-scratch-id="${beta.id}"]`
+    )
+    await betaOption.click({ button: "right" })
+    const betaMenu = page.getByRole("menu", { name: "Actions for Beta" })
+    await expect(betaMenu).toBeVisible()
+    await betaMenu.getByRole("menuitem", { name: "Edit Scratch" }).click()
+
+    let workspace = page.getByRole("region", {
+      name: "Scratches Workspace",
+    })
+    await expect(picker).toBeHidden()
+    await expect(workspace.getByRole("textbox", { name: "Title" })).toHaveValue(
+      "Beta"
+    )
+    await expect(
+      workspace.locator(`[role="option"][data-scratch-id="${beta.id}"]`)
+    ).toHaveAttribute("aria-selected", "true")
+
+    await workspace.getByRole("button", { name: "Back to Settings" }).click()
+    const settings = page.getByRole("dialog", { name: "Settings" })
+    await settings.getByRole("button", { name: "Close" }).click()
+
+    await page.keyboard.press(`${primaryModifier}+P`)
+    picker = page.getByRole("dialog", { name: "Open Scratch" })
+    await picker
+      .locator(`[role="option"][data-scratch-id="${gamma.id}"]`)
+      .click()
+    await picker.getByRole("button", { name: "Edit", exact: true }).click()
+
+    workspace = page.getByRole("region", { name: "Scratches Workspace" })
+    await expect(workspace.getByRole("textbox", { name: "Title" })).toHaveValue(
+      "Gamma"
+    )
+    await expect(
+      workspace.locator(`[role="option"][data-scratch-id="${gamma.id}"]`)
+    ).toHaveAttribute("aria-selected", "true")
+  } finally {
+    await exitApplication(app)
+    await rm(userData, { force: true, recursive: true })
+  }
+})
+
 test("scratch picker keeps its selected result actions reachable at minimum size and maximum zoom", async () => {
   const userData = await mkdtemp(
     path.join(os.tmpdir(), "pulse-md-scratch-picker-compact-e2e-")

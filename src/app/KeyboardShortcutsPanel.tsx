@@ -346,6 +346,11 @@ function platformShortcuts(
         },
         { label: "Previous result", keys: [[[shift, "Enter"]]] },
         {
+          label: "Insert line break",
+          description: "When the Find or Replace field is focused.",
+          keys: [[[alt, "Enter"]]],
+        },
+        {
           label: "Replace current result",
           description: "When the replacement field is focused.",
           keys: [[["Enter"]]],

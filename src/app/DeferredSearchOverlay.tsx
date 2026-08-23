@@ -37,7 +37,7 @@ export const DeferredSearchOverlay = React.forwardRef<
   { focusRequest, getController, handoffQueue, open, onClose },
   ref
 ) {
-  const fallbackInputRef = React.useRef<HTMLInputElement>(null)
+  const fallbackInputRef = React.useRef<HTMLTextAreaElement>(null)
   const appliedSearchStateRef = React.useRef<SearchUiState>({
     ...DEFAULT_SEARCH_UI_STATE,
   })

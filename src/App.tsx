@@ -345,11 +345,13 @@ function loadFormattingToolbar() {
 function FormattingToolbarFallback({
   error,
   position,
+  responsiveControlsInset,
   visible,
   onRetry,
 }: {
   error?: boolean
   position: AppSettings["chrome"]["formattingBarPosition"]
+  responsiveControlsInset: number
   visible: boolean
   onRetry?: () => void
 }) {
@@ -358,6 +360,11 @@ function FormattingToolbarFallback({
     <div
       className="formatting-toolbar fixed top-[calc(var(--window-chrome-height)-var(--formatting-toolbar-overlap))] right-0 left-0 z-[41] h-[var(--formatting-toolbar-height)] overflow-hidden bg-transparent text-[var(--document-foreground)]"
       data-visible=""
+      style={
+        responsiveControlsInset > 0
+          ? { right: `${responsiveControlsInset}px` }
+          : undefined
+      }
     >
       <div className="formatting-toolbar-scroll relative z-[1] h-full overflow-hidden">
         <div
@@ -365,6 +372,11 @@ function FormattingToolbarFallback({
           className="flex h-full min-w-full items-center gap-2 px-3 data-[position=center]:justify-center data-[position=right]:justify-end"
           data-position={position}
           role={error ? "alert" : "status"}
+          style={
+            responsiveControlsInset > 0
+              ? { justifyContent: "flex-start" }
+              : undefined
+          }
         >
           <span className="rounded-lg bg-popover/90 px-2.5 py-1 text-xs text-muted-foreground shadow-sm ring-1 ring-border/60">
             {error
@@ -396,6 +408,7 @@ function DeferredFormattingToolbar(props: FormattingToolbarProps) {
     <FormattingToolbarFallback
       error={failed}
       position={props.position}
+      responsiveControlsInset={props.responsiveControlsInset}
       visible={props.visible}
       onRetry={retryAction}
     />
@@ -703,6 +716,7 @@ interface WindowProfilesWorkspaceState {
 
 interface ScratchesWorkspaceState {
   parentDraft: AppSettings
+  selectedScratchId?: string
 }
 
 interface WindowProfilePickerState {
@@ -1338,6 +1352,8 @@ export function App() {
   const [tabDragSink, setTabDragSink] = React.useState(false)
   const [topChromeHoverLatched, setTopChromeHoverLatched] =
     React.useState(false)
+  const [responsiveControlsDrawerLayout, setResponsiveControlsDrawerLayout] =
+    React.useState({ inset: 0, visible: false })
   const [tabDragShelfHoverContext, setTabDragShelfHoverContext] =
     React.useState<object | null>(null)
   const [topDrawerCompensated, setTopDrawerCompensated] = React.useState(false)
@@ -2673,6 +2689,9 @@ export function App() {
       setSettingsOpen(false)
       setScratchesWorkspace({
         parentDraft: cloneAppSettings(workspace.parentDraft),
+        ...(workspace.selectedScratchId
+          ? { selectedScratchId: workspace.selectedScratchId }
+          : {}),
       })
       return true
     },
@@ -2690,6 +2709,35 @@ export function App() {
       pushSettingsNavigationRoute({ kind: "scratches" })
     },
     [activateScratchesWorkspace, pushSettingsNavigationRoute]
+  )
+
+  const editScratchDetails = React.useCallback(
+    (scratchId: string) => {
+      if (!scratchBrowserOpenRef.current) return
+      const parentDraft = cloneAppSettings(settingsRef.current)
+      if (windowZoomFactorRef.current !== null) {
+        parentDraft.zoomFactor = windowZoomFactorRef.current
+      }
+      if (
+        !activateScratchesWorkspace({
+          parentDraft,
+          selectedScratchId: scratchId,
+        })
+      ) {
+        return
+      }
+      scratchBrowserOpenRef.current = false
+      setScratchBrowserOpen(false)
+      reportEditorMenuState()
+      resetSettingsNavigationHistory()
+      pushSettingsNavigationRoute({ kind: "scratches" })
+    },
+    [
+      activateScratchesWorkspace,
+      pushSettingsNavigationRoute,
+      reportEditorMenuState,
+      resetSettingsNavigationHistory,
+    ]
   )
 
   const returnFromScratchesWorkspace = React.useCallback(() => {
@@ -5123,16 +5171,11 @@ export function App() {
 
   const hideTopControls = React.useCallback(
     (controls: readonly TopRightControlKey[]) =>
-      updateChromeFromCommand(
-        (chrome) => {
-          const topRightControls = { ...chrome.topRightControls }
-          for (const control of controls) topRightControls[control] = false
-          return { topRightControls }
-        },
-        `The ${
-          platformRef.current === "win32" ? "top-left" : "top-right"
-        } controls setting could not be saved.`
-      ),
+      updateChromeFromCommand((chrome) => {
+        const topRightControls = { ...chrome.topRightControls }
+        for (const control of controls) topRightControls[control] = false
+        return { topRightControls }
+      }, "The top-right controls setting could not be saved."),
     [updateChromeFromCommand]
   )
 
@@ -6832,7 +6875,10 @@ export function App() {
     activeTabId &&
     formattingBarEnabled
   )
-  const topDrawerVisible = formattingDrawerVisible || tabDragShelfVisible
+  const topDrawerVisible =
+    formattingDrawerVisible ||
+    tabDragShelfVisible ||
+    responsiveControlsDrawerLayout.visible
   const topDrawerCompensationActive = topDrawerVisible && topDrawerCompensated
 
   React.useLayoutEffect(() => {
@@ -6959,6 +7005,21 @@ export function App() {
     },
     [formattingBarEnabled]
   )
+  const handleResponsiveControlsDrawerLayoutChange = React.useCallback(
+    (layout: { inset: number; visible: boolean }) => {
+      setResponsiveControlsDrawerLayout((current) =>
+        current.inset === layout.inset && current.visible === layout.visible
+          ? current
+          : layout
+      )
+      if (layout.visible) {
+        if (shouldCompensateTopDrawer()) setTopDrawerCompensated(true)
+      } else if (!formattingBarEnabled && !tabDragShelfVisible) {
+        setTopDrawerCompensated(false)
+      }
+    },
+    [formattingBarEnabled, shouldCompensateTopDrawer, tabDragShelfVisible]
+  )
   const handleTabDragShelfVisibleChange = React.useCallback(
     (visible: boolean) => {
       setTopDrawerCompensated(visible && shouldCompensateTopDrawer())
@@ -6989,6 +7050,9 @@ export function App() {
       data-top-drawer-compensated={topDrawerCompensationActive || undefined}
       data-typography-preview={typographyPreview ? true : undefined}
       data-formatting-bar={formattingDrawerVisible || undefined}
+      data-responsive-controls-drawer={
+        responsiveControlsDrawerLayout.visible || undefined
+      }
       data-tab-drag-shelf={tabDragShelfVisible || undefined}
     >
       <div
@@ -7049,9 +7113,15 @@ export function App() {
           onNavigateBack={() => navigateDocumentHistory("back")}
           onNavigateForward={() => navigateDocumentHistory("forward")}
           onOpenOutline={openOutline}
+          onResponsiveControlsDrawerLayoutChange={
+            handleResponsiveControlsDrawerLayoutChange
+          }
           onOpenSettings={openSettings}
           outlineAnchorRef={outlineAnchorRef}
           outlineOpen={outlineOpen}
+          responsiveControlsDrawerVisible={
+            responsiveControlsDrawerLayout.visible
+          }
           renderOutlinePopover={
             outlineOpen
               ? (trigger) => (
@@ -7094,6 +7164,7 @@ export function App() {
           fallbackWheelScrollerRef={topChromeTabScrollerRef}
           hoverLatched={topChromeHoverLatched}
           position={appSettings.chrome.formattingBarPosition}
+          responsiveControlsInset={responsiveControlsDrawerLayout.inset}
           visible={formattingBarEnabled}
           wheelScrollDirection={appSettings.chrome.tabWheelScrollDirection}
           onHoverLatchedChange={setTopChromeHoverLatched}
@@ -7231,6 +7302,7 @@ export function App() {
 
       {platform && scratchBrowserOpen ? (
         <ScratchBrowserSurface
+          editScratch={editScratchDetails}
           open
           openScratch={openScratchById}
           platform={platform}
@@ -7327,6 +7399,7 @@ export function App() {
               newScratch: createScratchFromSettings,
               openScratch: openScratchById,
               platform,
+              initialSelectedId: scratchesWorkspace.selectedScratchId,
               settings: scratchesWorkspace.parentDraft,
               onBack: () => navigateSettingsHistory("back"),
               onNavigationBlockedChange: handleScratchesNavigationBlockedChange,

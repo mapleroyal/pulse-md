@@ -1,5 +1,5 @@
 import * as React from "react"
-import { FilePlus2Icon, FolderOpenIcon } from "lucide-react"
+import { FilePenLineIcon, FilePlus2Icon, FolderOpenIcon } from "lucide-react"
 
 import {
   type ScratchOpenDisposition,
@@ -11,6 +11,7 @@ import {
   type ScratchPreviewRenderState,
 } from "@/app/ScratchPicker"
 import { Button } from "@/components/ui/button"
+import { ContextMenuItem } from "@/components/ui/context-menu"
 import {
   Dialog,
   DialogContent,
@@ -40,6 +41,7 @@ export interface ScratchBrowserProps {
     scratchId: string,
     disposition: ScratchOpenDisposition
   ) => Promise<unknown> | unknown
+  editScratch: (scratchId: string) => void
   initialSort?: ScratchSort
   renderPreview?: (state: ScratchPreviewRenderState) => React.ReactNode
 }
@@ -56,6 +58,7 @@ export function ScratchBrowser({
   getScratchPreview,
   onOpenChange,
   openScratch,
+  editScratch,
   initialSort = "last-opened",
   renderPreview,
 }: ScratchBrowserProps) {
@@ -162,6 +165,16 @@ export function ScratchBrowser({
                   disabled={pending || interactionDisabled}
                   size="sm"
                   type="button"
+                  variant="outline"
+                  onClick={() => editScratch(scratch.scratchId)}
+                >
+                  <FilePenLineIcon data-icon="inline-start" />
+                  Edit
+                </Button>
+                <Button
+                  disabled={pending || interactionDisabled}
+                  size="sm"
+                  type="button"
                   onClick={() =>
                     void handleOpenScratch(scratch.scratchId, "default")
                   }
@@ -189,6 +202,15 @@ export function ScratchBrowser({
                   <TooltipContent>Open in New Tab</TooltipContent>
                 </Tooltip>
               </>
+            )}
+            renderRowContextMenu={(scratch, interactionDisabled) => (
+              <ContextMenuItem
+                disabled={pending || interactionDisabled}
+                onClick={() => editScratch(scratch.scratchId)}
+              >
+                <FilePenLineIcon />
+                Edit Scratch
+              </ContextMenuItem>
             )}
           />
         </DialogContent>

@@ -397,6 +397,7 @@ function verifyMacNativeAddon(nativeAddon) {
     "animateWindowBackgroundBlur",
     "setWindowBackgroundEffect",
     "tabDragEscapeKeyPressed",
+    "windowServerTags",
   ]
   for (const method of methods) {
     if (typeof addon[method] !== "function") {

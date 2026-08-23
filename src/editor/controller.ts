@@ -1743,7 +1743,8 @@ export class MarkdownEditorController implements MarkdownEditorHandle {
         }
     const initialContent = normalizeEditorContent(options.content ?? "")
     this.caretVisible =
-      options.autofocus === true || initialContent.length === 0
+      options.autofocus === true ||
+      (options.focusWhenEmpty !== false && initialContent.length === 0)
     this.onChange = options.onChange
     this.onModeChange = options.onModeChange
     this.onLineWrappingChange = options.onLineWrappingChange

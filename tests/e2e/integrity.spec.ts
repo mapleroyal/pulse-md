@@ -70,6 +70,45 @@ async function replaceEditorDocument(page: Page, content: string) {
   await expect(page.getByLabel("Modified")).toBeVisible()
 }
 
+test("the dark e2e theme is resolved before the first window is created", async () => {
+  test.skip(
+    process.env.PMD_E2E_FORCE_DARK_MODE !== "1",
+    "The optimized e2e runner owns the default dark appearance"
+  )
+  const testDirectory = await createTestDirectory()
+  const userData = path.join(testDirectory, "user-data")
+  const app = await launchApplication(userData)
+
+  try {
+    const page = await app.firstWindow()
+    const nativeAppearance = await app.evaluate(
+      ({ BrowserWindow, nativeTheme }) => ({
+        backgroundColor:
+          BrowserWindow.getAllWindows()[0]?.getBackgroundColor() ?? null,
+        shouldUseDarkColors: nativeTheme.shouldUseDarkColors,
+        themeSource: nativeTheme.themeSource,
+      })
+    )
+
+    expect(nativeAppearance).toMatchObject({
+      shouldUseDarkColors: true,
+      themeSource: "dark",
+    })
+    expect(nativeAppearance.backgroundColor).toMatch(/^#181818(?:ff)?$/i)
+    expect(new URL(page.url()).searchParams.get("appearanceMode")).toBe(
+      "system"
+    )
+    expect(
+      await page.evaluate(
+        () => window.matchMedia("(prefers-color-scheme: dark)").matches
+      )
+    ).toBe(true)
+  } finally {
+    await exitApplication(app)
+    await rm(testDirectory, { force: true, recursive: true })
+  }
+})
+
 test("the renderer uses its private scheme and IPC rejects a changed main-frame path", async () => {
   const testDirectory = await createTestDirectory()
   const userData = path.join(testDirectory, "user-data")

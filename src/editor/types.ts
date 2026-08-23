@@ -135,6 +135,8 @@ export interface MarkdownEditorControllerOptions {
   windowActive?: boolean
   ariaLabel?: string
   autofocus?: boolean
+  /** Empty primary documents focus their caret by default; auxiliary previews opt out. */
+  focusWhenEmpty?: boolean
   initialCursor?: { line: number; column: number }
   platform?: AppPlatform
   spellCheck?: boolean

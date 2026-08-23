@@ -16,6 +16,11 @@ import {
 } from "@/app/scratch-picker-model"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuTrigger,
+} from "@/components/ui/context-menu"
 import { Input } from "@/components/ui/input"
 import {
   Select,
@@ -62,6 +67,10 @@ export interface ScratchPickerProps {
     interactionDisabled: boolean
   ) => React.ReactNode
   renderDetails?: (
+    scratch: ScratchSummary,
+    interactionDisabled: boolean
+  ) => React.ReactNode
+  renderRowContextMenu?: (
     scratch: ScratchSummary,
     interactionDisabled: boolean
   ) => React.ReactNode
@@ -253,6 +262,7 @@ interface VirtualScratchListProps {
   entries: readonly ScratchSummary[]
   interactive: boolean
   listboxId: string
+  renderRowContextMenu?: ScratchPickerProps["renderRowContextMenu"]
   selectedId: string | null
   onFocusSearch: () => void
   onSelect: (scratchId: string) => void
@@ -262,6 +272,7 @@ function VirtualScratchList({
   entries,
   interactive,
   listboxId,
+  renderRowContextMenu,
   selectedId,
   onFocusSearch,
   onSelect,
@@ -357,6 +368,43 @@ function VirtualScratchList({
           scratch.excerpt.trim() ||
           (scratch.byteLength === 0 ? "Empty scratch" : "No text preview")
 
+        const row = (
+          <button
+            id={`${listboxId}-option-${entryIndex}`}
+            aria-posinset={entryIndex + 1}
+            aria-selected={selected}
+            aria-setsize={entries.length}
+            className="grid h-[5.25rem] w-full content-center gap-1 rounded-md px-3 py-2 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring/40 data-[selected=true]:bg-accent"
+            data-scratch-id={scratch.scratchId}
+            data-selected={selected || undefined}
+            disabled={!interactive}
+            role="option"
+            type="button"
+            onClick={() => onSelect(scratch.scratchId)}
+            onPointerDown={(event) => {
+              if (event.button !== 0) return
+              event.preventDefault()
+              onFocusSearch()
+            }}
+          >
+            <span className="flex min-w-0 items-center gap-2">
+              <span className="min-w-0 flex-1 truncate text-sm font-medium">
+                {scratchTitle(scratch)}
+              </span>
+              {scratch.open ? (
+                <span
+                  aria-label="Open"
+                  className="size-1.5 shrink-0 rounded-full bg-ring"
+                  data-corner-shape="round"
+                />
+              ) : null}
+            </span>
+            <span className="line-clamp-2 min-w-0 text-xs leading-4 text-muted-foreground">
+              {excerpt}
+            </span>
+          </button>
+        )
+
         return (
           <React.Fragment key={scratch.scratchId}>
             {gapBefore > 0 ? (
@@ -365,40 +413,19 @@ function VirtualScratchList({
                 style={{ height: gapBefore * SCRATCH_ROW_HEIGHT }}
               />
             ) : null}
-            <button
-              id={`${listboxId}-option-${entryIndex}`}
-              aria-posinset={entryIndex + 1}
-              aria-selected={selected}
-              aria-setsize={entries.length}
-              className="grid h-[5.25rem] w-full content-center gap-1 rounded-md px-3 py-2 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring/40 data-[selected=true]:bg-accent"
-              data-scratch-id={scratch.scratchId}
-              data-selected={selected || undefined}
-              disabled={!interactive}
-              role="option"
-              type="button"
-              onClick={() => onSelect(scratch.scratchId)}
-              onPointerDown={(event) => {
-                if (event.button !== 0) return
-                event.preventDefault()
-                onFocusSearch()
-              }}
-            >
-              <span className="flex min-w-0 items-center gap-2">
-                <span className="min-w-0 flex-1 truncate text-sm font-medium">
-                  {scratchTitle(scratch)}
-                </span>
-                {scratch.open ? (
-                  <span
-                    aria-label="Open"
-                    className="size-1.5 shrink-0 rounded-full bg-ring"
-                    data-corner-shape="round"
-                  />
-                ) : null}
-              </span>
-              <span className="line-clamp-2 min-w-0 text-xs leading-4 text-muted-foreground">
-                {excerpt}
-              </span>
-            </button>
+            {renderRowContextMenu ? (
+              <ContextMenu>
+                <ContextMenuTrigger render={row} />
+                <ContextMenuContent
+                  aria-label={`Actions for ${scratchTitle(scratch)}`}
+                  className="min-w-44"
+                >
+                  {renderRowContextMenu(scratch, !interactive)}
+                </ContextMenuContent>
+              </ContextMenu>
+            ) : (
+              row
+            )}
           </React.Fragment>
         )
       })}
@@ -429,6 +456,7 @@ export function ScratchPicker({
   onEscapeWhenEmpty,
   renderActions,
   renderDetails,
+  renderRowContextMenu,
   renderPreview = ScratchSourcePreview,
   className,
   emptyMessage = "No scratches yet.",
@@ -440,6 +468,7 @@ export function ScratchPicker({
   resultsCurrent = !loading,
 }: ScratchPickerProps) {
   const ownInputRef = React.useRef<HTMLInputElement>(null)
+  const pendingCyclesRef = React.useRef<(1 | -1)[]>([])
   const inputRef = providedInputRef ?? ownInputRef
   const listboxId = React.useId()
   const visibleScratches = scratches
@@ -473,6 +502,24 @@ export function ScratchPicker({
     [onSelectedIdChange, resultsCurrent, selectedIndex, visibleScratches]
   )
 
+  React.useLayoutEffect(() => {
+    if (!resultsCurrent || pendingCyclesRef.current.length === 0) {
+      return
+    }
+    const pendingCycles = pendingCyclesRef.current
+    pendingCyclesRef.current = []
+    if (visibleScratches.length === 0) return
+    let nextIndex = selectedIndex
+    for (const direction of pendingCycles) {
+      nextIndex = nextScratchIndex(
+        visibleScratches.length,
+        nextIndex,
+        direction
+      )
+    }
+    onSelectedIdChange(visibleScratches[nextIndex]!.scratchId)
+  }, [onSelectedIdChange, resultsCurrent, selectedIndex, visibleScratches])
+
   const handleSearchKeyDown = React.useCallback(
     (event: React.KeyboardEvent<HTMLInputElement>) => {
       const action = scratchPickerKeyAction(
@@ -487,13 +534,17 @@ export function ScratchPicker({
         query.length > 0
       )
       if (!action) return
-      if (!scratchPickerActionAllowed(action, resultsCurrent)) {
-        event.preventDefault()
-        return
-      }
       if (action.kind === "cycle") {
         event.preventDefault()
-        selectRelative(action.direction)
+        if (resultsCurrent) {
+          selectRelative(action.direction)
+        } else if (pendingCyclesRef.current.length < 32) {
+          pendingCyclesRef.current.push(action.direction)
+        }
+        return
+      }
+      if (!scratchPickerActionAllowed(action, resultsCurrent)) {
+        event.preventDefault()
         return
       }
       if (action.kind === "clear-query" || action.kind === "close") {
@@ -641,6 +692,7 @@ export function ScratchPicker({
               entries={visibleScratches}
               interactive={resultsCurrent}
               listboxId={listboxId}
+              renderRowContextMenu={renderRowContextMenu}
               selectedId={effectiveSelectedId}
               onFocusSearch={() =>
                 inputRef.current?.focus({ preventScroll: true })
