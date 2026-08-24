@@ -88,7 +88,7 @@ function ContextMenuContent({
         data-slot="context-menu-backdrop"
         className={({ open }) =>
           cn(
-            "fixed inset-x-0 top-0 z-40 h-[var(--window-chrome-height)] [-webkit-app-region:no-drag]",
+            "fixed inset-0 z-[49] [-webkit-app-region:no-drag]",
             !open && "pointer-events-none"
           )
         }

@@ -365,6 +365,18 @@ test("Windows app controls share the narrow formatting lane without covering doc
     expect(narrowGeometry.tabLeft).toBeCloseTo(8, 0)
     expect(narrowGeometry.tabRightInset).toBeCloseTo(146, 0)
 
+    const settingsControl = page.getByRole("button", {
+      name: "Settings",
+      exact: true,
+    })
+    const controlsMenu = page.getByRole("menu", {
+      name: "Top-right controls menu",
+    })
+    await settingsControl.click({ button: "right" })
+    await expect(controlsMenu).toBeVisible()
+    await page.mouse.click(24, 60)
+    await expect(controlsMenu).toHaveCount(0)
+
     await page.keyboard.press(`${primaryModifier}+F`)
     const search = page.getByRole("form", {
       name: "Find and replace in document",

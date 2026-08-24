@@ -267,6 +267,8 @@ function TopControlContextMenu({
         aria-label="Top-right controls menu"
         className="min-w-32"
         finalFocus={(interactionType) => interactionType === "keyboard"}
+        side="left"
+        sideOffset={4}
       >
         <ContextMenuItem onClick={onHide}>
           <EyeOffIcon />

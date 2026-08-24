@@ -2360,6 +2360,42 @@ test("top controls can remain visible without hovering @renderer-isolated", asyn
       "-webkit-app-region",
       "no-drag"
     )
+    if (process.platform === "win32") {
+      await expect
+        .poll(() =>
+          controlsMenu.evaluate((menu) => {
+            const chrome = document.querySelector<HTMLElement>(".top-chrome")
+            if (!chrome) throw new Error("Top chrome is unavailable")
+            const menuBounds = menu.getBoundingClientRect()
+            const chromeBounds = chrome.getBoundingClientRect()
+            const captionInset = Number.parseFloat(
+              getComputedStyle(chrome).getPropertyValue(
+                "--windows-caption-controls-inset"
+              )
+            )
+            const captionLeft = innerWidth - captionInset
+            return (
+              menuBounds.right <= captionLeft ||
+              menuBounds.top >= chromeBounds.bottom
+            )
+          })
+        )
+        .toBe(true)
+    }
+    const editorPoint = await page
+      .locator(".cm-scroller")
+      .evaluate((element) => {
+        const bounds = element.getBoundingClientRect()
+        return {
+          x: bounds.left + bounds.width / 2,
+          y: bounds.top + bounds.height / 2,
+        }
+      })
+    await page.mouse.click(editorPoint.x, editorPoint.y)
+    await expect(controlsMenu).toHaveCount(0)
+
+    await settingsControl.click({ button: "right" })
+    await expect(controlsMenu).toBeVisible()
     await page.mouse.click(blankChromePoint.x, blankChromePoint.y)
     await expect(controlsMenu).toHaveCount(0)
 
