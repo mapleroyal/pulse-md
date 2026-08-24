@@ -33,7 +33,7 @@
     "dev": "node scripts/run-development.mjs",
     "build": "npm run typecheck && npm run build:electron && vite build",
     "build:electron": "npm run build:native && node scripts/build-electron.mjs",
-    "build:native": "node scripts/build-native-macos.mjs && node scripts/build-cli.mjs",
+    "build:native": "node scripts/build-native-macos.mjs && node scripts/build-native-windows.mjs && node scripts/build-cli.mjs",
     "build:mac": "node scripts/build-release.mjs mac",
     "build:win": "node scripts/build-release.mjs win",
     "build:linux": "node scripts/build-release.mjs linux",

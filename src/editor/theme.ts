@@ -27,6 +27,7 @@ export const markdownEditorTheme = EditorView.baseTheme({
   ".cm-scroller": {
     cursor: "default",
     height: "100%",
+    outline: "none",
     overflow: "auto",
     fontFamily: sansFontFamily,
     scrollPaddingTop:

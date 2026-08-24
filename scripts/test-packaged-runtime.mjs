@@ -127,7 +127,9 @@ async function verifyPackagedResources(resources) {
   const nativeAddon =
     process.platform === "darwin"
       ? path.join(resources, "native", "macos-window-blur.node")
-      : null
+      : process.platform === "win32"
+        ? path.join(resources, "native", "windows-window-blur.node")
+        : null
   const electronLicenseDirectory = path.join(resources, "licenses", "electron")
   const required = [path.join(resources, "app.asar")]
   required.push(cli)
@@ -135,7 +137,7 @@ async function verifyPackagedResources(resources) {
     path.join(electronLicenseDirectory, "LICENSE.electron.txt"),
     path.join(electronLicenseDirectory, "LICENSES.chromium.html")
   )
-  if (process.platform === "darwin") {
+  if (nativeAddon) {
     required.push(nativeAddon)
   }
   if (process.platform === "linux") {
@@ -390,21 +392,25 @@ async function verifyMacPrivacyMetadata(executable) {
   }
 }
 
-function verifyMacNativeAddon(nativeAddon) {
+function verifyNativeAddon(nativeAddon) {
   if (!nativeAddon) return
   const addon = require(nativeAddon)
   const methods = [
     "animateWindowBackgroundBlur",
+    ...(process.platform === "win32"
+      ? ["clearWindowBackgroundEffect"]
+      : ["tabDragEscapeKeyPressed", "windowServerTags"]),
     "setWindowBackgroundEffect",
-    "tabDragEscapeKeyPressed",
-    "windowServerTags",
   ]
   for (const method of methods) {
     if (typeof addon[method] !== "function") {
       throw new Error(`Packaged native addon is missing ${method}()`)
     }
   }
-  if (typeof addon.tabDragEscapeKeyPressed() !== "boolean") {
+  if (
+    process.platform === "darwin" &&
+    typeof addon.tabDragEscapeKeyPressed() !== "boolean"
+  ) {
     throw new Error("Packaged native addon returned an invalid key state")
   }
 }
@@ -818,7 +824,7 @@ await verifyMacPrivacyMetadata(layout.executable)
 await verifyMacProtocolRegistration(layout.executable)
 await verifyMacIdentity(layout.executable)
 await verifyElectronFuses(layout.executable)
-verifyMacNativeAddon(resources.nativeAddon)
+verifyNativeAddon(resources.nativeAddon)
 await verifyPackagedCli(resources.cli, layout.executable, layout.productName)
 await verifyDefaultPackagedCliIdentity(
   resources.cli,

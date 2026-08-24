@@ -10,10 +10,26 @@ export const WINDOWS_MENU_IDS = [
   "help",
 ] as const
 export type WindowsMenuId = (typeof WINDOWS_MENU_IDS)[number]
-export interface WindowsMenuPopupAnchor {
-  x: number
-  y: number
+export type WindowsMenuItemType =
+  "normal" | "separator" | "checkbox" | "radio" | "submenu"
+export interface WindowsMenuItemSnapshot {
+  accelerator: string | null
+  actionToken: string | null
+  checked: boolean
+  enabled: boolean
+  label: string
+  submenu: readonly WindowsMenuItemSnapshot[]
+  type: WindowsMenuItemType
 }
+export type WindowsMenuSnapshot = Readonly<
+  Record<
+    WindowsMenuId,
+    {
+      enabled: boolean
+      items: readonly WindowsMenuItemSnapshot[]
+    }
+  >
+>
 export type ScratchLinkScheme = "pulse-md" | "pulse-md-development"
 export type TabId = string
 export type WindowId = number
@@ -1512,10 +1528,8 @@ export interface PulseMdApi {
     files: readonly File[],
     replaceActive: boolean
   ): Promise<OpenDocumentResult | null>
-  popupWindowsMenu(
-    menu: WindowsMenuId,
-    anchor: WindowsMenuPopupAnchor
-  ): Promise<void>
+  activateWindowsMenuItem(actionToken: string): Promise<void>
+  getWindowsMenuSnapshot(): Promise<WindowsMenuSnapshot>
   previewAppearance(settings: AppearanceSettings | null): void
   provideSettingsScratchSnapshot(
     response: SettingsScratchSnapshotResponse

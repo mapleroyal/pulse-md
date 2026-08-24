@@ -42,6 +42,7 @@ import { PathLabel } from "@/app/PathLabel"
 import { installHorizontalWheelScrolling } from "@/app/horizontal-wheel-scroll"
 import { splitPath } from "@/app/path-label"
 import { tabInsertionIndex } from "@/app/tab-drag"
+import { topControlGroupWidth } from "@/app/top-control-layout"
 import { WindowsMenuStrip } from "@/app/WindowsMenuStrip"
 import { useLongTextPopover } from "@/components/ui/use-long-text-popover"
 import { createRetryableDynamicImport } from "@/lib/retryable-dynamic-import"
@@ -150,7 +151,6 @@ interface TopChromeProps {
   canNavigateForward: boolean
   chrome: ChromeSettings
   dragShelfVisible: boolean
-  editorFocused: boolean
   editorMode: MarkdownEditorMode
   editorPanelId: string
   hoverLatched: boolean
@@ -181,14 +181,9 @@ interface TopChromeProps {
   onEditScratch: (scratchId: string) => void
   onOpenSettings: () => void
   onOpenOutline: () => void
-  onResponsiveControlsDrawerLayoutChange: (layout: {
-    inset: number
-    visible: boolean
-  }) => void
   outlineAnchorRef: React.RefObject<HTMLDivElement | null>
   outlineOpen: boolean
   renderOutlinePopover?: (trigger: React.ReactElement) => React.ReactNode
-  responsiveControlsDrawerVisible: boolean
   onCopyPath: (tabId: TabId) => void
   onRevealPath: (tabId: TabId) => void
   onToggleFormattingToolbar: () => void
@@ -198,47 +193,6 @@ interface TopChromeProps {
 
 const WINDOW_CONTROLS_SAFE_INSET = 86
 const WINDOWS_CAPTION_CONTROLS_WIDTH = 138
-const TOP_CONTROL_SIZE = 30
-const TOP_CONTROL_GAP = 4
-const RESPONSIVE_CONTROLS_DRAWER_MAX_WIDTH = 720
-const COMPACT_TOP_CONTROLS_MAX_WIDTH = 420
-
-const TOP_CONTROLS_REVEALED_SELECTOR = `:is(
-  [data-hover-chrome],
-  [data-always-show-controls],
-  [data-outline-open],
-  :focus-within,
-  :has(.document-tab[data-popup-open]),
-  :has(.document-tab-strip:hover),
-  :has(.top-control-context-target[data-popup-open]),
-  :has(.top-chrome-document-menu[data-popup-open])
-)`
-
-function useMediaQuery(query: string) {
-  const [matches, setMatches] = React.useState(() =>
-    typeof window === "undefined" ? false : window.matchMedia(query).matches
-  )
-
-  React.useLayoutEffect(() => {
-    const mediaQuery = window.matchMedia(query)
-    const update = () => setMatches(mediaQuery.matches)
-    update()
-    mediaQuery.addEventListener("change", update)
-    return () => mediaQuery.removeEventListener("change", update)
-  }, [query])
-
-  return matches
-}
-
-function topControlGroupWidth(buttonCount: number, hasSeparator: boolean) {
-  const itemCount = buttonCount + (hasSeparator ? 1 : 0)
-  if (itemCount === 0) return 0
-  return (
-    buttonCount * TOP_CONTROL_SIZE +
-    (hasSeparator ? 1 : 0) +
-    (itemCount - 1) * TOP_CONTROL_GAP
-  )
-}
 
 function DocumentContextMenu({
   children,
@@ -642,7 +596,6 @@ export function TopChrome({
   canNavigateForward,
   chrome,
   dragShelfVisible,
-  editorFocused,
   editorMode,
   editorPanelId,
   hoverLatched,
@@ -670,12 +623,10 @@ export function TopChrome({
   onEditScratch,
   onOpenSettings,
   onOpenOutline,
-  onResponsiveControlsDrawerLayoutChange,
   onRevealPath,
   outlineAnchorRef,
   outlineOpen,
   renderOutlinePopover,
-  responsiveControlsDrawerVisible,
   onToggleFormattingToolbar,
   onToggleMode,
   onWindowAction,
@@ -687,17 +638,7 @@ export function TopChrome({
     React.useState(false)
   const [documentActionsOpen, setDocumentActionsOpen] = React.useState(false)
   const [windowsMenuVisible, setWindowsMenuVisible] = React.useState(false)
-  const controlsDrawerViewport = useMediaQuery(
-    `(max-width: ${RESPONSIVE_CONTROLS_DRAWER_MAX_WIDTH}px)`
-  )
-  const compactControlsViewport = useMediaQuery(
-    `(max-width: ${COMPACT_TOP_CONTROLS_MAX_WIDTH}px)`
-  )
   const chromeRef = React.useRef<HTMLElement>(null)
-  const reportedControlsDrawerLayoutRef = React.useRef({
-    inset: -1,
-    visible: false,
-  })
   const dragCancelledRef = React.useRef(false)
   const dragChipBoundsRef = React.useRef<Array<{
     id: string
@@ -1014,69 +955,11 @@ export function TopChrome({
     Number(showCompactDocumentActions) + Number(showSettings),
     false
   )
+  const showControlCluster = wideControlWidth > 0 || compactControlWidth > 0
   const windowsChrome = platform === "win32"
   const windowsMenuOpen = windowsChrome && !previewTitle && windowsMenuVisible
-  const controlsInDrawer =
-    controlsDrawerViewport && !previewTitle && compactControlWidth > 0
-  const controlsDrawerInset = controlsInDrawer
-    ? (compactControlsViewport ? compactControlWidth : wideControlWidth) + 16
-    : 0
   const hiddenForWindowsMenuStyle: React.CSSProperties | undefined =
     windowsMenuOpen ? { opacity: 0, pointerEvents: "none" } : undefined
-
-  React.useLayoutEffect(() => {
-    const chromeElement = chromeRef.current
-    if (!chromeElement) return
-    let frame: number | null = null
-
-    const report = () => {
-      frame = null
-      const next = {
-        inset: controlsDrawerInset,
-        visible:
-          controlsInDrawer &&
-          !windowsMenuOpen &&
-          chromeElement.matches(TOP_CONTROLS_REVEALED_SELECTOR),
-      }
-      const previous = reportedControlsDrawerLayoutRef.current
-      if (previous.inset === next.inset && previous.visible === next.visible) {
-        return
-      }
-      reportedControlsDrawerLayoutRef.current = next
-      onResponsiveControlsDrawerLayoutChange(next)
-    }
-    const scheduleReport = () => {
-      if (frame !== null) return
-      frame = requestAnimationFrame(report)
-    }
-    const popupObserver = new MutationObserver(scheduleReport)
-    popupObserver.observe(chromeElement, {
-      attributeFilter: ["data-popup-open"],
-      attributes: true,
-      subtree: true,
-    })
-    chromeElement.addEventListener("focusin", scheduleReport)
-    chromeElement.addEventListener("focusout", scheduleReport)
-    window.addEventListener("blur", scheduleReport)
-    report()
-
-    return () => {
-      if (frame !== null) cancelAnimationFrame(frame)
-      popupObserver.disconnect()
-      chromeElement.removeEventListener("focusin", scheduleReport)
-      chromeElement.removeEventListener("focusout", scheduleReport)
-      window.removeEventListener("blur", scheduleReport)
-    }
-  }, [
-    chrome.alwaysShowTopControls,
-    controlsDrawerInset,
-    controlsInDrawer,
-    documentActionsOpen,
-    hoverLatched,
-    onResponsiveControlsDrawerLayoutChange,
-    outlineOpen,
-    windowsMenuOpen,
-  ])
 
   const documentActionsFallback = (
     <Button
@@ -1116,13 +999,10 @@ export function TopChrome({
         data-formatting-bar={formattingBarVisible || undefined}
         data-markdown-controls={markdownControlsEnabled || undefined}
         data-always-show-controls={chrome.alwaysShowTopControls || undefined}
-        data-tab-drag-shelf={
-          dragShelfVisible || responsiveControlsDrawerVisible || undefined
-        }
+        data-tab-drag-shelf={dragShelfVisible || undefined}
         data-tab-drag-active={tabDragActive || undefined}
         data-drag-over={dragOver || undefined}
         data-windows-menu-open={windowsMenuOpen || undefined}
-        data-controls-in-drawer={controlsInDrawer || undefined}
         style={
           {
             "--top-chrome-controls-reserved-width": `${
@@ -1134,12 +1014,6 @@ export function TopChrome({
             "--top-chrome-compact-controls-reserved-width": `${
               compactControlWidth > 0 ? compactControlWidth + 16 : 8
             }px`,
-            "--top-chrome-windows-controls-reserved-width": `${
-              wideControlWidth > 0 ? wideControlWidth + 16 : 8
-            }px`,
-            "--top-chrome-hover-height": controlsInDrawer
-              ? "var(--top-drawer-height)"
-              : undefined,
             "--window-controls-safe-inset": `${
               platform === "darwin"
                 ? WINDOW_CONTROLS_SAFE_INSET / windowZoomFactor
@@ -1151,36 +1025,30 @@ export function TopChrome({
                 : 0
             }px`,
             "--tc-hover-right": windowsChrome
-              ? "calc(var(--windows-caption-controls-inset) + 8px)"
+              ? "var(--windows-caption-controls-safe-inset)"
               : "50px",
             "--tc-left": "auto",
             "--tc-right": windowsChrome
-              ? "calc(var(--windows-caption-controls-inset) + 8px)"
+              ? "var(--windows-app-controls-right)"
               : "var(--tc-edge)",
             "--cf-max": windowsChrome
-              ? "max(0px, calc(100% - max(var(--windows-caption-controls-inset), var(--cf-rest, 0px)) * 2 - 16px))"
+              ? "max(0px, calc(100% - max(var(--windows-caption-controls-safe-inset), var(--cf-rest, 0px)) * 2))"
               : "calc(100% - var(--window-controls-safe-inset) * 2)",
-            "--cf-active": controlsInDrawer
-              ? "var(--cf-max)"
-              : windowsChrome
-                ? "max(0px, calc(100% - (var(--windows-caption-controls-inset) + var(--top-chrome-windows-controls-reserved-width)) * 2))"
-                : "calc(100% - var(--window-controls-safe-inset) * 2)",
+            "--cf-active": windowsChrome
+              ? "max(0px, calc(100% - var(--windows-active-top-safe-inset) * 2))"
+              : "calc(100% - var(--window-controls-safe-inset) * 2)",
             "--tab-left": windowsChrome
               ? "8px"
               : "var(--window-controls-safe-inset)",
             "--tab-right": windowsChrome
-              ? "calc(var(--windows-caption-controls-inset) + 8px)"
+              ? "var(--windows-active-top-safe-inset)"
               : "8px",
-            "--tab-active-left": controlsInDrawer
-              ? "var(--tab-left)"
-              : windowsChrome
-                ? "8px"
-                : "var(--window-controls-safe-inset)",
-            "--tab-active-right": controlsInDrawer
-              ? "var(--tab-right)"
-              : windowsChrome
-                ? "calc(var(--windows-caption-controls-inset) + var(--top-chrome-windows-controls-reserved-width))"
-                : "var(--tc-current)",
+            "--tab-active-left": windowsChrome
+              ? "8px"
+              : "var(--window-controls-safe-inset)",
+            "--tab-active-right": windowsChrome
+              ? "var(--windows-active-top-safe-inset)"
+              : "var(--tc-current)",
             "--tab-inset": windowsChrome
               ? "var(--windows-caption-controls-inset)"
               : "var(--window-controls-safe-inset)",
@@ -1223,9 +1091,7 @@ export function TopChrome({
       >
         {windowsChrome && !previewTitle ? (
           <WindowsMenuStrip
-            formatEnabled={markdownControlsEnabled && editorFocused}
             visible={windowsMenuVisible}
-            windowZoomFactor={windowZoomFactor}
             onVisibleChange={setWindowsMenuVisible}
           />
         ) : null}
@@ -1306,19 +1172,10 @@ export function TopChrome({
           </div>
         ) : null}
 
-        {wideControlWidth > 0 || compactControlWidth > 0 ? (
+        {showControlCluster ? (
           <div
             className="top-chrome-controls"
-            style={{
-              ...hiddenForWindowsMenuStyle,
-              ...(controlsInDrawer
-                ? {
-                    top: "calc(var(--window-chrome-height) + 10px)",
-                    right: "8px",
-                    left: "auto",
-                  }
-                : {}),
-            }}
+            style={hiddenForWindowsMenuStyle}
           >
             {showBack ? (
               <TopControlContextMenu

@@ -8,8 +8,7 @@ import {
   rectanglesIntersect,
   shouldPrepareTabTearOut,
   tabTearOutWindowPosition,
-  windowsBackgroundMaterial,
-  windowsBackgroundMaterialSupported,
+  windowsWindowBlurSupported,
   windowsTitleBarOverlay,
 } from "./window-chrome"
 
@@ -111,28 +110,16 @@ describe("Windows native chrome", () => {
     ["10.0.22000", false],
     ["6.3.9600", false],
     ["invalid", false],
-  ])("detects backdrop support for Windows release %s", (release, expected) => {
-    expect(windowsBackgroundMaterialSupported("win32", release)).toBe(expected)
-  })
-
-  it("does not expose the Windows backdrop on other platforms", () => {
-    expect(windowsBackgroundMaterialSupported("darwin", "10.0.26100")).toBe(
-      false
-    )
-  })
-
-  it("maps a zero-radius background to Mica and blurred backgrounds to Acrylic", () => {
-    expect(windowsBackgroundMaterial(0)).toBe("mica")
-    expect(windowsBackgroundMaterial(1)).toBe("acrylic")
-    expect(windowsBackgroundMaterial(80)).toBe("acrylic")
-  })
-
-  it.each([-1, Number.NaN, Number.POSITIVE_INFINITY])(
-    "rejects an invalid Windows blur radius: %s",
-    (blurRadius) => {
-      expect(() => windowsBackgroundMaterial(blurRadius)).toThrow(TypeError)
+  ])(
+    "detects native blur support for Windows release %s",
+    (release, expected) => {
+      expect(windowsWindowBlurSupported("win32", release)).toBe(expected)
     }
   )
+
+  it("does not expose Windows native blur on other platforms", () => {
+    expect(windowsWindowBlurSupported("darwin", "10.0.26100")).toBe(false)
+  })
 
   it.each([
     [0.8, 37],

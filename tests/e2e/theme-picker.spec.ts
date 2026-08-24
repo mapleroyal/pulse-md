@@ -1,6 +1,6 @@
 import path from "node:path"
 import { fileURLToPath } from "node:url"
-import { mkdtemp, rm } from "node:fs/promises"
+import { mkdtemp, readFile, rm } from "node:fs/promises"
 import os from "node:os"
 
 import { _electron as electron, expect, test } from "@playwright/test"
@@ -455,6 +455,110 @@ test("appearance mode indicator animates across a surface theme change", async (
 
     await page.emulateMedia({ reducedMotion: "reduce" })
     await expect(indicator).toHaveCSS("transition-property", "none")
+  } finally {
+    await exitApplication(app)
+    await rm(userData, { force: true, recursive: true })
+  }
+})
+
+test("Windows previews System appearance before Settings is saved", async () => {
+  test.skip(process.platform !== "win32", "Windows native-theme behavior")
+  const userData = await mkdtemp(
+    path.join(os.tmpdir(), "pulse-md-system-theme-preview-")
+  )
+  const settingsPath = path.join(userData, "settings.json")
+  const app = await electron.launch({
+    args: [projectRoot, `--user-data-dir=${userData}`, samplePath],
+    cwd: projectRoot,
+  })
+
+  try {
+    const page = await app.firstWindow()
+    await page.locator(".cm-editor").waitFor()
+    // Playwright may emulate a renderer scheme independently of the host OS.
+    // Use the page's System result for the surface assertion while separately
+    // requiring Electron's process-wide source to return to `system` below.
+    const systemScheme = await page.evaluate(() =>
+      matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light"
+    )
+    const explicitScheme = systemScheme === "dark" ? "light" : "dark"
+    const explicitLabel = explicitScheme === "dark" ? "Dark" : "Light"
+
+    await page.keyboard.press("Control+,")
+    await openSettingsSection(page, "Theme")
+    let settingsDialog = page.getByRole("dialog", { name: "Settings" })
+    await settingsDialog
+      .getByRole("radio", { name: explicitLabel, exact: true })
+      .click()
+    await settingsDialog.getByRole("button", { name: "Done" }).click()
+    await expect(settingsDialog).toHaveCount(0)
+    await expect
+      .poll(() => app.evaluate(({ nativeTheme }) => nativeTheme.themeSource))
+      .toBe(explicitScheme)
+
+    await page.keyboard.press("Control+,")
+    await openSettingsSection(page, "Theme")
+    settingsDialog = page.getByRole("dialog", { name: "Settings" })
+    await settingsDialog.getByRole("radio", { name: "System" }).click()
+
+    await expect
+      .poll(() => app.evaluate(({ nativeTheme }) => nativeTheme.themeSource))
+      .toBe("system")
+    await expect(page.locator("html")).toHaveClass(new RegExp(systemScheme))
+
+    // Specialized Settings workspaces commit only their own persisted fields
+    // while retaining the parent draft, so even a source-window commit must
+    // not end this appearance preview.
+    const committedExplicitSettings = JSON.parse(
+      await readFile(settingsPath, "utf8")
+    )
+    await page.evaluate(
+      (persistedSettings) => window.pulseMd.setSettings(persistedSettings),
+      committedExplicitSettings
+    )
+    await expect
+      .poll(() => app.evaluate(({ nativeTheme }) => nativeTheme.themeSource))
+      .toBe("system")
+
+    // A resource-only Settings commit and an external launch must not
+    // overwrite the process-wide source while this exclusive draft is live.
+    await page.evaluate(() => window.pulseMd.setDefaultWindowProfile(null))
+    await expect
+      .poll(() => app.evaluate(({ nativeTheme }) => nativeTheme.themeSource))
+      .toBe("system")
+    await app.evaluate(({ app: electronApp }) => {
+      electronApp.emit(
+        "second-instance",
+        {} as Electron.Event,
+        [],
+        process.cwd(),
+        { kind: "new-window", filePaths: [] }
+      )
+    })
+    await expect.poll(() => app.windows().length).toBe(2)
+    await expect
+      .poll(() => app.evaluate(({ nativeTheme }) => nativeTheme.themeSource))
+      .toBe("system")
+    await expect(
+      settingsDialog.getByRole("radio", { name: "System" })
+    ).toBeChecked()
+    await expect
+      .poll(
+        async () =>
+          (
+            JSON.parse(await readFile(settingsPath, "utf8")) as {
+              appearanceMode?: string
+            }
+          ).appearanceMode
+      )
+      .toBe(explicitScheme)
+
+    await settingsDialog.getByRole("button", { name: "Cancel" }).click()
+    await expect(settingsDialog).toHaveCount(0)
+    await expect
+      .poll(() => app.evaluate(({ nativeTheme }) => nativeTheme.themeSource))
+      .toBe(explicitScheme)
+    await expect(page.locator("html")).toHaveClass(new RegExp(explicitScheme))
   } finally {
     await exitApplication(app)
     await rm(userData, { force: true, recursive: true })

@@ -189,17 +189,10 @@ function transitionSettingsMatch(
   )
 }
 
-function launchTransitionForPlatform(
-  transition: LaunchTransitionSettings,
-  platform: AppPlatform
+function cloneLaunchTransition(
+  transition: LaunchTransitionSettings
 ): LaunchTransitionSettings {
-  return {
-    ...transition,
-    strategy:
-      platform === "win32" && transition.strategy === "tint-blur"
-        ? "cover"
-        : transition.strategy,
-  }
+  return { ...transition }
 }
 
 export function LaunchTransitionPreviewWorkspace({
@@ -211,9 +204,8 @@ export function LaunchTransitionPreviewWorkspace({
 }: LaunchTransitionPreviewWorkspaceProps) {
   const [draft, setDraft] = React.useState(() => {
     const initialDraft = cloneAppSettings(settings)
-    initialDraft.launchTransition = launchTransitionForPlatform(
-      initialDraft.launchTransition,
-      platform
+    initialDraft.launchTransition = cloneLaunchTransition(
+      initialDraft.launchTransition
     )
     return initialDraft
   })
@@ -231,9 +223,8 @@ export function LaunchTransitionPreviewWorkspace({
   const customEasingValid =
     draft.launchTransition.easing !== "custom" ||
     parseLaunchTransitionCubicBezier(customEasingInput) !== null
-  const defaultLaunchTransition = launchTransitionForPlatform(
-    DEFAULT_APP_SETTINGS.launchTransition,
-    platform
+  const defaultLaunchTransition = cloneLaunchTransition(
+    DEFAULT_APP_SETTINGS.launchTransition
   )
 
   const updateTransition = React.useCallback(
@@ -542,10 +533,7 @@ export function LaunchTransitionPreviewWorkspace({
                   </SelectTrigger>
                   <SelectContent>
                     <SelectGroup>
-                      {LAUNCH_TRANSITION_STRATEGIES.filter(
-                        (strategy) =>
-                          platform !== "win32" || strategy !== "tint-blur"
-                      ).map((strategy) => (
+                      {LAUNCH_TRANSITION_STRATEGIES.map((strategy) => (
                         <SelectItem key={strategy} value={strategy}>
                           {strategyLabels[strategy]}
                         </SelectItem>
@@ -555,8 +543,8 @@ export function LaunchTransitionPreviewWorkspace({
                 </Select>
                 {platform === "win32" ? (
                   <FieldDescription>
-                    Windows preloads the system-managed backdrop; its blur
-                    strength cannot be animated by Pulse MD.
+                    Tint and Blur Together animates the native blur radius with
+                    the same timing as the renderer tint reveal.
                   </FieldDescription>
                 ) : null}
               </FieldContent>

@@ -445,6 +445,132 @@ html[data-launch-transition="running"] .launch-tint-cover {
   padding-top: var(--editor-content-top-padding, var(--window-chrome-height));
 }
 
+/* Chromium cannot host WinUI's Notepad scrollbar control. Keep the Windows
+   editor scrollbar overlay-like instead: no rail, a quiet thumb that gains
+   contrast on hover, and a track inset that stays below every active top lane.
+   The document surface still fills the window, so chrome remains an overlay. */
+.app-shell[data-platform="win32"]
+  .editor-mount
+  .cm-scroller::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+.app-shell[data-platform="win32"]
+  .editor-mount
+  .cm-scroller::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.app-shell[data-platform="win32"]
+  .editor-mount
+  .cm-scroller::-webkit-scrollbar-track:vertical {
+  margin-block-start: max(
+    var(--window-chrome-height, 46px),
+    var(--editor-clip-top, 0px)
+  );
+  margin-block-end: var(--editor-clip-bottom, 0px);
+}
+
+.app-shell[data-platform="win32"]
+  .editor-mount
+  .cm-scroller::-webkit-scrollbar-thumb {
+  min-width: 36px;
+  min-height: 36px;
+  border: 3px solid transparent;
+  border-radius: 999px;
+  background: color-mix(in oklab, var(--document-foreground) 24%, transparent)
+    padding-box;
+}
+
+.app-shell[data-platform="win32"]
+  .editor-mount
+  .cm-scroller::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in oklab, var(--document-foreground) 48%, transparent)
+    padding-box;
+}
+
+.app-shell[data-platform="win32"]
+  .editor-mount
+  .cm-scroller::-webkit-scrollbar-button {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
+.app-shell[data-platform="win32"]
+  .editor-mount
+  .cm-scroller::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+.windows-menu-strip {
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  padding: 0 !important;
+}
+
+.windows-menu-item {
+  border: 0 !important;
+  padding: 0 9px !important;
+  font-weight: 400 !important;
+}
+
+.windows-native-menu {
+  width: auto !important;
+  min-width: min(220px, calc(100vw - 8px)) !important;
+  max-width: calc(100vw - 8px) !important;
+  border: 1px solid color-mix(in oklab, var(--foreground) 10%, transparent) !important;
+  border-radius: 8px !important;
+  background: var(--popover) !important;
+  padding: 4px !important;
+  box-shadow: 0 10px 28px color-mix(in oklab, #000 22%, transparent) !important;
+  font-family: "Segoe UI", var(--font-sans) !important;
+}
+
+.windows-native-menu-item {
+  min-height: 28px !important;
+  gap: 8px !important;
+  overflow: hidden;
+  border-radius: 4px !important;
+  padding: 0 8px 0 28px !important;
+  font-size: 12px !important;
+  font-weight: 400 !important;
+}
+
+.windows-native-menu-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.windows-native-menu-shortcut {
+  flex: none;
+  margin-left: 32px !important;
+  font-weight: 400 !important;
+  letter-spacing: normal !important;
+}
+
+.windows-native-menu-separator {
+  margin: 4px -4px !important;
+  background: color-mix(
+    in oklab,
+    var(--foreground) 10%,
+    transparent
+  ) !important;
+}
+
+.windows-native-menu
+  :is(
+    [data-slot="dropdown-menu-checkbox-item-indicator"],
+    [data-slot="dropdown-menu-radio-item-indicator"]
+  ) {
+  right: auto;
+  left: 8px;
+}
+
 html[data-formatting-animations] .app-shell .editor-mount {
   transition: clip-path 150ms ease-out;
 }
@@ -453,19 +579,13 @@ html[data-formatting-animations] .app-shell .editor-mount .cm-content {
   transition: padding-top 150ms ease-out;
 }
 
-.app-shell:is(
-    [data-formatting-bar],
-    [data-tab-drag-shelf],
-    [data-responsive-controls-drawer]
-  )
-  .editor-mount {
+.app-shell:is([data-formatting-bar], [data-tab-drag-shelf]) .editor-mount {
   --editor-clip-top: var(--top-drawer-height);
 }
 
 .app-shell[data-top-drawer-compensated]:is(
     [data-formatting-bar],
-    [data-tab-drag-shelf],
-    [data-responsive-controls-drawer]
+    [data-tab-drag-shelf]
   ) {
   --editor-content-top-padding: calc(var(--top-drawer-height) + 12px);
 }
@@ -572,6 +692,17 @@ html[data-formatting-animations] .app-shell .editor-mount .cm-content {
   --tc-edge: 16px;
   --tc-current: var(--top-chrome-controls-reserved-width, 8px);
   --cf-rest: 0px;
+  --windows-caption-controls-safe-inset: calc(
+    var(--windows-caption-controls-inset, 0px) + 8px
+  );
+  --windows-app-controls-right: var(--windows-caption-controls-safe-inset);
+  --windows-active-top-safe-inset: max(
+    var(--windows-caption-controls-safe-inset),
+    calc(
+      var(--windows-caption-controls-inset, 0px) +
+        var(--top-chrome-controls-reserved-width, 8px) - 8px
+    )
+  );
 
   position: fixed;
   z-index: 40;
@@ -661,7 +792,7 @@ html[data-formatting-animations]
   top: 0;
   right: 0;
   left: 0;
-  height: var(--window-chrome-height);
+  height: var(--top-chrome-hover-height);
   -webkit-app-region: no-drag;
 }
 
@@ -1606,6 +1737,60 @@ button.window-profile-tab-preview {
     right: var(--tab-active-right);
     left: var(--tab-active-left);
   }
+
+  .app-shell[data-platform="win32"][data-windows-controls-drawer] .top-chrome {
+    --top-chrome-hover-height: var(--top-drawer-height);
+    --windows-active-top-safe-inset: var(--windows-caption-controls-safe-inset);
+    --windows-app-controls-right: 8px;
+  }
+
+  .app-shell[data-platform="win32"][data-windows-controls-drawer]
+    .top-chrome-controls {
+    top: calc(
+      var(--window-chrome-height) - var(--formatting-toolbar-overlap) + 3px
+    );
+    transform: none;
+  }
+
+  .app-shell[data-platform="win32"][data-windows-controls-drawer]
+    .top-chrome-tab-drag-shelf {
+    height: var(--top-drawer-height);
+    pointer-events: auto;
+    -webkit-app-region: drag;
+  }
+
+  .app-shell[data-platform="win32"][data-windows-controls-drawer]
+    .top-chrome-tab-drag-shelf::after {
+    opacity: 1;
+  }
+
+  .app-shell[data-platform="win32"][data-windows-controls-drawer]
+    .editor-mount {
+    --editor-clip-top: var(--top-drawer-height);
+  }
+
+  .app-shell[data-platform="win32"][data-windows-controls-drawer]
+    .editor-mount
+    .cm-content {
+    --editor-content-top-padding: var(--window-chrome-height);
+  }
+
+  .app-shell[data-platform="win32"][data-windows-controls-drawer][data-top-drawer-compensated]
+    .editor-mount
+    .cm-content {
+    --editor-content-top-padding: calc(var(--top-drawer-height) + 12px);
+  }
+
+  .app-shell[data-platform="win32"][data-windows-controls-drawer]
+    .formatting-toolbar {
+    right: var(--windows-control-drawer-reserved-width, 8px);
+  }
+
+  .app-shell[data-platform="win32"][data-windows-controls-drawer]
+    .search-overlay {
+    top: calc(var(--top-drawer-height) + 4px);
+    max-height: calc(100dvh - var(--top-drawer-height) - 8px);
+  }
 }
 
 @media (max-width: 420px) {
@@ -1628,6 +1813,11 @@ button.window-profile-tab-preview {
 
   .top-chrome-document-menu {
     display: grid;
+  }
+
+  .app-shell[data-platform="win32"][data-windows-controls-drawer]
+    .formatting-toolbar {
+    right: var(--windows-compact-control-drawer-reserved-width, 8px);
   }
 }
 
@@ -1804,12 +1994,7 @@ html[data-formatting-animations] .app-shell .formatting-toolbar {
   -webkit-app-region: no-drag;
 }
 
-.app-shell:is(
-    [data-formatting-bar],
-    [data-tab-drag-shelf],
-    [data-responsive-controls-drawer]
-  )
-  .search-overlay {
+.app-shell:is([data-formatting-bar], [data-tab-drag-shelf]) .search-overlay {
   top: calc(var(--top-drawer-height) + 4px);
   max-height: calc(100dvh - var(--top-drawer-height) - 8px);
 }

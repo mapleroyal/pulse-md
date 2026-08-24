@@ -15,7 +15,6 @@ import {
   openSettingsSection,
   setWindowContentSize,
 } from "./electron-helpers"
-import { DEFAULT_APP_SETTINGS } from "../../src/shared/contracts"
 
 const projectRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -23,7 +22,6 @@ const projectRoot = path.resolve(
 )
 const samplePath = path.join(projectRoot, "tests/fixtures/sample.md")
 const primaryModifier = process.platform === "darwin" ? "Meta" : "Control"
-const WINDOWS_CAPTION_CONTROLS_WIDTH = 138
 
 async function expectHorizontallyReachable(surface: Locator) {
   await expect(surface).toBeVisible()
@@ -80,7 +78,7 @@ async function expectHorizontallyReachable(surface: Locator) {
   }
 }
 
-test("Windows bare Alt exposes and light-dismisses the application menu @renderer-isolated", async () => {
+test("Windows application menu supports access mode and sibling navigation @renderer-isolated", async () => {
   test.skip(process.platform !== "win32", "Windows-only application chrome")
   const userData = await mkdtemp(path.join(os.tmpdir(), "pulse-md-alt-menu-"))
   const app = await electron.launch({
@@ -94,6 +92,7 @@ test("Windows bare Alt exposes and light-dismisses the application menu @rendere
     const chrome = page.locator(".top-chrome")
     const menu = page.locator(".windows-menu-strip")
 
+    await menu.waitFor({ state: "attached" })
     await expect(menu).toBeHidden()
     await page.keyboard.press("Alt")
     await expect(menu).toBeVisible()
@@ -109,11 +108,68 @@ test("Windows bare Alt exposes and light-dismisses the application menu @rendere
     await expect(menu.locator("button[data-active]")).toHaveText("Edit")
     await page.keyboard.press("Escape")
     await expect(menu).toBeHidden()
+    await page.keyboard.press("F10")
+    await expect(menu).toBeVisible()
+    await page.keyboard.press("Escape")
+    await page.keyboard.press("Control+Alt+H")
+    await expect(menu).toBeHidden()
+
+    await page.locator(".cm-content").click()
+    await expect(page.locator(".cm-editor")).toHaveClass(/cm-focused/)
+    await page.keyboard.press("Alt+E")
+    await expect(menu.getByRole("menuitem", { name: "Edit" })).toHaveAttribute(
+      "aria-expanded",
+      "true"
+    )
+    const findSubmenu = page
+      .locator('[data-slot="menubar-sub-trigger"]')
+      .filter({ hasText: "Find" })
+    await findSubmenu.hover()
+    await expect(findSubmenu).toHaveAttribute("aria-expanded", "true")
+    await page.keyboard.press("ArrowLeft")
+    await expect(findSubmenu).toHaveAttribute("aria-expanded", "false")
+    await expect(menu.getByRole("menuitem", { name: "Edit" })).toHaveAttribute(
+      "aria-expanded",
+      "true"
+    )
+    await page.keyboard.press("ArrowRight")
+    await expect(
+      menu.getByRole("menuitem", { name: "Format" })
+    ).toHaveAttribute("aria-expanded", "true")
+    await page.keyboard.press("ArrowRight")
+    await expect(menu.getByRole("menuitem", { name: "View" })).toHaveAttribute(
+      "aria-expanded",
+      "true"
+    )
+    await page.keyboard.press("Escape")
+    await page.waitForTimeout(200)
+    await expect(page.locator(".cm-editor")).toHaveClass(/cm-focused/)
 
     await page.getByRole("button", { name: "Settings" }).focus()
-    await page.keyboard.press("Alt")
+    await page.evaluate(() => {
+      const dispatch = (type: "keydown" | "keyup", key: string) =>
+        window.dispatchEvent(
+          new KeyboardEvent(type, { bubbles: true, cancelable: true, key })
+        )
+      dispatch("keydown", "Alt")
+      dispatch("keyup", "Alt")
+      dispatch("keydown", "ArrowRight")
+      dispatch("keydown", "ArrowRight")
+    })
     await expect(menu).toBeVisible()
     await expect(menu.getByRole("menuitem", { name: "Format" })).toBeDisabled()
+    await expect(menu.locator("button[data-active]")).toHaveText("View")
+    await page.keyboard.press("Escape")
+    await page.keyboard.press("Alt+E")
+    await expect(menu.getByRole("menuitem", { name: "Edit" })).toHaveAttribute(
+      "aria-expanded",
+      "true"
+    )
+    await page.keyboard.press("ArrowRight")
+    await expect(menu.getByRole("menuitem", { name: "View" })).toHaveAttribute(
+      "aria-expanded",
+      "true"
+    )
     await page.keyboard.press("Escape")
 
     await page.keyboard.press("Alt")
@@ -124,6 +180,34 @@ test("Windows bare Alt exposes and light-dismisses the application menu @rendere
     }))
     await page.mouse.click(blankChromePoint.x, blankChromePoint.y)
     await expect(menu).toBeHidden()
+
+    await page.locator(".cm-content").click()
+    await page.keyboard.press("Alt+E")
+    await page
+      .locator('[data-slot="menubar-item"]')
+      .filter({ hasText: "Select All" })
+      .click()
+    await expect(menu).toBeHidden()
+    const replacement = "Renderer menu focus restored"
+    await page.keyboard.insertText(replacement)
+    await expect(page.locator(".cm-content")).toHaveText(replacement)
+
+    const zoomBefore = await app.evaluate(({ BrowserWindow }) =>
+      BrowserWindow.getAllWindows()[0]?.webContents.getZoomFactor()
+    )
+    await page.keyboard.press("Alt+V")
+    await page
+      .locator('[data-slot="menubar-item"]')
+      .filter({ hasText: "Zoom In" })
+      .click()
+    await expect(menu).toBeHidden()
+    await expect
+      .poll(() =>
+        app.evaluate(({ BrowserWindow }) =>
+          BrowserWindow.getAllWindows()[0]?.webContents.getZoomFactor()
+        )
+      )
+      .toBeGreaterThan(zoomBefore ?? 0)
 
     await setWindowContentSize(app, 480, 320)
     await app.evaluate(({ BrowserWindow }) => {
@@ -155,37 +239,41 @@ test("Windows bare Alt exposes and light-dismisses the application menu @rendere
     await page.keyboard.press("Escape")
     await page.keyboard.press("Alt+H")
     await expect(helpMenu).toHaveAttribute("aria-expanded", "true")
-    await app.evaluate(({ BrowserWindow, Menu }) => {
-      const win = BrowserWindow.getAllWindows()[0]
-      const help = Menu.getApplicationMenu()?.items.find(
-        ({ label }) => label === "Help"
-      )?.submenu
-      if (!win || !help) throw new Error("The native Help menu is unavailable")
-      help.closePopup(win)
-    })
+    await expect(
+      page.locator('[data-slot="menubar-content"][data-open]')
+    ).toBeVisible()
+
+    await page.keyboard.press("ArrowLeft")
+    const windowMenu = menu.getByRole("menuitem", { name: "Window" })
+    await expect(windowMenu).toHaveAttribute("aria-expanded", "true")
+    await page.keyboard.press("ArrowRight")
+    await expect(helpMenu).toHaveAttribute("aria-expanded", "true")
+
+    const fileMenu = menu.getByRole("menuitem", { name: "File" })
+    await fileMenu.hover()
+    await expect(fileMenu).toHaveAttribute("aria-expanded", "true")
+    await page.keyboard.press("Escape")
     await expect(menu).toBeHidden()
+
+    await page.locator(".cm-content").click()
+    await page.keyboard.press("Shift+F10")
+    await expect(menu).toBeHidden()
+    const editorContextMenu = page.getByRole("menu", {
+      name: "Editor context menu",
+    })
+    await expect(editorContextMenu).toBeVisible()
+    await page.keyboard.press("Escape")
+    await expect(editorContextMenu).toBeHidden()
   } finally {
     await exitApplication(app)
     await rm(userData, { force: true, recursive: true })
   }
 })
 
-test("app controls trail tabs when wide and share the lower drawer when narrow @renderer-isolated", async () => {
+test("Windows app controls share the narrow formatting lane without covering document chrome @renderer-isolated", async () => {
+  test.skip(process.platform !== "win32", "Windows-only application chrome")
   const userData = await mkdtemp(
-    path.join(os.tmpdir(), "pulse-md-responsive-app-controls-")
-  )
-  await writeFile(
-    path.join(userData, "settings.json"),
-    JSON.stringify({
-      ...DEFAULT_APP_SETTINGS,
-      chrome: {
-        ...DEFAULT_APP_SETTINGS.chrome,
-        alwaysShowTopControls: true,
-        formattingBarPosition: "right",
-        showFormattingBar: true,
-        tabVisibility: "always",
-      },
-    })
+    path.join(os.tmpdir(), "pulse-md-windows-control-lane-")
   )
   const app = await electron.launch({
     args: [projectRoot, `--user-data-dir=${userData}`, samplePath],
@@ -195,134 +283,387 @@ test("app controls trail tabs when wide and share the lower drawer when narrow @
   try {
     const page = await app.firstWindow()
     await page.locator(".cm-editor").waitFor()
-    await setWindowContentSize(app, 900, 720)
-    await expect.poll(() => page.evaluate(() => innerWidth)).toBe(900)
-
     const appShell = page.locator(".app-shell")
-    const chrome = page.locator(".top-chrome")
     const controls = page.locator(".top-chrome-controls")
-    const toolbarSurface = page.locator(".formatting-toolbar[data-visible]")
-    const toolbar = page.getByRole("toolbar", { name: "Formatting toolbar" })
+    const tabStrip = page.locator(".document-tab-strip")
 
-    await expect(controls).toBeVisible()
-    await expect(toolbar).toBeVisible()
-    await expect(chrome).not.toHaveAttribute("data-controls-in-drawer", "true")
+    await page.mouse.move(400, 200)
+    await expect(controls).toHaveCSS("opacity", "0")
+    const restingTabRightInset = await tabStrip.evaluate(
+      (element) => innerWidth - element.getBoundingClientRect().right
+    )
+    await page.mouse.move(200, 4)
+    await expect(controls).toHaveCSS("opacity", "1")
     const wideGeometry = await page.evaluate(() => {
-      const controlsElement = document.querySelector<HTMLElement>(
+      const controls = document.querySelector<HTMLElement>(
         ".top-chrome-controls"
       )
-      const stripElement = document.querySelector<HTMLElement>(
-        ".document-tab-strip"
-      )
-      const toolbarElement = document.querySelector<HTMLElement>(
-        '.formatting-toolbar [role="toolbar"]'
-      )
-      if (!controlsElement || !stripElement || !toolbarElement) {
-        throw new Error("The wide chrome geometry is unavailable")
-      }
-      const controlsBounds = controlsElement.getBoundingClientRect()
-      const stripBounds = stripElement.getBoundingClientRect()
+      const tabs = document.querySelector<HTMLElement>(".document-tab-strip")
+      if (!controls || !tabs) throw new Error("Top chrome is unavailable")
+      const controlsBounds = controls.getBoundingClientRect()
+      const tabBounds = tabs.getBoundingClientRect()
       return {
-        controlsCenterY: controlsBounds.top + controlsBounds.height / 2,
-        controlsRight: controlsBounds.right,
-        stripRight: stripBounds.right,
-        toolbarJustify: getComputedStyle(toolbarElement).justifyContent,
-        viewportWidth: innerWidth,
+        controlsBottom: controlsBounds.bottom,
+        controlsRightInset: innerWidth - controlsBounds.right,
+        tabLeft: tabBounds.left,
+        tabRightInset: innerWidth - tabBounds.right,
+        tabToControlsGap: controlsBounds.left - tabBounds.right,
       }
     })
-    const wideControlsInset =
-      process.platform === "win32" ? WINDOWS_CAPTION_CONTROLS_WIDTH + 8 : 16
-    expect(wideGeometry.controlsRight).toBeCloseTo(
-      wideGeometry.viewportWidth - wideControlsInset,
-      0
-    )
-    expect(wideGeometry.stripRight).toBeCloseTo(
-      wideGeometry.controlsRight -
-        (await controls.evaluate(
-          (element) => element.getBoundingClientRect().width
-        )) -
-        8,
-      0
-    )
-    expect(wideGeometry.controlsCenterY).toBeCloseTo(23, 0)
-    expect(wideGeometry.toolbarJustify).toBe("flex-end")
+    expect(wideGeometry.controlsBottom).toBeLessThanOrEqual(46)
+    expect(wideGeometry.controlsRightInset).toBeCloseTo(146, 0)
+    expect(wideGeometry.tabLeft).toBeCloseTo(8, 0)
+    expect(wideGeometry.tabRightInset).toBeCloseTo(restingTabRightInset, 0)
+    expect(wideGeometry.tabToControlsGap).toBeCloseTo(8, 0)
 
-    await setWindowContentSize(app, 700, 720)
-    await expect.poll(() => page.evaluate(() => innerWidth)).toBe(700)
-    await expect(chrome).toHaveAttribute("data-controls-in-drawer", "true")
+    await setWindowContentSize(app, 480, 320)
+    await expect.poll(() => page.evaluate(() => innerWidth)).toBe(480)
     await expect(appShell).toHaveAttribute(
-      "data-responsive-controls-drawer",
+      "data-windows-controls-drawer",
       "true"
     )
+    await expect
+      .poll(() =>
+        page
+          .locator(".editor-mount")
+          .evaluate((element) => getComputedStyle(element).clipPath)
+      )
+      .toBe("inset(74px 0px 0px)")
+    await page.mouse.move(240, 200)
+    await expect(controls).toHaveCSS("opacity", "0")
+    await page.mouse.move(160, 60)
+    await expect(controls).toHaveCSS("opacity", "1")
     const narrowGeometry = await page.evaluate(() => {
-      const controlsElement = document.querySelector<HTMLElement>(
+      const controls = document.querySelector<HTMLElement>(
         ".top-chrome-controls"
       )
-      const stripElement = document.querySelector<HTMLElement>(
-        ".document-tab-strip"
-      )
-      const toolbarElement = document.querySelector<HTMLElement>(
-        ".formatting-toolbar[data-visible]"
-      )
-      const toolbarActions =
-        toolbarElement?.querySelector<HTMLElement>('[role="toolbar"]')
-      if (
-        !controlsElement ||
-        !stripElement ||
-        !toolbarElement ||
-        !toolbarActions
-      ) {
-        throw new Error("The responsive chrome geometry is unavailable")
+      const editor = document.querySelector<HTMLElement>(".editor-mount")
+      const content = document.querySelector<HTMLElement>(".cm-content")
+      const tabs = document.querySelector<HTMLElement>(".document-tab-strip")
+      if (!controls || !editor || !content || !tabs) {
+        throw new Error("Narrow chrome is unavailable")
       }
-      const controlsBounds = controlsElement.getBoundingClientRect()
-      const stripBounds = stripElement.getBoundingClientRect()
-      const toolbarBounds = toolbarElement.getBoundingClientRect()
+      const controlsBounds = controls.getBoundingClientRect()
+      const tabBounds = tabs.getBoundingClientRect()
       return {
-        controlsCenterY: controlsBounds.top + controlsBounds.height / 2,
-        controlsLeft: controlsBounds.left,
-        controlsRight: controlsBounds.right,
-        stripCenterY: stripBounds.top + stripBounds.height / 2,
-        stripRightInset: innerWidth - stripBounds.right,
-        toolbarJustify: getComputedStyle(toolbarActions).justifyContent,
-        toolbarRight: toolbarBounds.right,
-        viewportWidth: innerWidth,
+        contentPaddingTop: Number.parseFloat(
+          getComputedStyle(content).paddingTop
+        ),
+        controlsBottom: controlsBounds.bottom,
+        controlsRightInset: innerWidth - controlsBounds.right,
+        controlsTop: controlsBounds.top,
+        editorClipPath: getComputedStyle(editor).clipPath,
+        tabLeft: tabBounds.left,
+        tabRightInset: innerWidth - tabBounds.right,
       }
     })
-    expect(narrowGeometry.controlsCenterY).toBeCloseTo(56, 0)
-    expect(narrowGeometry.stripCenterY).toBeCloseTo(23, 0)
-    expect(narrowGeometry.controlsRight).toBeCloseTo(
-      narrowGeometry.viewportWidth - 8,
-      0
-    )
-    expect(narrowGeometry.toolbarRight).toBeCloseTo(
-      narrowGeometry.controlsLeft - 8,
-      0
-    )
-    expect(narrowGeometry.toolbarJustify).toBe("flex-start")
-    expect(narrowGeometry.stripRightInset).toBeCloseTo(
-      process.platform === "win32" ? WINDOWS_CAPTION_CONTROLS_WIDTH + 8 : 8,
-      0
-    )
+    expect(narrowGeometry.controlsTop).toBeCloseTo(41, 0)
+    expect(narrowGeometry.controlsBottom).toBeCloseTo(71, 0)
+    expect(narrowGeometry.controlsRightInset).toBeCloseTo(8, 0)
+    expect(narrowGeometry.editorClipPath).toBe("inset(74px 0px 0px)")
+    expect(narrowGeometry.contentPaddingTop).toBeCloseTo(86, 0)
+    expect(narrowGeometry.tabLeft).toBeCloseTo(8, 0)
+    expect(narrowGeometry.tabRightInset).toBeCloseTo(146, 0)
 
-    await page
-      .getByRole("button", { name: "Formatting toolbar", exact: true })
-      .click()
-    await expect(toolbarSurface).toHaveCount(0)
-    await expect(appShell).not.toHaveAttribute("data-formatting-bar", "true")
-    await expect(appShell).toHaveAttribute(
-      "data-responsive-controls-drawer",
-      "true"
-    )
     await page.keyboard.press(`${primaryModifier}+F`)
     const search = page.getByRole("form", {
       name: "Find and replace in document",
     })
-    await expect(search).toBeVisible()
+    await expect(search).toHaveAttribute("data-search-overlay-state", "ready")
     await expect
       .poll(() =>
         search.evaluate((element) => element.getBoundingClientRect().top)
       )
       .toBeCloseTo(78, 0)
+    await page.keyboard.press("Escape")
+
+    await page.keyboard.press(`${primaryModifier}+Shift+B`)
+    const toolbar = page.locator(".formatting-toolbar[data-visible]")
+    await expect(toolbar).toBeVisible()
+    const sharedLaneGap = await page.evaluate(() => {
+      const controls = document.querySelector<HTMLElement>(
+        ".top-chrome-controls"
+      )
+      const toolbar = document.querySelector<HTMLElement>(
+        ".formatting-toolbar[data-visible]"
+      )
+      if (!controls || !toolbar) throw new Error("Shared lane is unavailable")
+      return (
+        controls.getBoundingClientRect().left -
+        toolbar.getBoundingClientRect().right
+      )
+    })
+    expect(sharedLaneGap).toBeCloseTo(8, 0)
+
+    await page.evaluate(() => window.pulseMd.previewWindowZoom(2))
+    await expect.poll(() => page.evaluate(() => innerWidth)).toBe(240)
+    await page.mouse.move(80, 4)
+    const documentActions = page.getByRole("button", {
+      name: "Document actions",
+    })
+    await expect(documentActions).toBeVisible()
+    await expect(
+      page.getByRole("button", { name: "Settings", exact: true })
+    ).toBeVisible()
+    for (const name of [
+      "Switch to Raw Markdown",
+      "Find",
+      "Document outline",
+      "Formatting toolbar",
+    ]) {
+      await expect(page.getByRole("button", { name, exact: true })).toBeHidden()
+    }
+    const compactGeometry = await page.evaluate(() => {
+      const controls = document.querySelector<HTMLElement>(
+        ".top-chrome-controls"
+      )
+      const editor = document.querySelector<HTMLElement>(".editor-mount")
+      const toolbar = document.querySelector<HTMLElement>(
+        ".formatting-toolbar[data-visible]"
+      )
+      if (!controls || !editor || !toolbar) {
+        throw new Error("Compact shared lane is unavailable")
+      }
+      const controlsBounds = controls.getBoundingClientRect()
+      const toolbarBounds = toolbar.getBoundingClientRect()
+      return {
+        controlsRightInset: innerWidth - controlsBounds.right,
+        editorClipPath: getComputedStyle(editor).clipPath,
+        laneGap: controlsBounds.left - toolbarBounds.right,
+      }
+    })
+    expect(compactGeometry.controlsRightInset).toBeCloseTo(8, 0)
+    expect(compactGeometry.editorClipPath).toBe("inset(74px 0px 0px)")
+    expect(compactGeometry.laneGap).toBeCloseTo(8, 0)
+
+    // Keep the tab strip referenced so a missing responsive tab layout cannot
+    // be masked by the control-lane assertions above.
+    await expect(tabStrip).toBeVisible()
+  } finally {
+    await exitApplication(app)
+    await rm(userData, { force: true, recursive: true })
+  }
+})
+
+test("Windows editor scrollbar clears overlay chrome and stays rail-less @renderer-isolated", async () => {
+  test.skip(process.platform !== "win32", "Windows-only scrollbar styling")
+  const userData = await mkdtemp(
+    path.join(os.tmpdir(), "pulse-md-windows-scrollbar-")
+  )
+  const documentPath = path.join(userData, "scrollbar.md")
+  await writeFile(
+    documentPath,
+    Array.from({ length: 400 }, (_, index) => `Line ${index + 1}`).join("\n"),
+    "utf8"
+  )
+  const app = await electron.launch({
+    args: [projectRoot, `--user-data-dir=${userData}`, documentPath],
+    cwd: projectRoot,
+  })
+
+  try {
+    const page = await app.firstWindow()
+    const scroller = page.locator(".editor-mount .cm-scroller")
+    await scroller.waitFor()
+    await expect
+      .poll(() =>
+        scroller.evaluate(
+          (element) => element.scrollHeight > element.clientHeight
+        )
+      )
+      .toBe(true)
+
+    const scrollbarStyles = () =>
+      scroller.evaluate((element) => {
+        const scrollbar = getComputedStyle(element, "::-webkit-scrollbar")
+        const track = getComputedStyle(element, "::-webkit-scrollbar-track")
+        const thumb = getComputedStyle(element, "::-webkit-scrollbar-thumb")
+        const button = getComputedStyle(element, "::-webkit-scrollbar-button")
+        const editorMount = element.closest<HTMLElement>(".editor-mount")
+        if (!editorMount) throw new Error("Editor mount is unavailable")
+        const elementStyle = getComputedStyle(element)
+        const editorStyle = getComputedStyle(editorMount)
+        return {
+          buttonDisplay: button.display,
+          buttonHeight: button.height,
+          buttonWidth: button.width,
+          clipPath: editorStyle.clipPath,
+          scrollbarColor: elementStyle.scrollbarColor,
+          scrollbarWidth: elementStyle.scrollbarWidth,
+          thumbBackground: thumb.backgroundColor,
+          trackBackground: track.backgroundColor,
+          width: scrollbar.width,
+        }
+      })
+
+    const ordinary = await scrollbarStyles()
+    expect(ordinary.clipPath).toBe("inset(0px)")
+    expect(ordinary.scrollbarColor).toBe("auto")
+    expect(ordinary.scrollbarWidth).toBe("auto")
+    expect(ordinary.width).toBe("10px")
+    expect(ordinary.trackBackground).toBe("rgba(0, 0, 0, 0)")
+    expect(ordinary.buttonDisplay).toBe("none")
+    expect(ordinary.buttonWidth).toBe("0px")
+    expect(ordinary.buttonHeight).toBe("0px")
+    expect(ordinary.thumbBackground).not.toBe("rgba(0, 0, 0, 0)")
+
+    await scroller.evaluate((element) => {
+      element.scrollTop = element.scrollHeight
+    })
+    const scrollerBounds = await scroller.boundingBox()
+    if (!scrollerBounds) throw new Error("Editor scroller is unavailable")
+    const scrollbarX = scrollerBounds.x + scrollerBounds.width - 5
+    // Stay above the status overlay's bottom reveal lane while grabbing the
+    // bottom-positioned native thumb.
+    const scrollbarY = scrollerBounds.y + scrollerBounds.height - 34
+    const initialScrollTop = await scroller.evaluate(
+      (element) => element.scrollTop
+    )
+    await page.mouse.move(scrollbarX, scrollbarY)
+    await page.mouse.down()
+    await page.mouse.move(scrollbarX, scrollbarY - 30, { steps: 5 })
+    await page.mouse.up()
+    await expect
+      .poll(() => scroller.evaluate((element) => element.scrollTop))
+      .toBeLessThan(initialScrollTop)
+    await expect
+      .poll(() =>
+        scroller.evaluate((element) => document.activeElement === element)
+      )
+      .toBe(true)
+    await page.keyboard.down("Shift")
+    try {
+      await expect
+        .poll(() =>
+          scroller.evaluate((element) => element.matches(":focus-visible"))
+        )
+        .toBe(true)
+      await expect
+        .poll(() =>
+          scroller.evaluate((element) => getComputedStyle(element).outlineStyle)
+        )
+        .toBe("none")
+    } finally {
+      await page.keyboard.up("Shift")
+    }
+
+    const scrollbarRules = await page.evaluate(() => {
+      const matched: Array<{ cssText: string; selector: string }> = []
+      const visit = (rules: CSSRuleList) => {
+        for (const rule of rules) {
+          if (
+            rule instanceof CSSStyleRule &&
+            rule.selectorText.includes(".cm-scroller::-webkit-scrollbar")
+          ) {
+            matched.push({
+              cssText: rule.style.cssText,
+              selector: rule.selectorText,
+            })
+          } else if ("cssRules" in rule) {
+            try {
+              visit((rule as CSSGroupingRule).cssRules)
+            } catch {
+              // Cross-origin sheets are irrelevant to the packaged renderer.
+            }
+          }
+        }
+      }
+      for (const sheet of document.styleSheets) {
+        try {
+          visit(sheet.cssRules)
+        } catch {
+          // Cross-origin sheets are irrelevant to the packaged renderer.
+        }
+      }
+      return matched
+    })
+    expect(
+      scrollbarRules.find(({ selector }) =>
+        selector.endsWith("::-webkit-scrollbar-track:vertical")
+      )?.cssText
+    ).toContain("var(--window-chrome-height")
+    expect(
+      scrollbarRules.find(
+        ({ selector, cssText }) =>
+          selector.endsWith("::-webkit-scrollbar-thumb") &&
+          cssText.includes("24%")
+      )
+    ).toBeDefined()
+    expect(
+      scrollbarRules.find(
+        ({ selector, cssText }) =>
+          selector.endsWith("::-webkit-scrollbar-thumb:hover") &&
+          cssText.includes("48%")
+      )
+    ).toBeDefined()
+
+    await setWindowContentSize(app, 600, 320)
+    await expect.poll(() => page.evaluate(() => innerWidth)).toBe(600)
+    await scroller.evaluate((element) => {
+      element.scrollTo({ behavior: "auto", top: 700 })
+    })
+    await expect
+      .poll(() => scroller.evaluate((element) => element.scrollTop))
+      .toBeCloseTo(700, 0)
+    await expect
+      .poll(() =>
+        scroller.evaluate((element) => {
+          const targetY = element.getBoundingClientRect().top + 100
+          return Array.from(
+            element.querySelectorAll<HTMLElement>(".cm-line")
+          ).some((candidate) => {
+            const bounds = candidate.getBoundingClientRect()
+            return bounds.top <= targetY && bounds.bottom > targetY
+          })
+        })
+      )
+      .toBe(true)
+    const readingAnchor = await scroller.evaluate((element) => {
+      const targetY = element.getBoundingClientRect().top + 100
+      const line = Array.from(
+        element.querySelectorAll<HTMLElement>(".cm-line")
+      ).find((candidate) => {
+        const bounds = candidate.getBoundingClientRect()
+        return bounds.top <= targetY && bounds.bottom > targetY
+      })
+      if (!line) throw new Error("No reading-position anchor is mounted")
+      return {
+        text: line.textContent,
+        top: line.getBoundingClientRect().top,
+      }
+    })
+
+    await setWindowContentSize(app, 480, 320)
+    await expect.poll(() => page.evaluate(() => innerWidth)).toBe(480)
+    await expect
+      .poll(() =>
+        scroller.evaluate((element, anchor) => {
+          const line = Array.from(
+            element.querySelectorAll<HTMLElement>(".cm-line")
+          ).find((candidate) => candidate.textContent === anchor.text)
+          return line ? line.getBoundingClientRect().top : null
+        }, readingAnchor)
+      )
+      .toBeCloseTo(readingAnchor.top, 0)
+
+    await page.keyboard.press(`${primaryModifier}+Shift+B`)
+    await expect(page.locator(".formatting-toolbar")).toBeVisible()
+    await expect
+      .poll(async () => (await scrollbarStyles()).clipPath)
+      .toBe("inset(74px 0px 0px)")
+
+    await page.mouse.move(200, 1)
+    const revealRegion = page.locator(".status-overlay-reveal-region")
+    const revealBounds = await revealRegion.boundingBox()
+    if (!revealBounds) throw new Error("Status reveal region is unavailable")
+    await page.mouse.move(
+      revealBounds.x + revealBounds.width / 2,
+      revealBounds.y + revealBounds.height / 2
+    )
+    await expect(page.locator(".status-overlay")).toBeVisible()
+    await expect
+      .poll(async () => (await scrollbarStyles()).clipPath)
+      .toBe("inset(74px 0px 28px)")
   } finally {
     await exitApplication(app)
     await rm(userData, { force: true, recursive: true })
@@ -358,7 +699,10 @@ test("search and outline stay below the complete top chrome @renderer-isolated",
             )
             const boundary =
               toolbar ??
-              (drawer && drawer.getBoundingClientRect().height > 0
+              (drawer &&
+              chrome &&
+              drawer.getBoundingClientRect().bottom >
+                chrome.getBoundingClientRect().bottom
                 ? drawer
                 : chrome)
             if (!boundary) throw new Error("Top chrome is unavailable")

@@ -8,7 +8,6 @@ import {
   MAX_SPELLING_WORD_LENGTH,
   MAX_ZOOM_FACTOR,
   MIN_ZOOM_FACTOR,
-  WINDOWS_MENU_IDS,
   ZOOM_FACTOR_STEP,
 } from "../src/shared/contracts"
 import type {
@@ -66,8 +65,7 @@ import type {
   TabTransferImport,
   TransferId,
   WindowAction,
-  WindowsMenuId,
-  WindowsMenuPopupAnchor,
+  WindowsMenuSnapshot,
   WindowProfileCaptureKind,
   WindowProfile,
   WindowProfileFileChoice,
@@ -241,6 +239,19 @@ function assertSpellingWord(word: unknown): asserts word is string {
 const spellingReadinessProbe = "pulsemdzzzxqvblorp"
 
 const pulseMd: PulseMdApi = {
+  activateWindowsMenuItem: (actionToken: string) => {
+    if (
+      typeof actionToken !== "string" ||
+      actionToken.length < 1 ||
+      actionToken.length > 128
+    ) {
+      return Promise.reject(new TypeError("Invalid Windows menu action"))
+    }
+    return ipcRenderer.invoke(
+      ipcChannels.activateWindowsMenuItem,
+      actionToken
+    ) as Promise<void>
+  },
   bootstrap: async () =>
     rememberBootstrapSettings(
       (await ipcRenderer.invoke(ipcChannels.bootstrap)) as BootstrapPayload
@@ -480,24 +491,10 @@ const pulseMd: PulseMdApi = {
       replaceActive
     ) as Promise<OpenDocumentResult | null>
   },
-  popupWindowsMenu: (menu: WindowsMenuId, anchor: WindowsMenuPopupAnchor) => {
-    if (
-      !WINDOWS_MENU_IDS.includes(menu) ||
-      typeof anchor !== "object" ||
-      anchor === null ||
-      !Number.isInteger(anchor.x) ||
-      !Number.isInteger(anchor.y) ||
-      anchor.x < 0 ||
-      anchor.y < 0
-    ) {
-      return Promise.reject(new TypeError("Invalid Windows menu popup"))
-    }
-    return ipcRenderer.invoke(
-      ipcChannels.popupWindowsMenu,
-      menu,
-      anchor
-    ) as Promise<void>
-  },
+  getWindowsMenuSnapshot: () =>
+    ipcRenderer.invoke(
+      ipcChannels.getWindowsMenuSnapshot
+    ) as Promise<WindowsMenuSnapshot>,
   previewAppearance: (settings: AppearanceSettings | null) =>
     ipcRenderer.send(ipcChannels.previewAppearance, settings),
   provideSettingsScratchSnapshot: (response: SettingsScratchSnapshotResponse) =>

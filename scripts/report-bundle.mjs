@@ -27,7 +27,9 @@ const budgets = {
   // source remains deferred; this allowance keeps measured headroom without
   // relaxing the stricter aggregate launch-payload ceiling below.
   initialJavaScriptRawBytes: 1_440_000,
-  initialCssRawBytes: 147_000,
+  // Windows' renderer menubar and rail-less, chrome-aware scrollbar add a
+  // small platform CSS surface while the aggregate launch budget stays fixed.
+  initialCssRawBytes: 152_000,
   initialFontRawBytes: 1_000_000,
   initialClosureRawBytes: 2_550_000,
   totalOutputRawBytes: 10_500_000,

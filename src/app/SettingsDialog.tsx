@@ -1647,7 +1647,7 @@ export default function SettingsDialog({
 
                 {platform === "win32" && !backgroundEffectSupported ? (
                   <FieldDescription>
-                    System backdrops are unavailable on this Windows release.
+                    Native backdrop blur is unavailable on this Windows release.
                     Pulse MD remains opaque; Windows 11 22H2 or later is
                     required.
                   </FieldDescription>
@@ -1792,7 +1792,7 @@ export default function SettingsDialog({
                   </FieldContent>
                 </Field>
 
-                {platform === "darwin" ? (
+                {platform === "darwin" || platform === "win32" ? (
                   <Field
                     data-disabled={!backgroundEffectControlsEnabled}
                     orientation="vertical"
@@ -1878,9 +1878,8 @@ export default function SettingsDialog({
                   <Field orientation="vertical">
                     <FieldLabel>Blur Radius</FieldLabel>
                     <FieldDescription>
-                      Windows manages blur strength for the system backdrop, so
-                      it is not adjustable in Pulse MD. System backdrops require
-                      Windows 11 22H2 or later; older releases remain opaque.
+                      Native window transparency and blur are unavailable on
+                      this platform.
                     </FieldDescription>
                   </Field>
                 )}

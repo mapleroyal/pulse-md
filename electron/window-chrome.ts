@@ -3,8 +3,6 @@ export const NATIVE_WINDOW_CONTROL_SIZE = 14
 export const NATIVE_WINDOW_CONTROL_X = 16
 export const TAB_TEAR_OUT_DISTANCE = 18
 
-export type WindowsBackgroundMaterial = "acrylic" | "mica"
-
 export interface WindowsTitleBarOverlay {
   color: string
   height: number
@@ -110,18 +108,7 @@ export function macWindowButtonPosition(zoomFactor: number): {
   }
 }
 
-export function windowsBackgroundMaterial(
-  blurRadius: number
-): WindowsBackgroundMaterial {
-  if (!Number.isFinite(blurRadius) || blurRadius < 0) {
-    throw new TypeError(
-      "Background blur radius must be non-negative and finite"
-    )
-  }
-  return blurRadius > 0 ? "acrylic" : "mica"
-}
-
-export function windowsBackgroundMaterialSupported(
+export function windowsWindowBlurSupported(
   platform: NodeJS.Platform,
   release: string
 ): boolean {

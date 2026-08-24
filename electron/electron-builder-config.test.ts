@@ -334,6 +334,10 @@ describe("electron-builder configuration", () => {
     ])
     expect(configuration.win?.extraResources).toEqual([
       {
+        from: "dist-native/win32/windows-window-blur.node",
+        to: "native/windows-window-blur.node",
+      },
+      {
         from: "dist-native/win32/bin/pmd.exe",
         to: "bin/pmd.exe",
       },

@@ -44,6 +44,7 @@ import {
   type BrowserWindowConstructorOptions,
   type IpcMainEvent,
   type IpcMainInvokeEvent,
+  type MenuItem,
   type MenuItemConstructorOptions,
   type WebContents,
 } from "electron"
@@ -182,7 +183,8 @@ import {
   type WindowAction,
   type WindowId,
   type WindowsMenuId,
-  type WindowsMenuPopupAnchor,
+  type WindowsMenuItemSnapshot,
+  type WindowsMenuSnapshot,
   type WindowProfileCaptureKind,
   type WindowProfileFileChoice,
   type WindowProfileLaunchResult,
@@ -328,10 +330,8 @@ import {
   shouldPrepareTabTearOut,
   tabTearOutWindowPosition,
   TOP_CHROME_HEIGHT,
-  windowsBackgroundMaterial,
-  windowsBackgroundMaterialSupported,
   windowsTitleBarOverlay,
-  type WindowsBackgroundMaterial,
+  windowsWindowBlurSupported,
   type WindowsTitleBarOverlay,
 } from "./window-chrome"
 import {
@@ -413,7 +413,6 @@ const WINDOWS_MENU_LABELS: Readonly<Record<WindowsMenuId, string>> = {
   window: "Window",
   help: "Help",
 }
-const activeWindowsMenuPopups = new Set<WindowId>()
 const DRAG_TOKEN_LIFETIME_MS = 30_000
 const TAB_EXPORT_TIMEOUT_MS = 10_000
 const SETTINGS_SCRATCH_SNAPSHOT_TIMEOUT_MS = 10_000
@@ -429,6 +428,7 @@ const WINDOW_BACKGROUND_THROTTLING_ENABLED = true
 const ZOOM_FACTOR_EPSILON = 1e-6
 const MIN_VISUAL_ZOOM_SCALE = 1
 const MAX_VISUAL_ZOOM_SCALE = 5
+const WINDOWS_WM_DESTROY = 0x0002
 const PULSE_MD_APP_SCHEME = "pulse-md"
 const SCRATCH_SORT_ORDERS: readonly ScratchSortOrder[] = [
   "last-opened",
@@ -711,7 +711,7 @@ interface WindowState {
   appliedBackgroundBlurAnimationActive: boolean
   appliedBackgroundEffectSignature: string | null
   appliedBackgroundBlurRadius: number
-  appliedWindowsBackgroundMaterial: WindowsBackgroundMaterial | null
+  appliedWindowsAlphaBootstrap: boolean
   appliedWindowsTitleBarOverlaySignature: string | null
   appearancePreview: AppearanceSettings | null
   approvedTabCloses: Map<TabId, TabCloseApproval>
@@ -768,6 +768,7 @@ interface WindowState {
   trustedRendererLocation: TrustedRendererLocation
   visualEffectRevision: number
   win: BrowserWindow
+  windowsMenuActions: Map<string, MenuItem>
 }
 
 interface MacWindowBlurAddon {
@@ -790,6 +791,30 @@ interface MacWindowBlurAddon {
     opacity: number
   ): boolean
   tabDragEscapeKeyPressed(): boolean
+}
+
+interface WindowsWindowBlurAddon {
+  animateWindowBackgroundBlur(
+    nativeHandle: Buffer,
+    ownerId: number,
+    radius: number,
+    durationMs: number,
+    delayMs: number,
+    x1: number,
+    y1: number,
+    x2: number,
+    y2: number
+  ): boolean
+  clearWindowBackgroundEffect(nativeHandle: Buffer, ownerId: number): boolean
+  setWindowBackgroundEffect(
+    nativeHandle: Buffer,
+    ownerId: number,
+    radius: number,
+    red: number,
+    green: number,
+    blue: number,
+    opacity: number
+  ): boolean
 }
 
 interface NativeWindowBackgroundEffect {
@@ -1050,6 +1075,8 @@ let recentDocumentsWriteQueue: Promise<void> = Promise.resolve()
 let recentDocumentsMenuRefresh: ReturnType<typeof setImmediate> | null = null
 let macWindowBlurAddon: MacWindowBlurAddon | null | undefined
 let macWindowBlurWarningShown = false
+let windowsWindowBlurAddon: WindowsWindowBlurAddon | null | undefined
+let windowsWindowBlurWarningShown = false
 let windowsNativeChromeWarningShown = false
 let backgroundActivationPolicyActive = false
 
@@ -2893,6 +2920,7 @@ async function commitApplicationSettings(
       }
       settings = nextSettings
       committedSettings = nextSettings
+      applyWindowsNativeThemeSource(nextSettings)
       if (applicationInitialized && loginItemChanged) {
         Menu.setApplicationMenu(createApplicationMenu())
         updateViewMenuItems()
@@ -2908,8 +2936,13 @@ async function commitApplicationSettings(
         try {
           applyWindowZoom(target, nextSettings.zoomFactor)
           if (!targetState.rendererReady) continue
-          targetState.appearancePreview = null
-          applyWindowVisualEffect(targetState, nextSettings)
+          if (target.id !== settingsSessionOwnerWindowId) {
+            targetState.appearancePreview = null
+          }
+          applyWindowVisualEffect(
+            targetState,
+            targetState.appearancePreview ?? nextSettings
+          )
           if (target.id === sourceWindowId) continue
           target.webContents.send(
             ipcChannels.settingsChanged,
@@ -5102,6 +5135,13 @@ function lastUsableCommandWindow(): BrowserWindow | null {
 
 function releaseSettingsSessionForWindow(windowId: WindowId): void {
   if (settingsSessionOwnerWindowId !== windowId) return
+  const state = windowStates.get(windowId)
+  const hadAppearancePreview = Boolean(state?.appearancePreview)
+  if (state) state.appearancePreview = null
+  applyWindowsNativeThemeSource(settings)
+  if (hadAppearancePreview && state && windowCanReceiveVisualEffect(state)) {
+    applyWindowVisualEffect(state, settings)
+  }
   if (pendingSettingsImport?.ownerWindowId === windowId) {
     pendingSettingsImport = null
   }
@@ -5117,10 +5157,7 @@ function activeSettingsSessionOwner(): WindowState | null {
     state.recoverySurfaceActive ||
     state.recoveryInProgress
   ) {
-    if (pendingSettingsImport?.ownerWindowId === settingsSessionOwnerWindowId) {
-      pendingSettingsImport = null
-    }
-    settingsSessionOwnerWindowId = null
+    releaseSettingsSessionForWindow(settingsSessionOwnerWindowId)
     return null
   }
   return state
@@ -6067,6 +6104,98 @@ function createApplicationMenu(): Menu {
   return menu
 }
 
+function windowsMenuDisplayLabel(label: string): string {
+  const escapedAmpersand = "\u0000"
+  return label
+    .replaceAll("&&", escapedAmpersand)
+    .replaceAll("&", "")
+    .replaceAll(escapedAmpersand, "&")
+}
+
+function windowsMenuItemSnapshot(
+  state: WindowState,
+  item: MenuItem
+): WindowsMenuItemSnapshot | null {
+  if (!item.visible) return null
+
+  if (item.type === "separator") {
+    return {
+      accelerator: null,
+      actionToken: null,
+      checked: false,
+      enabled: false,
+      label: "",
+      submenu: [],
+      type: "separator",
+    }
+  }
+
+  const submenu = (item.submenu?.items ?? [])
+    .map((child) => windowsMenuItemSnapshot(state, child))
+    .filter((child): child is WindowsMenuItemSnapshot => child !== null)
+  const type = item.submenu
+    ? "submenu"
+    : item.type === "checkbox" || item.type === "radio"
+      ? item.type
+      : "normal"
+  const actionable =
+    item.enabled &&
+    (type === "normal" || type === "checkbox" || type === "radio")
+  const actionToken = actionable ? randomUUID() : null
+  if (actionToken) state.windowsMenuActions.set(actionToken, item)
+
+  return {
+    accelerator: item.accelerator,
+    actionToken,
+    checked: item.checked,
+    enabled: item.enabled,
+    label: windowsMenuDisplayLabel(item.label),
+    submenu,
+    type,
+  }
+}
+
+function windowsMenuSnapshot(state: WindowState): WindowsMenuSnapshot {
+  updateViewMenuItems(state)
+  state.windowsMenuActions.clear()
+  const applicationMenu = Menu.getApplicationMenu()
+  if (!applicationMenu) throw new Error("The application menu is unavailable")
+
+  return Object.fromEntries(
+    WINDOWS_MENU_IDS.map((menu) => {
+      const topLevelItem = applicationMenu.items.find(
+        (item) => item.label === WINDOWS_MENU_LABELS[menu]
+      )
+      const items = (topLevelItem?.submenu?.items ?? [])
+        .map((item) => windowsMenuItemSnapshot(state, item))
+        .filter((item): item is WindowsMenuItemSnapshot => item !== null)
+      return [
+        menu,
+        {
+          enabled: Boolean(
+            topLevelItem?.enabled && topLevelItem.visible && items.length > 0
+          ),
+          items,
+        },
+      ]
+    })
+  ) as unknown as WindowsMenuSnapshot
+}
+
+function activateWindowsMenuItem(
+  state: WindowState,
+  actionToken: string
+): void {
+  const item = state.windowsMenuActions.get(actionToken)
+  // A snapshot is one menu session. Invalidating every token before invoking
+  // the command prevents a stale renderer surface from replaying an action.
+  state.windowsMenuActions.clear()
+  if (!item || item.type === "separator" || item.submenu) {
+    throw new Error("The Windows menu action is unavailable")
+  }
+  item.click({}, state.win, state.win.webContents)
+}
+
 async function initialDocumentForWindow(
   win: BrowserWindow,
   filePath?: string,
@@ -6642,6 +6771,35 @@ function resolvedAppearance(mode: AppearanceMode): ResolvedAppearance {
   return nativeTheme.shouldUseDarkColors ? "dark" : "light"
 }
 
+function windowsNativeThemeSource(
+  value: Pick<AppSettings, "appearanceMode" | "themeByScheme">
+): "system" | ResolvedAppearance {
+  if (value.appearanceMode === "system") return "system"
+  return resolveAppearanceProfile(value.themeByScheme[value.appearanceMode])
+    .surfaceScheme
+}
+
+function applyWindowsNativeThemeSource(
+  value: Pick<AppSettings, "appearanceMode" | "themeByScheme">
+): void {
+  if (process.platform !== "win32") return
+  const owner =
+    settingsSessionOwnerWindowId === null
+      ? null
+      : windowStates.get(settingsSessionOwnerWindowId)
+  const preview =
+    owner &&
+    !owner.win.isDestroyed() &&
+    !owner.recoverySurfaceActive &&
+    !owner.recoveryInProgress
+      ? owner.appearancePreview
+      : null
+  // nativeTheme is process-wide. Keep the exclusive Settings owner's draft
+  // authoritative across unrelated commits and additional window creation.
+  const source = windowsNativeThemeSource(preview ?? value)
+  if (nativeTheme.themeSource !== source) nativeTheme.themeSource = source
+}
+
 function windowBackgroundColor(value: AppearanceSettings): string {
   const profile = value.themeByScheme[resolvedAppearance(value.appearanceMode)]
   return resolveAppearanceProfile(profile).backgroundColor
@@ -6659,10 +6817,7 @@ function windowsTitleBarOverlaySignature(
 }
 
 function windowsNativeBackgroundSupported(): boolean {
-  return windowsBackgroundMaterialSupported(
-    process.platform,
-    operatingSystemRelease()
-  )
+  return windowsWindowBlurSupported(process.platform, operatingSystemRelease())
 }
 
 function rendererBackgroundCapability(): NodeJS.Platform | "opaque" {
@@ -6727,6 +6882,18 @@ function setWindowBackgroundColor(
 ): boolean {
   if (!windowCanReceiveVisualEffect(state, revision)) return false
   try {
+    if (process.platform === "win32") {
+      const contentColor =
+        color === "rgba(0, 0, 0, 0)"
+          ? "#00000000"
+          : /^#[\da-f]{6}$/i.test(color)
+            ? `#ff${color.slice(1)}`
+            : null
+      if (contentColor === null) {
+        throw new TypeError(`Unsupported Windows window background: ${color}`)
+      }
+      state.win.contentView.setBackgroundColor(contentColor)
+    }
     state.win.setBackgroundColor(color)
     return true
   } catch (error) {
@@ -6822,6 +6989,51 @@ function loadMacWindowBlurAddon(): MacWindowBlurAddon | null {
     }
   }
   return macWindowBlurAddon
+}
+
+function windowsWindowBlurAddonPath(): string {
+  return app.isPackaged
+    ? path.join(process.resourcesPath, "native", "windows-window-blur.node")
+    : path.join(
+        app.getAppPath(),
+        "dist-native",
+        "win32",
+        "windows-window-blur.node"
+      )
+}
+
+function loadWindowsWindowBlurAddon(): WindowsWindowBlurAddon | null {
+  if (process.platform !== "win32") return null
+  if (windowsWindowBlurAddon !== undefined) return windowsWindowBlurAddon
+
+  if (launchVisualMode) {
+    launchVisualBenchmarkAddonLoadStartedEpochMs = launchBenchmarkEpochMs()
+  }
+
+  try {
+    const loaded = requireNativeModule(
+      windowsWindowBlurAddonPath()
+    ) as Partial<WindowsWindowBlurAddon>
+    if (
+      typeof loaded.setWindowBackgroundEffect !== "function" ||
+      typeof loaded.animateWindowBackgroundBlur !== "function" ||
+      typeof loaded.clearWindowBackgroundEffect !== "function"
+    ) {
+      throw new TypeError("Native Windows blur module has an invalid API")
+    }
+    windowsWindowBlurAddon = loaded as WindowsWindowBlurAddon
+  } catch (error) {
+    windowsWindowBlurAddon = null
+    if (!windowsWindowBlurWarningShown) {
+      windowsWindowBlurWarningShown = true
+      console.warn("Native Windows window blur is unavailable", error)
+    }
+  } finally {
+    if (launchVisualMode) {
+      launchVisualBenchmarkAddonLoadReadyEpochMs = launchBenchmarkEpochMs()
+    }
+  }
+  return windowsWindowBlurAddon
 }
 
 function setMacWindowBackgroundEffect(
@@ -6935,56 +7147,162 @@ function setWindowsWindowBackgroundEffect(
   ) {
     return false
   }
-  const material = windowsBackgroundMaterial(effect.blurRadius)
-  if (state.appliedWindowsBackgroundMaterial === material) {
-    // Translucency and theme previews update Pulse's renderer tint. Reapplying
-    // an unchanged DWM material would unnecessarily rebuild the native frame
-    // and transparency state on every slider tick.
-    state.appliedBackgroundBlurAnimationActive = false
-    state.appliedBackgroundBlurRadius = effect.blurRadius
-    state.appliedBackgroundEffectSignature =
-      nativeWindowBackgroundEffectSignature(effect)
-    return true
-  }
   try {
-    state.win.setBackgroundMaterial(material)
-    state.appliedBackgroundBlurAnimationActive = false
-    state.appliedBackgroundBlurRadius = effect.blurRadius
-    state.appliedBackgroundEffectSignature =
-      nativeWindowBackgroundEffectSignature(effect)
-    state.appliedWindowsBackgroundMaterial = material
-    return true
+    if (!state.appliedWindowsAlphaBootstrap) {
+      // This flips Aura's backing surface into its alpha-capable mode. The
+      // addon immediately suppresses the stock Acrylic visual while retaining
+      // that plumbing for Chromium and the custom composition target.
+      state.win.setBackgroundMaterial("acrylic")
+      state.appliedWindowsAlphaBootstrap = true
+    }
+    const addon = loadWindowsWindowBlurAddon()
+    if (!addon) {
+      state.win.setBackgroundMaterial("none")
+      state.appliedWindowsAlphaBootstrap = false
+      return false
+    }
+    const applied = addon.setWindowBackgroundEffect(
+      state.win.getNativeWindowHandle(),
+      state.win.id,
+      effect.blurRadius,
+      effect.red,
+      effect.green,
+      effect.blue,
+      effect.opacity
+    )
+    if (applied) {
+      state.appliedBackgroundBlurAnimationActive = false
+      state.appliedBackgroundBlurRadius = effect.blurRadius
+      state.appliedBackgroundEffectSignature =
+        nativeWindowBackgroundEffectSignature(effect)
+    } else {
+      clearWindowsWindowBackgroundEffect(state, effect.backgroundColor)
+    }
+    return applied
   } catch (error) {
     if (isDestroyedElectronObjectError(error)) return false
-    if (!windowsNativeChromeWarningShown) {
-      windowsNativeChromeWarningShown = true
-      console.warn("Unable to update Windows background material", error)
+    clearWindowsWindowBackgroundEffect(state, effect.backgroundColor)
+    if (!windowsWindowBlurWarningShown) {
+      windowsWindowBlurWarningShown = true
+      console.warn("Unable to update Windows background blur", error)
     }
     return false
   }
 }
 
-function clearWindowsWindowBackgroundEffect(state: WindowState): void {
+function clearWindowsWindowBackgroundEffect(
+  state: WindowState,
+  restoredBackgroundColor?: string
+): void {
+  if (process.platform !== "win32" || !windowCanReceiveVisualEffect(state)) {
+    return
+  }
+  // Always cover Chromium before detaching the target. Electron also resets
+  // its View backing when material mode returns to `none`, so reinforce the
+  // same color afterward rather than accepting its default white surface.
+  if (restoredBackgroundColor) {
+    setWindowBackgroundColor(state, restoredBackgroundColor)
+  }
   if (
-    process.platform !== "win32" ||
-    state.appliedWindowsBackgroundMaterial === null ||
-    !windowCanReceiveVisualEffect(state)
+    state.appliedBackgroundEffectSignature === null &&
+    state.appliedBackgroundBlurRadius === 0 &&
+    !state.appliedWindowsAlphaBootstrap
   ) {
     return
   }
+  let cleanupError: unknown = null
   try {
-    state.win.setBackgroundMaterial("none")
-    state.appliedBackgroundBlurAnimationActive = false
-    state.appliedBackgroundBlurRadius = 0
-    state.appliedBackgroundEffectSignature = null
-    state.appliedWindowsBackgroundMaterial = null
+    windowsWindowBlurAddon?.clearWindowBackgroundEffect(
+      state.win.getNativeWindowHandle(),
+      state.win.id
+    )
   } catch (error) {
-    if (isDestroyedElectronObjectError(error)) return
-    if (!windowsNativeChromeWarningShown) {
-      windowsNativeChromeWarningShown = true
-      console.warn("Unable to clear Windows background material", error)
+    cleanupError = error
+  }
+  try {
+    if (state.appliedWindowsAlphaBootstrap) {
+      state.win.setBackgroundMaterial("none")
+    }
+  } catch (error) {
+    cleanupError ??= error
+  }
+  state.appliedWindowsAlphaBootstrap = false
+  state.appliedBackgroundBlurAnimationActive = false
+  state.appliedBackgroundBlurRadius = 0
+  state.appliedBackgroundEffectSignature = null
+  if (restoredBackgroundColor) {
+    setWindowBackgroundColor(state, restoredBackgroundColor)
+  }
+  if (cleanupError && !isDestroyedElectronObjectError(cleanupError)) {
+    if (!windowsWindowBlurWarningShown) {
+      windowsWindowBlurWarningShown = true
+      console.warn("Unable to clear Windows background blur", cleanupError)
     }
   }
+}
+
+function releaseWindowsWindowBackgroundEffect(
+  nativeHandle: Buffer,
+  ownerId: number
+): void {
+  if (process.platform !== "win32" || !windowsWindowBlurAddon) return
+  try {
+    windowsWindowBlurAddon.clearWindowBackgroundEffect(nativeHandle, ownerId)
+  } catch (error) {
+    if (!windowsWindowBlurWarningShown) {
+      windowsWindowBlurWarningShown = true
+      console.warn("Unable to release Windows background blur", error)
+    }
+  }
+}
+
+function animateWindowsWindowBackgroundBlur(
+  state: WindowState,
+  effect: NativeWindowBackgroundEffect,
+  transition: LaunchTransitionSettings
+): boolean {
+  if (process.platform !== "win32" || !windowCanReceiveVisualEffect(state)) {
+    return false
+  }
+  const addon = loadWindowsWindowBlurAddon()
+  if (!addon) return false
+  const [x1, y1, x2, y2] = launchTransitionBezier(transition)
+  try {
+    const applied = addon.animateWindowBackgroundBlur(
+      state.win.getNativeWindowHandle(),
+      state.win.id,
+      effect.blurRadius,
+      transition.durationMs,
+      transition.delayMs,
+      x1,
+      y1,
+      x2,
+      y2
+    )
+    if (applied) {
+      state.appliedBackgroundBlurAnimationActive = true
+      state.appliedBackgroundBlurRadius = effect.blurRadius
+      state.appliedBackgroundEffectSignature =
+        nativeWindowBackgroundEffectSignature(effect)
+    }
+    return applied
+  } catch (error) {
+    if (!windowsWindowBlurWarningShown) {
+      windowsWindowBlurWarningShown = true
+      console.warn("Unable to animate Windows background blur", error)
+    }
+    return false
+  }
+}
+
+function animateNativeWindowBackgroundBlur(
+  state: WindowState,
+  effect: NativeWindowBackgroundEffect,
+  transition: LaunchTransitionSettings
+): boolean {
+  return process.platform === "win32"
+    ? animateWindowsWindowBackgroundBlur(state, effect, transition)
+    : animateMacWindowBackgroundBlur(state, effect, transition)
 }
 
 function setNativeWindowBackgroundEffect(
@@ -7014,9 +7332,8 @@ function applyWindowVisualEffectAtRevision(
     ) {
       return setWindowBackgroundColor(state, "rgba(0, 0, 0, 0)", revision)
     }
-    // Install the platform background material before exposing Chromium's
-    // clear backing. A missing native effect therefore leaves the editor
-    // opaque instead of partly composed.
+    // Install the native backdrop and tint before exposing Chromium's clear
+    // backing. A missing native effect therefore leaves the editor opaque.
     if (!setNativeWindowBackgroundEffect(state, effect)) {
       setWindowBackgroundColor(state, windowBackgroundColor(value), revision)
       return false
@@ -7025,10 +7342,9 @@ function applyWindowVisualEffectAtRevision(
   }
 
   if (process.platform === "win32") {
-    // Electron resets the WebContents backing when a Windows material is
-    // removed, so clear the material first and then apply the selected theme.
-    clearWindowsWindowBackgroundEffect(state)
-    setWindowBackgroundColor(state, windowBackgroundColor(value), revision)
+    // Cover the compositor before removing its target so disabling the effect,
+    // including through Reduce Transparency, cannot flash the desktop clear.
+    clearWindowsWindowBackgroundEffect(state, windowBackgroundColor(value))
     return false
   }
 
@@ -7242,12 +7558,11 @@ function scheduleWindowVisualEffect(
     let applied: boolean
     if (configuredTransition.strategy === "tint-blur" && targetRadius > 0) {
       applied =
-        process.platform === "darwin" &&
-        setMacWindowBackgroundEffect(state, {
+        setNativeWindowBackgroundEffect(state, {
           ...targetEffect,
           blurRadius: 0,
         }) &&
-        animateMacWindowBackgroundBlur(
+        animateNativeWindowBackgroundBlur(
           state,
           targetEffect,
           configuredTransition
@@ -8510,6 +8825,9 @@ async function createDocumentWindow(
   restoreForegroundActivationPolicy()
   const windowSize = { ...(options.size ?? rememberedWindowSize) }
   const launchAppearance = await currentSettings()
+  // Keep native dialogs and caption affordances aligned with an explicit app
+  // appearance before the window is constructed.
+  applyWindowsNativeThemeSource(launchAppearance)
   if (options.launchOverrides?.editorMode) {
     launchAppearance.initialEditorMode = options.launchOverrides.editorMode
   }
@@ -8545,13 +8863,6 @@ async function createDocumentWindow(
         ? {
             titleBarStyle: "hidden",
             titleBarOverlay: launchWindowsTitleBarOverlay!,
-            ...(nativeTranslucencyEnabled(launchAppearance)
-              ? {
-                  backgroundMaterial: windowsBackgroundMaterial(
-                    launchAppearance.backgroundEffect.blurRadius
-                  ),
-                }
-              : {}),
           }
         : {
             frame: false,
@@ -8574,9 +8885,8 @@ async function createDocumentWindow(
     title: PRODUCT_NAME,
     show: false,
     resizable: true,
-    // Windows background materials clear the WebContents backing themselves.
-    // Keep the native window opaque so WCO maximize, Snap, and resizing retain
-    // their standard system behavior.
+    // The Windows compositor target sits behind Chromium without making the
+    // HWND transparent, preserving WCO maximize, Snap, and native resizing.
     transparent: process.platform === "darwin",
     backgroundColor: windowBackgroundColor(launchAppearance),
     // Windows uses the renderer access strip for bare Alt. Keep Electron's
@@ -8601,6 +8911,24 @@ async function createDocumentWindow(
     },
   })
   const browserWindowCreatedEpochMs = launchBenchmarkEpochMs()
+  const windowsNativeWindowHandle =
+    process.platform === "win32"
+      ? Buffer.from(win.getNativeWindowHandle())
+      : null
+  const windowsNativeWindowOwnerId =
+    process.platform === "win32" ? win.id : null
+  if (windowsNativeWindowHandle && windowsNativeWindowOwnerId !== null) {
+    // `BrowserWindow.destroy()` skips Electron's `close` event. Release the
+    // target from the native destruction boundary while the HWND still has its
+    // original identity; `closed` keeps an idempotent fallback for teardown
+    // paths that do not deliver this message hook.
+    win.hookWindowMessage(WINDOWS_WM_DESTROY, () => {
+      releaseWindowsWindowBackgroundEffect(
+        windowsNativeWindowHandle,
+        windowsNativeWindowOwnerId
+      )
+    })
+  }
 
   let tabIds: TabId[]
   if (options.existingTab) {
@@ -8660,22 +8988,13 @@ async function createDocumentWindow(
 
   const initialActiveTabId =
     tabIds[Math.min(Math.max(0, options.activeIndex ?? 0), tabIds.length - 1)]!
-  const initialWindowsBackgroundEffect =
-    process.platform === "win32" && nativeTranslucencyEnabled(launchAppearance)
-      ? nativeWindowBackgroundEffect(launchAppearance)
-      : null
   const state: WindowState = {
     activeTabId: initialActiveTabId,
     allowClose: false,
     appliedBackgroundBlurAnimationActive: false,
-    appliedBackgroundEffectSignature: initialWindowsBackgroundEffect
-      ? nativeWindowBackgroundEffectSignature(initialWindowsBackgroundEffect)
-      : null,
-    appliedBackgroundBlurRadius:
-      initialWindowsBackgroundEffect?.blurRadius ?? 0,
-    appliedWindowsBackgroundMaterial: initialWindowsBackgroundEffect
-      ? windowsBackgroundMaterial(initialWindowsBackgroundEffect.blurRadius)
-      : null,
+    appliedBackgroundEffectSignature: null,
+    appliedBackgroundBlurRadius: 0,
+    appliedWindowsAlphaBootstrap: false,
     appliedWindowsTitleBarOverlaySignature: launchWindowsTitleBarOverlay
       ? windowsTitleBarOverlaySignature(launchWindowsTitleBarOverlay)
       : null,
@@ -8743,6 +9062,7 @@ async function createDocumentWindow(
     trustedRendererLocation: trustedRendererLocation(launchRendererUrl),
     visualEffectRevision: 0,
     win,
+    windowsMenuActions: new Map(),
   }
   windowStates.set(win.id, state)
   win.webContents.on("context-menu", (_event, params) => {
@@ -8944,6 +9264,15 @@ async function createDocumentWindow(
       state.recoveryInProgress ||
       state.recoverySurfaceActive
     ) {
+      if (process.platform === "win32") {
+        const appearance =
+          state.appearancePreview ??
+          (state.editorReady ? settings : state.launchSettings)
+        clearWindowsWindowBackgroundEffect(
+          state,
+          windowBackgroundColor(appearance)
+        )
+      }
       return
     }
     event.preventDefault()
@@ -8978,6 +9307,12 @@ async function createDocumentWindow(
   })
 
   win.on("closed", () => {
+    if (windowsNativeWindowHandle && windowsNativeWindowOwnerId !== null) {
+      releaseWindowsWindowBackgroundEffect(
+        windowsNativeWindowHandle,
+        windowsNativeWindowOwnerId
+      )
+    }
     retireWindowVisualEffects(state)
     releaseSettingsSessionForWindow(win.id)
     pendingExternalScratchActivations.delete(win.id)
@@ -9029,21 +9364,22 @@ async function createDocumentWindow(
     options.onCreated?.(win, state)
     // The launch surface is now settled: either the themed native backing is
     // still present or eager translucency is installed. Show it while Chromium
-    // loads instead of blocking bootstrap IPC on a synchronous native show
-    // after the load event. Yield once so the custom protocol can begin serving
-    // the navigation before macOS presents it.
+    // loads; yield once so the custom protocol can begin serving navigation.
+    const showWindow = () => {
+      if (!win.isDestroyed()) {
+        if (state.launchVisualBenchmark) {
+          state.launchVisualBenchmark.showRequestedEpochMs =
+            launchBenchmarkEpochMs()
+        }
+        win.show()
+      }
+    }
     const windowShow =
       options.showAfterLoad === false
         ? null
         : new Promise<void>((resolve) => {
             setImmediate(() => {
-              if (!win.isDestroyed()) {
-                if (state.launchVisualBenchmark) {
-                  state.launchVisualBenchmark.showRequestedEpochMs =
-                    launchBenchmarkEpochMs()
-                }
-                win.show()
-              }
+              showWindow()
               resolve()
             })
           })
@@ -11765,80 +12101,31 @@ function registerIpc(): void {
   )
 
   ipcMain.handle(
-    ipcChannels.popupWindowsMenu,
-    async (event, rawMenu: unknown, rawAnchor: unknown): Promise<void> => {
-      const { state, win } = stateForSender(event)
+    ipcChannels.getWindowsMenuSnapshot,
+    (event): WindowsMenuSnapshot => {
+      const { state } = stateForSender(event)
       if (process.platform !== "win32") {
         throw new Error("The renderer application menu is Windows-only")
       }
-      if (!WINDOWS_MENU_IDS.includes(rawMenu as WindowsMenuId)) {
-        throw new TypeError("Invalid Windows application menu")
-      }
-      if (typeof rawAnchor !== "object" || rawAnchor === null) {
-        throw new TypeError("Invalid Windows application menu anchor")
-      }
-      const anchor = rawAnchor as Partial<WindowsMenuPopupAnchor>
-      const anchorX = anchor.x
-      const anchorY = anchor.y
-      const [contentWidth, contentHeight] = win.getContentSize()
-      const topChromeHeight = Math.round(
-        TOP_CHROME_HEIGHT * win.webContents.getZoomFactor()
-      )
-      if (
-        typeof anchorX !== "number" ||
-        typeof anchorY !== "number" ||
-        !Number.isInteger(anchorX) ||
-        !Number.isInteger(anchorY) ||
-        anchorX < 0 ||
-        anchorY < 0 ||
-        anchorX > contentWidth ||
-        anchorY > Math.min(contentHeight, topChromeHeight + 2)
-      ) {
-        throw new TypeError("Invalid Windows application menu anchor")
-      }
-      if (activeWindowsMenuPopups.has(win.id)) return
+      return windowsMenuSnapshot(state)
+    }
+  )
 
-      updateViewMenuItems(state)
-      const topLevelItem = Menu.getApplicationMenu()?.items.find(
-        (item) => item.label === WINDOWS_MENU_LABELS[rawMenu as WindowsMenuId]
-      )
+  ipcMain.handle(
+    ipcChannels.activateWindowsMenuItem,
+    (event, rawActionToken: unknown): void => {
+      const { state } = stateForSender(event)
+      if (process.platform !== "win32") {
+        throw new Error("The renderer application menu is Windows-only")
+      }
       if (
-        !topLevelItem?.submenu ||
-        !topLevelItem.enabled ||
-        !topLevelItem.visible
+        typeof rawActionToken !== "string" ||
+        rawActionToken.length < 1 ||
+        rawActionToken.length > 128
       ) {
-        return
+        throw new TypeError("Invalid Windows menu action")
       }
-      const submenu = topLevelItem.submenu
-
-      activeWindowsMenuPopups.add(win.id)
-      try {
-        await new Promise<void>((resolve, reject) => {
-          let settled = false
-          const finish = () => {
-            if (settled) return
-            settled = true
-            win.removeListener("closed", finish)
-            resolve()
-          }
-          win.once("closed", finish)
-          try {
-            submenu.popup({
-              window: win,
-              ...(event.senderFrame ? { frame: event.senderFrame } : {}),
-              x: anchorX,
-              y: anchorY,
-              sourceType: "keyboard",
-              callback: finish,
-            })
-          } catch (error) {
-            win.removeListener("closed", finish)
-            reject(error)
-          }
-        })
-      } finally {
-        activeWindowsMenuPopups.delete(win.id)
-      }
+      activateWindowsMenuItem(state, rawActionToken)
     }
   )
 
@@ -11982,7 +12269,7 @@ function registerIpc(): void {
         ownerState.recoverySurfaceActive ||
         ownerState.recoveryInProgress
       ) {
-        settingsSessionOwnerWindowId = null
+        releaseSettingsSessionForWindow(settingsSessionOwnerWindowId)
       } else if (ownerState.win.id !== win.id) {
         if (ownerState.win.isMinimized()) ownerState.win.restore()
         ownerState.win.show()
@@ -12322,12 +12609,18 @@ function registerIpc(): void {
   registerOneWayIpcHandler(
     ipcChannels.previewAppearance,
     (event, rawAppearance: unknown): void => {
-      const { state } = stateForSender(event)
+      const { state, win } = stateForSender(event)
+      if (settingsSessionOwnerWindowId !== win.id) return
       state.appearancePreview =
         rawAppearance === null
           ? null
           : normalizeAppearanceSettings(rawAppearance)
-      applyWindowVisualEffect(state, state.appearancePreview ?? settings)
+      const appearance = state.appearancePreview ?? settings
+      // On Windows, nativeTheme controls both Electron chrome and Chromium's
+      // prefers-color-scheme result. Let a live System draft release any
+      // explicit source immediately; session teardown restores the commit.
+      applyWindowsNativeThemeSource(appearance)
+      applyWindowVisualEffect(state, appearance)
     }
   )
 

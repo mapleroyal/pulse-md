@@ -62,7 +62,6 @@ interface FormattingToolbarProps {
   className?: string
   hoverLatched: boolean
   position: FormattingBarPosition
-  responsiveControlsInset: number
   fallbackWheelScrollerRef: React.RefObject<HTMLDivElement | null>
   visible: boolean
   wheelScrollDirection: TabWheelScrollDirection
@@ -114,7 +113,6 @@ function FormattingToolbarContent({
   fallbackWheelScrollerRef,
   hoverLatched,
   position,
-  responsiveControlsInset,
   visible,
   wheelScrollDirection,
   onHoverLatchedChange,
@@ -305,11 +303,6 @@ function FormattingToolbarContent({
         )}
         data-visible={visible || undefined}
         inert={!visible || undefined}
-        style={
-          responsiveControlsInset > 0
-            ? { right: `${responsiveControlsInset}px` }
-            : undefined
-        }
         onPointerEnter={() => onHoverLatchedChange(true)}
         onTransitionEnd={onTransitionEnd}
       >
@@ -335,11 +328,6 @@ function FormattingToolbarContent({
             className="flex h-full w-max min-w-full items-center gap-0.5 px-2 data-[position=center]:justify-center data-[position=right]:justify-end"
             data-position={position}
             role="toolbar"
-            style={
-              responsiveControlsInset > 0
-                ? { justifyContent: "flex-start" }
-                : undefined
-            }
             onFocusCapture={retainToolbarFocusItem}
             onKeyDown={moveToolbarFocus}
           >

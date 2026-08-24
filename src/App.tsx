@@ -35,6 +35,7 @@ import {
   type SearchUiState,
 } from "@/app/search-handoff"
 import { prepareSearchOverlay } from "@/app/search-overlay-loader"
+import { topControlGroupWidth } from "@/app/top-control-layout"
 import type { StatusOverlayHandle } from "@/app/StatusOverlay"
 import type { TabFocusPolicy } from "@/app/TopChrome"
 import { useTheme } from "@/components/theme-provider"
@@ -345,13 +346,11 @@ function loadFormattingToolbar() {
 function FormattingToolbarFallback({
   error,
   position,
-  responsiveControlsInset,
   visible,
   onRetry,
 }: {
   error?: boolean
   position: AppSettings["chrome"]["formattingBarPosition"]
-  responsiveControlsInset: number
   visible: boolean
   onRetry?: () => void
 }) {
@@ -360,11 +359,6 @@ function FormattingToolbarFallback({
     <div
       className="formatting-toolbar fixed top-[calc(var(--window-chrome-height)-var(--formatting-toolbar-overlap))] right-0 left-0 z-[41] h-[var(--formatting-toolbar-height)] overflow-hidden bg-transparent text-[var(--document-foreground)]"
       data-visible=""
-      style={
-        responsiveControlsInset > 0
-          ? { right: `${responsiveControlsInset}px` }
-          : undefined
-      }
     >
       <div className="formatting-toolbar-scroll relative z-[1] h-full overflow-hidden">
         <div
@@ -372,11 +366,6 @@ function FormattingToolbarFallback({
           className="flex h-full min-w-full items-center gap-2 px-3 data-[position=center]:justify-center data-[position=right]:justify-end"
           data-position={position}
           role={error ? "alert" : "status"}
-          style={
-            responsiveControlsInset > 0
-              ? { justifyContent: "flex-start" }
-              : undefined
-          }
         >
           <span className="rounded-lg bg-popover/90 px-2.5 py-1 text-xs text-muted-foreground shadow-sm ring-1 ring-border/60">
             {error
@@ -408,7 +397,6 @@ function DeferredFormattingToolbar(props: FormattingToolbarProps) {
     <FormattingToolbarFallback
       error={failed}
       position={props.position}
-      responsiveControlsInset={props.responsiveControlsInset}
       visible={props.visible}
       onRetry={retryAction}
     />
@@ -1328,7 +1316,6 @@ export function App() {
   const [searchOpen, setSearchOpen] = React.useState(false)
   const [activeEditorMode, setActiveEditorMode] =
     React.useState<MarkdownEditorMode>("live")
-  const [editorFocused, setEditorFocused] = React.useState(false)
   const [outlineOpen, setOutlineOpen] = React.useState(false)
   const [outlineHeadings, setOutlineHeadings] = React.useState<
     readonly MarkdownHeading[]
@@ -1374,11 +1361,15 @@ export function App() {
   const [tabDragSink, setTabDragSink] = React.useState(false)
   const [topChromeHoverLatched, setTopChromeHoverLatched] =
     React.useState(false)
-  const [responsiveControlsDrawerLayout, setResponsiveControlsDrawerLayout] =
-    React.useState({ inset: 0, visible: false })
   const [tabDragShelfHoverContext, setTabDragShelfHoverContext] =
     React.useState<object | null>(null)
   const [topDrawerCompensated, setTopDrawerCompensated] = React.useState(false)
+  const [windowsControlDrawerNarrow, setWindowsControlDrawerNarrow] =
+    React.useState(() => window.matchMedia("(max-width: 520px)").matches)
+  const [topDrawerPresence, setTopDrawerPresence] = React.useState<{
+    tabId: TabId | null
+    visible: boolean
+  }>({ tabId: null, visible: false })
   const topDrawerCompensationContextRef = React.useRef({
     active: false,
     tabId: null as TabId | null,
@@ -1518,6 +1509,29 @@ export function App() {
       TOP_DRAWER_TOP_EDGE_THRESHOLD,
     []
   )
+  const subscribeTopDrawerPosition = React.useCallback(
+    (onStoreChange: () => void) => {
+      void activeTabId
+      const scrollDOM = controllerRef.current?.view.scrollDOM
+      if (!scrollDOM) return () => undefined
+      scrollDOM.addEventListener("scroll", onStoreChange, { passive: true })
+      return () => scrollDOM.removeEventListener("scroll", onStoreChange)
+    },
+    [activeTabId]
+  )
+  const topDrawerAtTopEdge = React.useSyncExternalStore(
+    subscribeTopDrawerPosition,
+    shouldCompensateTopDrawer,
+    () => false
+  )
+
+  React.useEffect(() => {
+    const query = window.matchMedia("(max-width: 520px)")
+    const update = () => setWindowsControlDrawerNarrow(query.matches)
+    update()
+    query.addEventListener("change", update)
+    return () => query.removeEventListener("change", update)
+  }, [])
 
   React.useEffect(() => {
     if (!platform || !activeTabId) return
@@ -1737,9 +1751,6 @@ export function App() {
     const activeId = activeTabIdRef.current
     const tab = activeId ? tabsRef.current.get(activeId) : undefined
     const nextEditorFocused = controller.view.hasFocus
-    setEditorFocused((current) =>
-      current === nextEditorFocused ? current : nextEditorFocused
-    )
     const queryCommandEnabled = (command: "redo" | "undo") => {
       try {
         return document.queryCommandEnabled(command)
@@ -6968,10 +6979,64 @@ export function App() {
     activeTabId &&
     formattingBarEnabled
   )
+  const windowsControlDrawerMetrics = React.useMemo(() => {
+    if (platform !== "win32" || settingsWorkspacePreviewOpen || !activeTabId) {
+      return null
+    }
+
+    const showNavigation =
+      appSettings.chrome.topRightControls.navigation &&
+      (navigationAvailability.back || navigationAvailability.forward)
+    const navigationButtonCount = showNavigation ? 2 : 0
+    const showViewMode =
+      markdownControlsEnabled && appSettings.chrome.topRightControls.viewMode
+    const showFind = appSettings.chrome.topRightControls.find
+    const showOutline =
+      markdownControlsEnabled && appSettings.chrome.topRightControls.outline
+    const showFormattingToolbar =
+      markdownControlsEnabled &&
+      appSettings.chrome.topRightControls.formattingToolbar
+    const showSettings = appSettings.chrome.topRightControls.settings
+    const documentActionCount =
+      Number(showViewMode) +
+      Number(showFind) +
+      Number(showOutline) +
+      Number(showFormattingToolbar)
+    const wideActionCount = documentActionCount + Number(showSettings)
+    const wideWidth = topControlGroupWidth(
+      navigationButtonCount + wideActionCount,
+      navigationButtonCount > 0 && wideActionCount > 0
+    )
+    const compactWidth = topControlGroupWidth(
+      Number(showNavigation || documentActionCount > 0) + Number(showSettings),
+      false
+    )
+    return wideWidth > 0 || compactWidth > 0
+      ? { compactWidth, wideWidth }
+      : null
+  }, [
+    activeTabId,
+    appSettings.chrome.topRightControls,
+    markdownControlsEnabled,
+    navigationAvailability.back,
+    navigationAvailability.forward,
+    platform,
+    settingsWorkspacePreviewOpen,
+  ])
+  const windowsControlDrawerVisible = Boolean(
+    windowsControlDrawerMetrics && windowsControlDrawerNarrow
+  )
   const topDrawerVisible =
     formattingDrawerVisible ||
     tabDragShelfVisible ||
-    responsiveControlsDrawerLayout.visible
+    windowsControlDrawerVisible
+  if (
+    topDrawerPresence.tabId !== activeTabId ||
+    topDrawerPresence.visible !== topDrawerVisible
+  ) {
+    setTopDrawerPresence({ tabId: activeTabId, visible: topDrawerVisible })
+    setTopDrawerCompensated(topDrawerVisible && topDrawerAtTopEdge)
+  }
   const topDrawerCompensationActive = topDrawerVisible && topDrawerCompensated
 
   React.useLayoutEffect(() => {
@@ -7091,27 +7156,12 @@ export function App() {
       setTopChromeHoverLatched(latched)
       if (!latched) {
         setTabDragShelfHoverContext(null)
-        if (!formattingBarEnabled) {
+        if (!formattingBarEnabled && !windowsControlDrawerVisible) {
           setTopDrawerCompensated(false)
         }
       }
     },
-    [formattingBarEnabled]
-  )
-  const handleResponsiveControlsDrawerLayoutChange = React.useCallback(
-    (layout: { inset: number; visible: boolean }) => {
-      setResponsiveControlsDrawerLayout((current) =>
-        current.inset === layout.inset && current.visible === layout.visible
-          ? current
-          : layout
-      )
-      if (layout.visible) {
-        if (shouldCompensateTopDrawer()) setTopDrawerCompensated(true)
-      } else if (!formattingBarEnabled && !tabDragShelfVisible) {
-        setTopDrawerCompensated(false)
-      }
-    },
-    [formattingBarEnabled, shouldCompensateTopDrawer, tabDragShelfVisible]
+    [formattingBarEnabled, windowsControlDrawerVisible]
   )
   const handleTabDragShelfVisibleChange = React.useCallback(
     (visible: boolean) => {
@@ -7140,13 +7190,26 @@ export function App() {
     <main
       ref={appShellRef}
       className="app-shell"
+      data-platform={platform ?? undefined}
+      data-windows-controls-drawer={
+        windowsControlDrawerMetrics ? true : undefined
+      }
       data-top-drawer-compensated={topDrawerCompensationActive || undefined}
       data-typography-preview={typographyPreview ? true : undefined}
       data-formatting-bar={formattingDrawerVisible || undefined}
-      data-responsive-controls-drawer={
-        responsiveControlsDrawerLayout.visible || undefined
-      }
       data-tab-drag-shelf={tabDragShelfVisible || undefined}
+      style={
+        windowsControlDrawerMetrics
+          ? ({
+              "--windows-compact-control-drawer-reserved-width": `${
+                windowsControlDrawerMetrics.compactWidth + 16
+              }px`,
+              "--windows-control-drawer-reserved-width": `${
+                windowsControlDrawerMetrics.wideWidth + 16
+              }px`,
+            } as React.CSSProperties)
+          : undefined
+      }
     >
       <div
         ref={launchTintCoverRef}
@@ -7173,7 +7236,6 @@ export function App() {
           canNavigateForward={navigationAvailability.forward}
           chrome={appSettings.chrome}
           dragShelfVisible={tabDragShelfVisible}
-          editorFocused={editorFocused}
           editorMode={activeEditorMode}
           editorPanelId={DOCUMENT_EDITOR_PANEL_ID}
           hoverLatched={topChromeHoverLatched}
@@ -7207,15 +7269,9 @@ export function App() {
           onNavigateForward={() => navigateDocumentHistory("forward")}
           onEditScratch={editScratchFromTab}
           onOpenOutline={openOutline}
-          onResponsiveControlsDrawerLayoutChange={
-            handleResponsiveControlsDrawerLayoutChange
-          }
           onOpenSettings={openSettings}
           outlineAnchorRef={outlineAnchorRef}
           outlineOpen={outlineOpen}
-          responsiveControlsDrawerVisible={
-            responsiveControlsDrawerLayout.visible
-          }
           renderOutlinePopover={
             outlineOpen
               ? (trigger) => (
@@ -7258,7 +7314,6 @@ export function App() {
           fallbackWheelScrollerRef={topChromeTabScrollerRef}
           hoverLatched={topChromeHoverLatched}
           position={appSettings.chrome.formattingBarPosition}
-          responsiveControlsInset={responsiveControlsDrawerLayout.inset}
           visible={formattingBarEnabled}
           wheelScrollDirection={appSettings.chrome.tabWheelScrollDirection}
           onHoverLatchedChange={setTopChromeHoverLatched}

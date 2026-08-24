@@ -3343,6 +3343,7 @@ test("revealing top controls keeps a covered active tab against their adjacent e
         ? WINDOWS_CAPTION_CONTROLS_WIDTH + TOP_CHROME_CONTENT_GAP
         : TOP_CHROME_CONTENT_GAP
     await activeTab.getByRole("tab").click()
+    await page.locator(".cm-content").focus()
     await page.mouse.move(450, 160)
     await expect
       .poll(() =>
@@ -3362,10 +3363,8 @@ test("revealing top controls keeps a covered active tab against their adjacent e
       element.scrollLeft += activeBounds.right - (stripBounds.right - 24)
       const positionedActiveBounds = active.getBoundingClientRect()
       return {
-        activeLeft: positionedActiveBounds.left,
         activeRight: positionedActiveBounds.right,
         scrollLeft: element.scrollLeft,
-        stripLeft: stripBounds.left,
         stripRight: stripBounds.right,
       }
     })
@@ -3388,13 +3387,11 @@ test("revealing top controls keeps a covered active tab against their adjacent e
         const controlsBounds = controls.getBoundingClientRect()
         const activeBounds = active.getBoundingClientRect()
         return {
-          activeLeft: activeBounds.left,
           activeRight: activeBounds.right,
           aligned:
             Math.abs(stripBounds.right - (controlsBounds.left - 8)) <= 0.5 &&
             Math.abs(activeBounds.right - stripBounds.right) <= 0.5,
           scrollLeft: element.scrollLeft,
-          stripLeft: stripBounds.left,
           stripRight: stripBounds.right,
         }
       })
@@ -3433,10 +3430,8 @@ test("revealing top controls keeps a covered active tab against their adjacent e
       const activeBounds = active.getBoundingClientRect()
       element.scrollLeft += activeBounds.right - (stripBounds.right - 24)
       return {
-        activeLeft: active.getBoundingClientRect().left,
         activeRight: active.getBoundingClientRect().right,
         scrollLeft: element.scrollLeft,
-        stripLeft: stripBounds.left,
         stripRight: stripBounds.right,
       }
     })
