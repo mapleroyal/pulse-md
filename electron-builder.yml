@@ -34,6 +34,15 @@ mac:
     - Contents/Resources/bin/pmd
   fileAssociations:
     - ext:
+        - md
+        - markdown
+        - mdown
+        - mkd
+      description: Markdown document
+      mimeType: text/markdown
+      name: PulseMD.Markdown
+      role: Editor
+    - ext:
         - txt
         - text
         - log
@@ -124,6 +133,16 @@ win:
     - target: nsis
       arch:
         - x64
+  fileAssociations:
+    - ext:
+        - md
+        - markdown
+        - mdown
+        - mkd
+      description: Markdown document
+      mimeType: text/markdown
+      name: PulseMD.Markdown
+      role: Editor
   artifactName: ${productName}-${version}-${arch}.${ext}
 nsis:
   # electron-builder only installs NSIS file associations machine-wide.
@@ -132,7 +151,7 @@ nsis:
   perMachine: true
   include: build/installer.nsh
 linux:
-  category: Utility
+  category: Utility;TextEditor
   executableName: pulse-md
   icon: build/icons/linux
   maintainer: Pulse MD Project
@@ -149,19 +168,18 @@ linux:
   desktop:
     entry:
       Name: Pulse MD
-      StartupWMClass: pulse-md
+      StartupWMClass: io.github.mapleroyal.pulse-md
+  fileAssociations:
+    # electron-builder 26's FPM path emits array extensions as one invalid
+    # comma-delimited glob. shared-mime-info already owns the usual Markdown
+    # extensions on Linux, so only add its missing mdown alias here.
+    - ext: mdown
+      description: Markdown document
+      mimeType: text/markdown
+      name: PulseMD.Markdown
+      role: Editor
 deb:
   packageName: pulse-md
-fileAssociations:
-  - ext:
-      - md
-      - markdown
-      - mdown
-      - mkd
-    description: Markdown document
-    mimeType: text/markdown
-    name: PulseMD.Markdown
-    role: Editor
 npmRebuild: false
 compression: maximum
 electronLanguages:

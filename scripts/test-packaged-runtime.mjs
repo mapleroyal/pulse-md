@@ -674,6 +674,7 @@ async function endpointIsLive(endpoint) {
       clearTimeout(timeout)
       socket.destroy()
       if (
+        error.code === "ECONNRESET" ||
         error.code === "ECONNREFUSED" ||
         error.code === "ENOENT" ||
         error.code === "ENXIO"

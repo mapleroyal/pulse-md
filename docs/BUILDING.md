@@ -13,8 +13,14 @@ supported), then install the native prerequisites for the host:
   `node -p process.arch` prints `x64`; Windows ARM packages are not part of the
   current development baseline. If a Restricted PowerShell policy blocks
   `npm.ps1`, use `npm.cmd` for every documented `npm` command.
-- **Linux:** a C compiler available as `cc` (`build-essential` or the
-  distribution equivalent).
+- **Linux:** a C compiler available as `cc` plus `xdg-mime`, `xdg-settings`,
+  `desktop-file-validate`, `update-desktop-database`, `update-mime-database`,
+  `gtk-update-icon-cache`, `xmllint`, GNU `tar` with Zstandard support, and
+  `bsdtar` from the distribution's ordinary build and desktop-integration
+  packages. Native Arch packaging additionally requires `makepkg` and `pacman`.
+  On Arch and Omarchy, `libxcrypt-compat` is required only by the
+  electron-builder FPM runtime used to build the Debian-family `.deb`; the
+  native Arch package and `npm run install:local` bypass FPM and do not use it.
 
 ## Source and community build
 
@@ -29,10 +35,33 @@ npm run package
 
 The command selects the host platform and writes installable artifacts to
 `release/`: DMG and ZIP on macOS, an NSIS installer on Windows, and AppImage
-and Debian packages on Linux. It neither uploads anything nor requires signing
-or storefront credentials. Before promoting the artifacts, it exercises the
-unpacked package's metadata, fuses, bundled resources, CLI, and a focused
-packaged Electron workflow.
+and Debian packages on Linux. The AppImage is the portable,
+cross-distribution download; the `.deb` is only for Debian-family systems.
+On Linux, use a narrower command when only one format is needed:
+
+```sh
+npm run package:linux            # AppImage plus DEB
+npm run package:linux:appimage   # AppImage only
+npm run package:linux:deb        # Debian-family package only
+npm run package:linux:arch       # Native Arch package only
+```
+
+The Arch command packages the prepared runtime with the checked-in `PKGBUILD`
+template and `makepkg`, verifies its metadata and complete payload, and writes a
+conventional `.pkg.tar.zst` artifact to `release/`. It deliberately bypasses
+electron-builder's FPM-backed `pacman` target so the dependencies, installed
+paths, launcher, `pmd` command, and package metadata remain explicit and
+auditable. RPM and Flatpak packaging remain future work.
+
+These commands neither upload anything nor require signing or storefront
+credentials. Before promoting their artifacts, they exercise the unpacked
+package's metadata, fuses, bundled resources, CLI, and a focused packaged
+Electron workflow.
+
+Linux packages install the Pulse MD application icon and register the app as a
+Markdown handler. They deliberately do not replace the shared `text/markdown`
+document artwork; the active desktop icon theme owns that common file-type
+icon.
 
 Every packaged build uses the same **Pulse MD** product identity, `pmd` helper,
 user data, single-instance endpoint, file associations, and `pulse-md` scratch
@@ -51,8 +80,11 @@ identity can compete for launch, link, file-association, and CLI requests:
   unpacked ZIP; retaining the DMG or ZIP itself is safe.
 - On Windows, upgrade by running the new all-users NSIS installer rather than
   choosing another install location.
-- On Linux, choose one installed Debian package or one AppImage at a stable
-  path and replace the old copy when rebuilding.
+- On Arch and its derivatives, prefer one native `pulse-md` package tracked by
+  `pacman`. On other Linux systems, use the stable user-local runtime at
+  `~/.local/lib/pulse-md`, one independently installed Debian package, or one
+  AppImage at a stable path. Replace the old copy rather than retaining
+  multiple runnable packages.
 
 For ordinary project delivery, use the same-OS installed verification wrapper:
 
@@ -64,12 +96,20 @@ On macOS it compiles the adaptive icon, builds the canonical package, replaces
 `/Applications/Pulse MD.app`, cleans stale canonical registrations and managed
 runnable copies, and verifies the installed app. On Windows it builds and runs
 the all-users NSIS installer so normal file associations are installed. On
-Linux it builds the Debian package and prints the exact package-manager command
-for the user to review and run; it does not invoke `sudo` itself. Windows and
-Linux must be verified on their respective operating systems.
+Arch and Omarchy it builds the native `.pkg.tar.zst`, installs it through
+`pacman`, verifies package ownership plus the installed runtime and CLI, and
+removes only validated files from the superseded user-local Linux layout. A
+terminal invocation uses `sudo`; a noninteractive graphical invocation may use
+the desktop authorization prompt. On other Linux systems the command retains
+the user-local lane: it transactionally replaces `~/.local/lib/pulse-md`,
+installs `pmd` in `~/.local/bin`, and registers desktop integration under the
+user's XDG directories without privilege. Windows and Linux must be verified on
+their respective operating systems.
 
-Every packaged build provides the CLI as `pmd`. On macOS and Linux, use
-**Install Command Line Tool…** in Pulse MD; the Windows installer adds its
+Every packaged build provides the CLI as `pmd`. The native Arch package owns
+`/usr/bin/pmd`, and `install:local` installs it automatically on Linux.
+Independently installed AppImages, Debian packages, and macOS builds provide
+**Install Command Line Tool…** in Pulse MD. The Windows installer adds its
 command to the machine-wide `PATH`. Open a new terminal if needed, then verify
 it:
 
@@ -145,9 +185,12 @@ npm run build:linux
 - `build:win` requires `WIN_CSC_LINK` (or `CSC_LINK`), signs all shipped native
   executables and the NSIS installer, and rejects missing, invalid, or
   untimestamped signatures.
-- `build:linux` produces AppImage and Debian artifacts. Build on an
-  intentionally chosen baseline and test every distribution and architecture
-  you intend to claim.
+- `build:linux` produces AppImage and Debian artifacts. The native Arch
+  source/community artifact is produced separately with
+  `npm run package:linux:arch`, using `PKGBUILD` and `makepkg` so the installed
+  package is tracked by `pacman`. Build on an intentionally chosen baseline and
+  test every distribution and architecture you intend to claim. No current
+  command produces RPM or Flatpak artifacts.
 
 Each successful direct-distribution build verifies the contents of its
 distributable artifacts, removes duplicate staging candidates, and retains only

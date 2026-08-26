@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; script-src 'self' 'sha256-TgM7MbuGoA7Ez9fL6IFELzdPK93cDt1Lk2fL4QiAqLA='; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' pulse-md-image: http: https: data: blob:; connect-src 'self'"
+      content="default-src 'self'; script-src 'self' 'sha256-PHdzcHzlDXp8b7r356GBUlO3th/vq7fozJqowb8/Io8='; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' pulse-md-image: http: https: data: blob:; connect-src 'self'"
     />
     <meta name="color-scheme" content="light dark" />
     <title>Pulse MD</title>
@@ -46,7 +46,8 @@
             : 0
         const translucentBackground =
           (backgroundCapability === "darwin" ||
-            backgroundCapability === "win32") &&
+            backgroundCapability === "win32" ||
+            backgroundCapability === "linux") &&
           parameters.get("backgroundEffectEnabled") === "true" &&
           backgroundTranslucency > 0
         const requestedLaunchTransitionDuration = Number(
@@ -65,7 +66,9 @@
           .padStart(2, "0")
         const finalSurfaceBackground = `${background}${finalSurfaceAlpha}`
         const finalWindowBackground = translucentBackground
-          ? `${background}00`
+          ? backgroundCapability === "linux"
+            ? finalSurfaceBackground
+            : `${background}00`
           : background
         const windowBackground = launchTransitionPending
           ? background

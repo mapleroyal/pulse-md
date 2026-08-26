@@ -4,6 +4,7 @@ import type { DevelopmentCheckoutIdentity } from "../scripts/development-checkou
 export const PRODUCT_NAME = "Pulse MD"
 export const DEVELOPMENT_PRODUCT_NAME = "Pulse MD Development"
 export const WINDOWS_APP_USER_MODEL_ID = "io.github.mapleroyal.pulse-md"
+export const LINUX_DESKTOP_NAME = "io.github.mapleroyal.pulse-md.desktop"
 
 export const USER_DATA_DIRECTORY_NAME = PRODUCT_NAME
 
@@ -18,6 +19,7 @@ export interface DistributionIdentity {
   cliIdentity: CliIdentity
   isDevelopment: boolean
   isCanonicalPackage: boolean
+  linuxDesktopName: string
   productName: string
   scratchLinkScheme: ScratchLinkScheme
   userDataDirectoryName: string
@@ -29,6 +31,7 @@ const PACKAGED_IDENTITY: DistributionIdentity = {
   cliIdentity: "pulse-md",
   isDevelopment: false,
   isCanonicalPackage: true,
+  linuxDesktopName: LINUX_DESKTOP_NAME,
   productName: PRODUCT_NAME,
   scratchLinkScheme: "pulse-md",
   userDataDirectoryName: USER_DATA_DIRECTORY_NAME,
@@ -56,6 +59,7 @@ export function resolveDistributionIdentity(
       cliIdentity: developmentCheckout.cliIdentity,
       isDevelopment: true,
       isCanonicalPackage: false,
+      linuxDesktopName: `io.github.mapleroyal.pulse-md-development-${developmentCheckout.checkoutHash}.desktop`,
       productName: DEVELOPMENT_PRODUCT_NAME,
       scratchLinkScheme: "pulse-md-development",
       userDataDirectoryName: developmentCheckout.userDataDirectoryName,

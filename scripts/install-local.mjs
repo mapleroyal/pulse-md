@@ -1,19 +1,25 @@
 import { spawnSync } from "node:child_process"
 import { createHash, randomUUID } from "node:crypto"
 import {
+  chmodSync,
   copyFileSync,
+  cpSync,
   lstatSync,
   mkdirSync,
   mkdtempSync,
+  readlinkSync,
   readFileSync,
   readdirSync,
   realpathSync,
   renameSync,
   rmSync,
+  symlinkSync,
+  writeFileSync,
 } from "node:fs"
 import { createRequire } from "node:module"
 import os from "node:os"
 import path from "node:path"
+import { pathToFileURL } from "node:url"
 
 import {
   parseWindowsInstallInventory,
@@ -28,6 +34,13 @@ import {
   windowsPathInventoryInvocation,
   windowsShellInventoryInvocation,
 } from "./windows-installer-launch.mjs"
+import {
+  archIconSizes,
+  archPackageIconPath,
+  archPackageLayout,
+  archPackageVersion,
+  packageArchRuntime,
+} from "./package-arch.mjs"
 
 const projectRoot = path.resolve(import.meta.dirname, "..")
 const packageMetadata = JSON.parse(
@@ -35,10 +48,12 @@ const packageMetadata = JSON.parse(
 )
 const macInstalledApp = "/Applications/Pulse MD.app"
 const bundleIdentifier = "io.github.mapleroyal.pulse-md"
+const linuxDesktopName = `${bundleIdentifier}.desktop`
+const linuxIconSizes = [16, 24, 32, 48, 64, 96, 128, 256, 512]
 const productName = "Pulse MD"
 const releaseDirectory = path.join(projectRoot, "release")
 const require = createRequire(import.meta.url)
-const { extractFile } = require("@electron/asar")
+const { extractFile, uncache } = require("@electron/asar")
 
 function failure(label, result) {
   const detail = result.error?.message || result.stderr || result.stdout
@@ -89,6 +104,36 @@ function builderInvocation(args) {
       ...args,
     ],
   ]
+}
+
+export function isArchLinuxRelease(osRelease) {
+  const values = new Map()
+  for (const line of String(osRelease).split(/\r?\n/)) {
+    const match = /^([A-Z_]+)=(.*)$/.exec(line)
+    if (!match) continue
+    let value = match[2].trim()
+    if (
+      value.length >= 2 &&
+      ((value.startsWith('"') && value.endsWith('"')) ||
+        (value.startsWith("'") && value.endsWith("'")))
+    ) {
+      value = value.slice(1, -1)
+    }
+    values.set(match[1], value)
+  }
+  return [values.get("ID"), ...(values.get("ID_LIKE") || "").split(/\s+/)]
+    .filter(Boolean)
+    .includes("arch")
+}
+
+function isArchLinuxHost() {
+  if (process.platform !== "linux") return false
+  try {
+    return isArchLinuxRelease(readFileSync("/etc/os-release", "utf8"))
+  } catch (error) {
+    if (error?.code === "ENOENT") return false
+    throw error
+  }
 }
 
 function pathStat(target) {
@@ -244,10 +289,10 @@ async function waitForPulseMdToStop() {
   assertPulseMdIsNotRunning()
 }
 
-function verifyPackagedRuntime(packagedRoot) {
+function verifyPackagedRuntime(packagedRoot, environment = {}) {
   const [npm, args] = npmInvocation(["run", "test:packaged"])
   runVisible(npm, args, {
-    env: { ...process.env, PMD_PACKAGED_ROOT: packagedRoot },
+    env: { ...process.env, ...environment, PMD_PACKAGED_ROOT: packagedRoot },
     label: `packaged verification for ${packagedRoot}`,
   })
 }
@@ -581,7 +626,9 @@ function buildPackageTo(outputDirectory) {
   }
   const [builder, builderArgs] = builderInvocation([
     platformArgument,
-    ...(process.platform === "darwin" ? ["dir"] : []),
+    ...(process.platform === "darwin" || process.platform === "linux"
+      ? ["dir"]
+      : []),
     "--config",
     "electron-builder.local.cjs",
     `--config.directories.output=${outputDirectory}`,
@@ -772,35 +819,1106 @@ function windowsPackagedRuntimeRoot(outputDirectory) {
   return roots[0]
 }
 
-function promoteFileAtomically(source, target) {
-  const parent = path.dirname(target)
-  requireRegularDirectory(parent, "artifact output directory")
-  const token = `${process.pid}-${randomUUID()}`
-  const incoming = path.join(parent, `.install-incoming-${token}`)
-  const previous = path.join(parent, `.install-previous-${token}`)
-  const existing = pathStat(target)
-  if (existing && (!existing.isFile() || existing.isSymbolicLink())) {
-    throw new Error(`Refusing unexpected artifact target: ${target}`)
+function absoluteXdgDirectory(configured, fallback, description) {
+  const target = configured || fallback
+  if (!path.isAbsolute(target)) {
+    throw new Error(`${description} must be an absolute path: ${target}`)
   }
-  if (pathStat(incoming) || pathStat(previous)) {
-    throw new Error("An artifact staging path already exists")
+  return path.normalize(target)
+}
+
+export function linuxInstallLayout({
+  configHome,
+  dataHome,
+  homeDirectory = os.homedir(),
+} = {}) {
+  if (!path.isAbsolute(homeDirectory)) {
+    throw new Error(`Home directory must be an absolute path: ${homeDirectory}`)
   }
-  let movedPrevious = false
-  let installedIncoming = false
+  const normalizedHome = path.normalize(homeDirectory)
+  const resolvedConfigHome = absoluteXdgDirectory(
+    configHome ?? process.env.XDG_CONFIG_HOME,
+    path.join(normalizedHome, ".config"),
+    "XDG_CONFIG_HOME"
+  )
+  const resolvedDataHome = absoluteXdgDirectory(
+    dataHome ?? process.env.XDG_DATA_HOME,
+    path.join(normalizedHome, ".local", "share"),
+    "XDG_DATA_HOME"
+  )
+  const installationRoot = path.join(
+    normalizedHome,
+    ".local",
+    "lib",
+    "pulse-md"
+  )
+  const iconThemeRoot = path.join(resolvedDataHome, "icons", "hicolor")
+  return {
+    applicationsDirectory: path.join(resolvedDataHome, "applications"),
+    cli: path.join(normalizedHome, ".local", "bin", "pmd"),
+    configHome: resolvedConfigHome,
+    desktop: path.join(resolvedDataHome, "applications", linuxDesktopName),
+    executable: path.join(installationRoot, "pulse-md"),
+    helper: path.join(installationRoot, "resources", "bin", "pmd"),
+    iconThemeRoot,
+    icons: new Map(
+      linuxIconSizes.map((size) => [
+        size,
+        path.join(iconThemeRoot, `${size}x${size}`, "apps", "pulse-md.png"),
+      ])
+    ),
+    installationRoot,
+    mimeApps: path.join(resolvedConfigHome, "mimeapps.list"),
+    mimePackage: path.join(
+      resolvedDataHome,
+      "mime",
+      "packages",
+      `${bundleIdentifier}.xml`
+    ),
+    mimeRoot: path.join(resolvedDataHome, "mime"),
+  }
+}
+
+export function archLinuxInstallLayout() {
+  const iconThemeRoot = "/usr/share/icons/hicolor"
+  return {
+    applicationsDirectory: "/usr/share/applications",
+    cli: archPackageLayout.cli,
+    command: archPackageLayout.guiCommand,
+    desktop: archPackageLayout.desktop,
+    executable: archPackageLayout.executable,
+    helper: archPackageLayout.helper,
+    iconThemeRoot,
+    icons: new Map(
+      archIconSizes.map((size) => [size, archPackageIconPath(size)])
+    ),
+    installationRoot: archPackageLayout.runtimeRoot,
+    license: archPackageLayout.license,
+    mimePackage: archPackageLayout.mime,
+    mimeRoot: "/usr/share/mime",
+  }
+}
+
+function quoteDesktopExecArgument(value) {
+  if (!path.isAbsolute(value) || /[\n\r\0]/.test(value)) {
+    throw new Error(`Invalid desktop executable path: ${value}`)
+  }
+  const escapedPercent = value.replaceAll("%", "%%")
+  if (/^[A-Za-z0-9_./:@+-]+$/.test(escapedPercent)) return escapedPercent
+  return `"${escapedPercent
+    .replaceAll("\\", "\\\\")
+    .replaceAll('"', '\\"')
+    .replaceAll("`", "\\`")
+    .replaceAll("$", "\\$")}"`
+}
+
+export function linuxDesktopEntry(executable) {
+  return [
+    "[Desktop Entry]",
+    "Type=Application",
+    `Name=${productName}`,
+    "GenericName=Markdown Reader and Editor",
+    `Comment=${packageMetadata.description}`,
+    `Exec=${quoteDesktopExecArgument(executable)} %U`,
+    "Icon=pulse-md",
+    "Terminal=false",
+    "StartupNotify=true",
+    `StartupWMClass=${bundleIdentifier}`,
+    "Categories=Utility;TextEditor;",
+    "Keywords=markdown;read;write;notes;text;editor;",
+    "MimeType=text/markdown;x-scheme-handler/pulse-md;",
+    "",
+  ].join("\n")
+}
+
+export function linuxMimePackage() {
+  return [
+    '<?xml version="1.0" encoding="UTF-8"?>',
+    '<mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">',
+    '  <mime-type type="text/markdown">',
+    "    <comment>Markdown document</comment>",
+    '    <glob pattern="*.mdown" weight="80"/>',
+    "  </mime-type>",
+    "</mime-info>",
+    "",
+  ].join("\n")
+}
+
+function requireExecutableFile(target, description) {
+  requireRegularFile(target, description)
+  if ((lstatSync(target).mode & 0o111) === 0) {
+    throw new Error(`${description} is not executable: ${target}`)
+  }
+}
+
+function linuxRuntimeMetadata(installationRoot) {
+  const asar = path.join(installationRoot, "resources", "app.asar")
+  requireRegularFile(asar, "Pulse MD app.asar")
+  uncache(asar)
   try {
-    copyFileSync(source, incoming)
-    if (existing) {
-      renameSync(target, previous)
-      movedPrevious = true
-    }
-    renameSync(incoming, target)
-    installedIncoming = true
-    if (movedPrevious) rmSync(previous)
+    return JSON.parse(extractFile(asar, "package.json").toString("utf8"))
   } catch (error) {
-    if (installedIncoming && pathStat(target)?.isFile()) rmSync(target)
-    if (pathStat(incoming)?.isFile()) rmSync(incoming)
-    if (movedPrevious && pathStat(previous)?.isFile() && !pathStat(target)) {
-      renameSync(previous, target)
+    throw new Error(`Invalid packaged metadata in ${asar}: ${error.message}`, {
+      cause: error,
+    })
+  } finally {
+    uncache(asar)
+  }
+}
+
+function validateLinuxRuntime(
+  installationRoot,
+  { currentVersion = true } = {}
+) {
+  requireRegularDirectory(installationRoot, "Pulse MD Linux runtime")
+  requireExecutableFile(
+    path.join(installationRoot, "pulse-md"),
+    "Pulse MD executable"
+  )
+  requireExecutableFile(
+    path.join(installationRoot, "resources", "bin", "pmd"),
+    "Pulse MD CLI helper"
+  )
+  const metadata = linuxRuntimeMetadata(installationRoot)
+  if (
+    metadata.pmdDistributionChannel !== "canonical" ||
+    metadata.name !== "pulse-md" ||
+    metadata.productName !== productName
+  ) {
+    throw new Error(`Refusing unverified Pulse MD runtime: ${installationRoot}`)
+  }
+  if (currentVersion && metadata.version !== packageMetadata.version) {
+    throw new Error(
+      `Unexpected Pulse MD version ${String(metadata.version)} at ${installationRoot}`
+    )
+  }
+}
+
+function linuxPackagedRuntimeRoot(outputDirectory) {
+  requireRegularDirectory(outputDirectory, "package build output")
+  const roots = readdirSync(outputDirectory, { withFileTypes: true })
+    .filter(
+      (entry) =>
+        !entry.isSymbolicLink() &&
+        entry.isDirectory() &&
+        /^linux.*-unpacked$/.test(entry.name)
+    )
+    .map((entry) => path.join(outputDirectory, entry.name))
+    .filter((root) => pathStat(path.join(root, "pulse-md"))?.isFile())
+  if (roots.length !== 1) {
+    throw new Error(
+      `Expected one unpacked Linux Pulse MD runtime, found ${roots.length}`
+    )
+  }
+  validateLinuxRuntime(roots[0])
+  return roots[0]
+}
+
+function ownedAppImageCliWrapper(target, helper) {
+  const stat = pathStat(target)
+  if (!stat?.isFile() || stat.isSymbolicLink() || stat.size > 64 * 1024) {
+    return false
+  }
+  const source = readFileSync(target, "utf8")
+  return (
+    source.includes(`# ${productName} pmd AppImage launcher`) &&
+    source.includes(helper)
+  )
+}
+
+function validateExistingLinuxInstall(installationRoot, cli) {
+  const asar = path.join(installationRoot, "resources", "app.asar")
+  if (pathStat(asar)) {
+    validateLinuxRuntime(installationRoot, { currentVersion: false })
+    return
+  }
+
+  requireRegularDirectory(installationRoot, "existing Linux install target")
+  const entries = readdirSync(installationRoot)
+  const appImageHelper = path.join(installationRoot, "pmd-helper")
+  if (
+    entries.length !== 1 ||
+    entries[0] !== "pmd-helper" ||
+    !ownedAppImageCliWrapper(cli, appImageHelper)
+  ) {
+    throw new Error(
+      `Refusing to replace an unverified directory: ${installationRoot}`
+    )
+  }
+  requireExecutableFile(appImageHelper, "AppImage CLI helper")
+}
+
+function validateExistingLinuxRuntimePath(installationRoot) {
+  const asar = path.join(installationRoot, "resources", "app.asar")
+  if (pathStat(asar)) {
+    validateLinuxRuntime(installationRoot, { currentVersion: false })
+    return
+  }
+  requireRegularDirectory(installationRoot, "existing Linux install target")
+  const entries = readdirSync(installationRoot)
+  const helper = path.join(installationRoot, "pmd-helper")
+  if (entries.length !== 1 || entries[0] !== "pmd-helper") {
+    throw new Error(
+      `Refusing to replace an unverified directory: ${installationRoot}`
+    )
+  }
+  requireExecutableFile(helper, "AppImage CLI helper")
+}
+
+function validateExistingLinuxCli(target, layout) {
+  const stat = pathStat(target)
+  if (!stat) return
+  if (stat.isFile() && !stat.isSymbolicLink()) {
+    if (
+      !ownedAppImageCliWrapper(
+        target,
+        path.join(layout.installationRoot, "pmd-helper")
+      )
+    ) {
+      throw new Error(`Refusing to replace an unverified command: ${target}`)
+    }
+    return
+  }
+  if (!stat.isSymbolicLink()) {
+    throw new Error(`Refusing unexpected command target: ${target}`)
+  }
+
+  const resolved = path.resolve(path.dirname(target), readlinkSync(target))
+  if (resolved === layout.helper) return
+  const binDirectory = path.dirname(resolved)
+  const resourcesDirectory = path.dirname(binDirectory)
+  if (
+    path.basename(resolved) !== "pmd" ||
+    path.basename(binDirectory) !== "bin" ||
+    path.basename(resourcesDirectory) !== "resources"
+  ) {
+    throw new Error(`Refusing to replace an unverified command link: ${target}`)
+  }
+  validateLinuxRuntime(path.dirname(resourcesDirectory), {
+    currentVersion: false,
+  })
+}
+
+function validateReplaceableFile(target, description) {
+  const stat = pathStat(target)
+  if (!stat?.isFile() || stat.isSymbolicLink()) {
+    throw new Error(`${description} is not a regular file: ${target}`)
+  }
+}
+
+function validateExactTextFile(target, expected, description) {
+  validateReplaceableFile(target, description)
+  if (readFileSync(target, "utf8") !== expected) {
+    throw new Error(`Refusing to replace a modified ${description}: ${target}`)
+  }
+}
+
+function stageLegacyLinuxRemoval(layout, transaction) {
+  const targets = []
+  if (pathStat(layout.installationRoot)) {
+    validateExistingLinuxInstall(layout.installationRoot, layout.cli)
+  }
+  const stage = (target, validateExisting) => {
+    if (transaction.stage({ target, validateExisting })) targets.push(target)
+  }
+
+  stage(layout.cli, (target) => validateExistingLinuxCli(target, layout))
+  stage(layout.desktop, (target) =>
+    validateExactTextFile(
+      target,
+      linuxDesktopEntry(layout.executable),
+      "Pulse MD desktop entry"
+    )
+  )
+  stage(layout.mimePackage, (target) =>
+    validateExactTextFile(target, linuxMimePackage(), "Pulse MD MIME package")
+  )
+  for (const [size, target] of layout.icons) {
+    const source = path.join(
+      projectRoot,
+      "build",
+      "icons",
+      "linux",
+      `${size}x${size}.png`
+    )
+    stage(target, (existing) =>
+      assertMatchingFile(source, existing, `${size}px Linux icon`)
+    )
+  }
+  stage(layout.installationRoot, validateExistingLinuxRuntimePath)
+  return targets
+}
+
+function removeManagedPath(target, expectedParent) {
+  if (!target || path.dirname(target) !== expectedParent) {
+    throw new Error(`Refusing unmanaged cleanup target: ${target}`)
+  }
+  const stat = pathStat(target)
+  if (!stat) return
+  if (stat.isDirectory() && !stat.isSymbolicLink()) {
+    rmSync(target, { recursive: true })
+  } else {
+    rmSync(target)
+  }
+}
+
+export class LinuxInstallTransaction {
+  constructor(token) {
+    this.entries = []
+    this.token = token
+    this.committed = false
+  }
+
+  stage({ create, target, validateExisting, validateIncoming }) {
+    const parent = path.dirname(target)
+    mkdirSync(parent, { mode: 0o755, recursive: true })
+    requireRegularDirectory(parent, "Linux install directory")
+    const extension = path.extname(target)
+    const stem = path.basename(target, extension)
+    const incoming = path.join(
+      parent,
+      `.${stem}.incoming-${this.token}${extension}`
+    )
+    const previous = path.join(
+      parent,
+      `.${path.basename(target)}.previous-${this.token}`
+    )
+    if (pathStat(incoming) || pathStat(previous)) {
+      throw new Error(`An install staging path already exists for ${target}`)
+    }
+    const hadExisting = Boolean(pathStat(target))
+    if (hadExisting) validateExisting(target)
+    try {
+      create(incoming)
+      validateIncoming(incoming)
+    } catch (error) {
+      removeManagedPath(incoming, parent)
+      throw error
+    }
+    this.entries.push({
+      hadExisting,
+      incoming,
+      installed: false,
+      movedPrevious: false,
+      parent,
+      previous,
+      target,
+      validateExisting,
+    })
+    return incoming
+  }
+
+  apply() {
+    try {
+      for (const entry of this.entries) {
+        const existing = pathStat(entry.target)
+        if (Boolean(existing) !== entry.hadExisting) {
+          throw new Error(
+            `Install target changed while staging: ${entry.target}`
+          )
+        }
+        if (existing) {
+          entry.validateExisting(entry.target)
+          renameSync(entry.target, entry.previous)
+          entry.movedPrevious = true
+        }
+        renameSync(entry.incoming, entry.target)
+        entry.installed = true
+      }
+    } catch (error) {
+      this.rollback()
+      throw error
+    }
+  }
+
+  rollback() {
+    if (this.committed) return
+    for (const entry of [...this.entries].reverse()) {
+      if (entry.installed) {
+        removeManagedPath(entry.target, entry.parent)
+        entry.installed = false
+      }
+      if (entry.movedPrevious) {
+        if (pathStat(entry.target)) {
+          throw new Error(
+            `Cannot restore occupied install target: ${entry.target}`
+          )
+        }
+        renameSync(entry.previous, entry.target)
+        entry.movedPrevious = false
+      }
+      removeManagedPath(entry.incoming, entry.parent)
+    }
+  }
+
+  commit() {
+    if (this.entries.some((entry) => !entry.installed)) {
+      throw new Error(
+        "Cannot commit an installation that was not fully applied"
+      )
+    }
+    // Removing the rollback copies is the point of no return. Mark the
+    // installation committed first so a later cleanup failure can never
+    // delete new targets whose previous copies are already gone.
+    this.committed = true
+    const cleanupErrors = []
+    for (const entry of this.entries) {
+      try {
+        removeManagedPath(entry.previous, entry.parent)
+        entry.movedPrevious = false
+      } catch (error) {
+        cleanupErrors.push(error)
+      }
+      try {
+        removeManagedPath(entry.incoming, entry.parent)
+      } catch (error) {
+        cleanupErrors.push(error)
+      }
+    }
+    if (cleanupErrors.length > 0) {
+      throw new Error(
+        `Committed installation cleanup failed:\n${cleanupErrors
+          .map((error) => error.message)
+          .join("\n")}`,
+        { cause: cleanupErrors[0] }
+      )
+    }
+  }
+}
+
+export class LinuxRemovalTransaction {
+  constructor(token) {
+    this.entries = []
+    this.token = token
+    this.committed = false
+  }
+
+  stage({ target, validateExisting }) {
+    const stat = pathStat(target)
+    if (!stat) return false
+    const parent = path.dirname(target)
+    requireRegularDirectory(parent, "Linux install directory")
+    validateExisting(target)
+    const previous = path.join(
+      parent,
+      `.${path.basename(target)}.previous-${this.token}`
+    )
+    if (pathStat(previous)) {
+      throw new Error(`A removal staging path already exists for ${target}`)
+    }
+    this.entries.push({
+      moved: false,
+      parent,
+      previous,
+      target,
+      validateExisting,
+    })
+    return true
+  }
+
+  apply() {
+    try {
+      for (const entry of this.entries) {
+        if (!pathStat(entry.target)) {
+          throw new Error(
+            `Removal target changed while staging: ${entry.target}`
+          )
+        }
+        entry.validateExisting(entry.target)
+        renameSync(entry.target, entry.previous)
+        entry.moved = true
+      }
+    } catch (error) {
+      this.rollback()
+      throw error
+    }
+  }
+
+  rollback() {
+    if (this.committed) return
+    for (const entry of [...this.entries].reverse()) {
+      if (!entry.moved) continue
+      if (pathStat(entry.target)) {
+        throw new Error(
+          `Cannot restore occupied removal target: ${entry.target}`
+        )
+      }
+      renameSync(entry.previous, entry.target)
+      entry.moved = false
+    }
+  }
+
+  commit() {
+    if (this.entries.some((entry) => !entry.moved)) {
+      throw new Error("Cannot commit a removal that was not fully applied")
+    }
+    this.committed = true
+    const cleanupErrors = []
+    for (const entry of this.entries) {
+      try {
+        removeManagedPath(entry.previous, entry.parent)
+        entry.moved = false
+      } catch (error) {
+        cleanupErrors.push(error)
+      }
+    }
+    if (cleanupErrors.length > 0) {
+      throw new Error(
+        `Committed removal cleanup failed:\n${cleanupErrors
+          .map((error) => error.message)
+          .join("\n")}`,
+        { cause: cleanupErrors[0] }
+      )
+    }
+  }
+}
+
+function linuxExecutableProcessIds(executable) {
+  if (!pathStat(executable)) return []
+  const expected = canonicalPath(executable)
+  return readdirSync("/proc", { withFileTypes: true })
+    .filter((entry) => entry.isDirectory() && /^\d+$/.test(entry.name))
+    .filter((entry) => {
+      try {
+        return canonicalPath(path.join("/proc", entry.name, "exe")) === expected
+      } catch {
+        return false
+      }
+    })
+    .map((entry) => entry.name)
+}
+
+function assertLinuxPulseMdIsNotRunning(executable) {
+  const processIds = linuxExecutableProcessIds(executable)
+  if (processIds.length > 0) {
+    throw new Error(
+      `Quit Pulse MD before installing (processes ${processIds.join(", ")})`
+    )
+  }
+}
+
+async function waitForLinuxPulseMdToStop(executable) {
+  const deadline = Date.now() + 10_000
+  while (Date.now() < deadline) {
+    if (linuxExecutableProcessIds(executable).length === 0) return
+    await new Promise((resolve) => setTimeout(resolve, 25))
+  }
+  assertLinuxPulseMdIsNotRunning(executable)
+}
+
+function snapshotFile(target) {
+  let snapshotTarget = target
+  const initial = pathStat(target)
+  if (initial?.isSymbolicLink()) snapshotTarget = realpathSync.native(target)
+  const stat = pathStat(snapshotTarget)
+  if (!stat) return { existed: false, target: snapshotTarget }
+  if (!stat.isFile() || stat.isSymbolicLink()) {
+    throw new Error(`Cannot snapshot non-file preference: ${snapshotTarget}`)
+  }
+  return {
+    contents: readFileSync(snapshotTarget),
+    existed: true,
+    mode: stat.mode & 0o777,
+    target: snapshotTarget,
+  }
+}
+
+function restoreFileSnapshot(snapshot) {
+  const parent = path.dirname(snapshot.target)
+  mkdirSync(parent, { mode: 0o755, recursive: true })
+  requireRegularDirectory(parent, "preference directory")
+  if (!snapshot.existed) {
+    const stat = pathStat(snapshot.target)
+    if (stat) {
+      if (!stat.isFile() || stat.isSymbolicLink()) {
+        throw new Error(`Cannot restore preference: ${snapshot.target}`)
+      }
+      rmSync(snapshot.target)
+    }
+    return
+  }
+  const incoming = path.join(
+    parent,
+    `.${path.basename(snapshot.target)}.restore-${process.pid}-${randomUUID()}`
+  )
+  try {
+    writeFileSync(incoming, snapshot.contents, { mode: snapshot.mode })
+    chmodSync(incoming, snapshot.mode)
+    renameSync(incoming, snapshot.target)
+  } finally {
+    if (pathStat(incoming)) rmSync(incoming)
+  }
+}
+
+function refreshLinuxDesktopIntegration(layout) {
+  const mimePackages = path.join(layout.mimeRoot, "packages")
+  if (pathStat(mimePackages)) {
+    requireRegularDirectory(mimePackages, "user MIME package directory")
+    run("update-mime-database", [layout.mimeRoot], {
+      label: "refreshing the user MIME database",
+    })
+  }
+  if (pathStat(layout.applicationsDirectory)) {
+    requireRegularDirectory(
+      layout.applicationsDirectory,
+      "user application directory"
+    )
+    run("update-desktop-database", [layout.applicationsDirectory], {
+      label: "refreshing desktop applications",
+    })
+  }
+  if (pathStat(layout.iconThemeRoot)) {
+    requireRegularDirectory(layout.iconThemeRoot, "user icon theme directory")
+    run("gtk-update-icon-cache", ["-f", "-t", layout.iconThemeRoot], {
+      label: "refreshing the user icon cache",
+    })
+  }
+}
+
+function xdgMimeDefault(mimeType) {
+  return run("xdg-mime", ["query", "default", mimeType], {
+    label: `querying the ${mimeType} default`,
+  }).stdout.trim()
+}
+
+function installLinuxDefaults() {
+  for (const mimeType of ["text/markdown", "x-scheme-handler/pulse-md"]) {
+    run("xdg-mime", ["default", linuxDesktopName, mimeType], {
+      label: `setting the ${mimeType} default`,
+    })
+    const resolved = xdgMimeDefault(mimeType)
+    if (resolved !== linuxDesktopName) {
+      throw new Error(
+        `${mimeType} resolves to ${resolved || "nothing"}, expected ${linuxDesktopName}`
+      )
+    }
+  }
+  const protocolCheck = run(
+    "xdg-settings",
+    ["check", "default-url-scheme-handler", "pulse-md", linuxDesktopName],
+    { label: "verifying the pulse-md URL handler" }
+  ).stdout.trim()
+  if (protocolCheck !== "yes") {
+    throw new Error(
+      `xdg-settings did not recognize ${linuxDesktopName} as the pulse-md URL handler`
+    )
+  }
+}
+
+function cleanCliEnvironment(environment = {}) {
+  return Object.fromEntries(
+    Object.entries({ ...process.env, ...environment }).filter(
+      ([name]) => !["PMD_APP_EXECUTABLE", "PMD_CLI_ENDPOINT"].includes(name)
+    )
+  )
+}
+
+function verifyInstalledLinuxCli(layout, environment) {
+  const cliStat = pathStat(layout.cli)
+  if (!cliStat?.isSymbolicLink()) {
+    throw new Error(`Installed pmd is not a symbolic link: ${layout.cli}`)
+  }
+  if (
+    canonicalPath(layout.cli) !== canonicalPath(layout.helper) ||
+    path.resolve(path.dirname(layout.cli), readlinkSync(layout.cli)) !==
+      layout.helper
+  ) {
+    throw new Error(`Installed pmd does not target ${layout.helper}`)
+  }
+  const result = run(layout.cli, ["doctor"], {
+    env: cleanCliEnvironment(environment),
+    label: "installed Linux pmd doctor",
+    timeout: 20_000,
+  })
+  const lines = result.stdout.trimEnd().split(/\r?\n/)
+  const value = (label) =>
+    lines.find((line) => line.startsWith(`${label}: `))?.slice(label.length + 2)
+  if (
+    !result.stdout.startsWith(`${productName} ${packageMetadata.version}\n`) ||
+    canonicalPath(value("Application") || "/") !==
+      canonicalPath(layout.executable) ||
+    canonicalPath(value("Helper") || "/") !== canonicalPath(layout.helper) ||
+    value("Packaged") !== "yes" ||
+    !value("Endpoint")?.includes("pulse-md-") ||
+    value("Status") !== "ready"
+  ) {
+    throw new Error(`Installed pmd reached the wrong app:\n${result.stdout}`)
+  }
+}
+
+function linuxVerificationEnvironment(temporaryDirectory) {
+  const root = path.join(temporaryDirectory, "verification-home")
+  const environment = {
+    XDG_CACHE_HOME: path.join(root, "cache"),
+    XDG_CONFIG_HOME: path.join(root, "config"),
+    XDG_DATA_HOME: path.join(root, "data"),
+    XDG_STATE_HOME: path.join(root, "state"),
+  }
+  for (const target of Object.values(environment)) {
+    mkdirSync(target, { mode: 0o700, recursive: true })
+  }
+  return environment
+}
+
+export function archPacmanInstallInvocation(
+  artifact,
+  {
+    effectiveUserId = process.geteuid?.(),
+    environment = process.env,
+    interactive = Boolean(process.stdin.isTTY && process.stdout.isTTY),
+  } = {}
+) {
+  if (!path.isAbsolute(artifact)) {
+    throw new Error(`Arch package path must be absolute: ${artifact}`)
+  }
+  const args = ["-U", "--noconfirm", artifact]
+  if (effectiveUserId === 0) return ["/usr/bin/pacman", args]
+  if (
+    !interactive &&
+    (environment.WAYLAND_DISPLAY || environment.DISPLAY) &&
+    pathStat("/usr/bin/pkexec")?.isFile()
+  ) {
+    return ["/usr/bin/pkexec", ["/usr/bin/pacman", ...args]]
+  }
+  return ["/usr/bin/sudo", ["/usr/bin/pacman", ...args]]
+}
+
+function verifyArchPackageOwnership(layout) {
+  const environment = { ...process.env, LC_ALL: "C" }
+  const expectedVersion = `${archPackageVersion(packageMetadata.version)}-1`
+  const installed = run("/usr/bin/pacman", ["-Q", "pulse-md"], {
+    env: environment,
+    label: "querying the installed Arch package",
+  }).stdout.trim()
+  if (installed !== `pulse-md ${expectedVersion}`) {
+    throw new Error(
+      `Unexpected installed Arch package: ${installed || "not installed"}`
+    )
+  }
+  const integrityResult = run("/usr/bin/pacman", ["-Qkk", "pulse-md"], {
+    env: environment,
+    label: "checking the installed Arch package",
+  })
+  const integrity = integrityResult.stdout.trim()
+  if (integrityResult.stderr.trim() || !/\b0 altered files\b/.test(integrity)) {
+    throw new Error(
+      `Installed Arch package is altered:\n${[
+        integrity,
+        integrityResult.stderr.trim(),
+      ]
+        .filter(Boolean)
+        .join("\n")}`
+    )
+  }
+
+  const ownedPaths = [
+    layout.installationRoot,
+    layout.executable,
+    path.join(layout.installationRoot, "resources", "app.asar"),
+    layout.helper,
+    layout.command,
+    layout.cli,
+    layout.desktop,
+    layout.license,
+    layout.mimePackage,
+    ...layout.icons.values(),
+  ]
+  for (const target of ownedPaths) {
+    const owner = run("/usr/bin/pacman", ["-Qqo", target], {
+      env: environment,
+      label: `checking package ownership of ${target}`,
+    }).stdout.trim()
+    if (owner !== "pulse-md") {
+      throw new Error(`${target} is owned by ${owner || "no package"}`)
+    }
+  }
+
+  validateLinuxRuntime(layout.installationRoot)
+  verifyPackagedSymlink(layout.command, layout.executable)
+  verifyPackagedSymlink(layout.cli, layout.helper)
+  validateExactTextFile(
+    layout.desktop,
+    linuxDesktopEntry(layout.command),
+    "installed Pulse MD desktop entry"
+  )
+  validateExactTextFile(
+    layout.mimePackage,
+    linuxMimePackage(),
+    "installed Pulse MD MIME package"
+  )
+  run("desktop-file-validate", [layout.desktop], {
+    label: "validating the installed Pulse MD desktop entry",
+  })
+  run("xmllint", ["--noout", layout.mimePackage], {
+    label: "validating the installed Pulse MD MIME package",
+  })
+  for (const [size, target] of layout.icons) {
+    assertMatchingFile(
+      path.join(projectRoot, "build", "icons", "linux", `${size}x${size}.png`),
+      target,
+      `${size}px installed Linux icon`
+    )
+  }
+}
+
+function verifyPackagedSymlink(target, expected) {
+  const stat = pathStat(target)
+  if (!stat?.isSymbolicLink() || readlinkSync(target) !== expected) {
+    throw new Error(`Unexpected installed symbolic link: ${target}`)
+  }
+}
+
+async function installArchLinux(temporaryDirectory) {
+  const packagedRoot = linuxPackagedRuntimeRoot(temporaryDirectory)
+  const verificationEnvironment =
+    linuxVerificationEnvironment(temporaryDirectory)
+  verifyPackagedRuntime(packagedRoot, verificationEnvironment)
+
+  const packageDirectory = path.join(temporaryDirectory, "arch-package")
+  mkdirSync(packageDirectory)
+  const artifact = packageArchRuntime(packagedRoot, packageDirectory)
+  const nativeLayout = archLinuxInstallLayout()
+  const legacyLayout = linuxInstallLayout()
+  assertLinuxPulseMdIsNotRunning(legacyLayout.executable)
+  assertLinuxPulseMdIsNotRunning(nativeLayout.executable)
+
+  const removal = new LinuxRemovalTransaction(`${process.pid}-${randomUUID()}`)
+  const legacyTargets = stageLegacyLinuxRemoval(legacyLayout, removal)
+  const [packageManager, packageManagerArgs] =
+    archPacmanInstallInvocation(artifact)
+  runVisible(packageManager, packageManagerArgs, {
+    label: "installing the native Arch package",
+  })
+
+  let removalApplied = false
+  let mimeAppsSnapshot = null
+  try {
+    verifyArchPackageOwnership(nativeLayout)
+    assertMatchingFile(
+      path.join(packagedRoot, "resources", "app.asar"),
+      path.join(nativeLayout.installationRoot, "resources", "app.asar"),
+      "installed Arch app.asar"
+    )
+    assertMatchingFile(
+      path.join(packagedRoot, "resources", "bin", "pmd"),
+      nativeLayout.helper,
+      "installed Arch pmd"
+    )
+    verifyPackagedRuntime(
+      nativeLayout.installationRoot,
+      verificationEnvironment
+    )
+    verifyInstalledLinuxCli(nativeLayout, verificationEnvironment)
+    await waitForLinuxPulseMdToStop(nativeLayout.executable)
+
+    if (legacyTargets.length > 0) {
+      assertLinuxPulseMdIsNotRunning(legacyLayout.executable)
+      removal.apply()
+      removalApplied = true
+      refreshLinuxDesktopIntegration(legacyLayout)
+    }
+    mkdirSync(legacyLayout.configHome, { mode: 0o755, recursive: true })
+    requireRegularDirectory(
+      legacyLayout.configHome,
+      "XDG configuration directory"
+    )
+    mimeAppsSnapshot = snapshotFile(legacyLayout.mimeApps)
+    installLinuxDefaults()
+    for (const target of legacyTargets) {
+      if (pathStat(target)) {
+        throw new Error(
+          `Legacy Pulse MD target remains after migration: ${target}`
+        )
+      }
+    }
+    verifyArchPackageOwnership(nativeLayout)
+    removal.commit()
+    console.log(`Installed and verified ${artifact}`)
+    console.log(`Pacman owns ${nativeLayout.installationRoot}`)
+    console.log(`Installed pmd at ${nativeLayout.cli}`)
+  } catch (error) {
+    if (removal.committed) throw error
+    const rollbackErrors = []
+    try {
+      await waitForLinuxPulseMdToStop(nativeLayout.executable)
+    } catch (rollbackError) {
+      rollbackErrors.push(rollbackError)
+    }
+    if (mimeAppsSnapshot) {
+      try {
+        restoreFileSnapshot(mimeAppsSnapshot)
+      } catch (rollbackError) {
+        rollbackErrors.push(rollbackError)
+      }
+    }
+    if (removalApplied && !removal.committed) {
+      try {
+        removal.rollback()
+        refreshLinuxDesktopIntegration(legacyLayout)
+      } catch (rollbackError) {
+        rollbackErrors.push(rollbackError)
+      }
+    }
+    if (rollbackErrors.length > 0) {
+      throw new Error(
+        `${error.message}\nMigration rollback also failed:\n${rollbackErrors
+          .map((rollbackError) => rollbackError.message)
+          .join("\n")}`,
+        { cause: error }
+      )
+    }
+    throw error
+  }
+}
+
+async function installLinux(temporaryDirectory) {
+  const layout = linuxInstallLayout()
+  assertLinuxPulseMdIsNotRunning(layout.executable)
+  const packagedRoot = linuxPackagedRuntimeRoot(temporaryDirectory)
+  const verificationEnvironment =
+    linuxVerificationEnvironment(temporaryDirectory)
+  verifyPackagedRuntime(packagedRoot, verificationEnvironment)
+  assertLinuxPulseMdIsNotRunning(layout.executable)
+
+  const transaction = new LinuxInstallTransaction(
+    `${process.pid}-${randomUUID()}`
+  )
+  const desktopSource = linuxDesktopEntry(layout.executable)
+  const mimeSource = linuxMimePackage()
+  let transactionApplied = false
+  let mimeAppsSnapshot = null
+  let preferencesMayHaveChanged = false
+
+  try {
+    transaction.stage({
+      create: (incoming) =>
+        cpSync(packagedRoot, incoming, {
+          errorOnExist: true,
+          force: false,
+          preserveTimestamps: true,
+          recursive: true,
+          verbatimSymlinks: true,
+        }),
+      target: layout.installationRoot,
+      validateExisting: () =>
+        validateExistingLinuxInstall(layout.installationRoot, layout.cli),
+      validateIncoming: (incoming) => validateLinuxRuntime(incoming),
+    })
+    transaction.stage({
+      create: (incoming) => symlinkSync(layout.helper, incoming),
+      target: layout.cli,
+      validateExisting: (target) => validateExistingLinuxCli(target, layout),
+      validateIncoming: (incoming) => {
+        if (!pathStat(incoming)?.isSymbolicLink()) {
+          throw new Error(`Failed to stage the pmd link: ${incoming}`)
+        }
+      },
+    })
+    const incomingDesktop = transaction.stage({
+      create: (incoming) =>
+        writeFileSync(incoming, desktopSource, { mode: 0o644 }),
+      target: layout.desktop,
+      validateExisting: (target) =>
+        validateReplaceableFile(target, "existing Pulse MD desktop entry"),
+      validateIncoming: (incoming) =>
+        requireRegularFile(incoming, "staged Pulse MD desktop entry"),
+    })
+    run("desktop-file-validate", [incomingDesktop], {
+      label: "validating the Pulse MD desktop entry",
+    })
+    transaction.stage({
+      create: (incoming) =>
+        writeFileSync(incoming, mimeSource, { mode: 0o644 }),
+      target: layout.mimePackage,
+      validateExisting: (target) =>
+        validateReplaceableFile(target, "existing Pulse MD MIME package"),
+      validateIncoming: (incoming) =>
+        requireRegularFile(incoming, "staged Pulse MD MIME package"),
+    })
+    for (const [size, target] of layout.icons) {
+      const source = path.join(
+        projectRoot,
+        "build",
+        "icons",
+        "linux",
+        `${size}x${size}.png`
+      )
+      requireRegularFile(source, `${size}px Linux icon source`)
+      transaction.stage({
+        create: (incoming) => {
+          copyFileSync(source, incoming)
+          chmodSync(incoming, 0o644)
+        },
+        target,
+        validateExisting: (existing) =>
+          validateReplaceableFile(existing, `existing ${size}px Pulse MD icon`),
+        validateIncoming: (incoming) =>
+          assertMatchingFile(source, incoming, `${size}px Linux icon`),
+      })
+    }
+
+    transaction.apply()
+    transactionApplied = true
+    validateLinuxRuntime(layout.installationRoot)
+    assertMatchingFile(
+      path.join(packagedRoot, "resources", "app.asar"),
+      path.join(layout.installationRoot, "resources", "app.asar"),
+      "app.asar"
+    )
+    assertMatchingFile(
+      path.join(packagedRoot, "resources", "bin", "pmd"),
+      layout.helper,
+      "pmd"
+    )
+    verifyPackagedRuntime(layout.installationRoot, verificationEnvironment)
+    verifyInstalledLinuxCli(layout, verificationEnvironment)
+    await waitForLinuxPulseMdToStop(layout.executable)
+
+    refreshLinuxDesktopIntegration(layout)
+    mkdirSync(layout.configHome, { mode: 0o755, recursive: true })
+    requireRegularDirectory(layout.configHome, "XDG configuration directory")
+    mimeAppsSnapshot = snapshotFile(layout.mimeApps)
+    preferencesMayHaveChanged = true
+    installLinuxDefaults()
+
+    transaction.commit()
+    console.log(`Installed and verified ${layout.installationRoot}`)
+    console.log(`Installed pmd at ${layout.cli}`)
+    console.log(`Registered ${layout.desktop}`)
+  } catch (error) {
+    if (transaction.committed) throw error
+    const rollbackErrors = []
+    try {
+      await waitForLinuxPulseMdToStop(layout.executable)
+    } catch (rollbackError) {
+      rollbackErrors.push(rollbackError)
+    }
+    if (preferencesMayHaveChanged && mimeAppsSnapshot) {
+      try {
+        restoreFileSnapshot(mimeAppsSnapshot)
+      } catch (rollbackError) {
+        rollbackErrors.push(rollbackError)
+      }
+    }
+    try {
+      transaction.rollback()
+    } catch (rollbackError) {
+      rollbackErrors.push(rollbackError)
+    }
+    if (transactionApplied) {
+      try {
+        refreshLinuxDesktopIntegration(layout)
+      } catch (rollbackError) {
+        rollbackErrors.push(rollbackError)
+      }
+    }
+    if (rollbackErrors.length > 0) {
+      throw new Error(
+        `${error.message}\nRollback also failed:\n${rollbackErrors
+          .map((rollbackError) => rollbackError.message)
+          .join("\n")}`,
+        { cause: error }
+      )
     }
     throw error
   }
@@ -887,21 +2005,8 @@ async function installPlatformPackage() {
       return
     }
     if (process.platform === "linux") {
-      const debs = readdirSync(temporaryDirectory)
-        .filter((name) => name.endsWith(".deb"))
-        .map((name) => path.join(temporaryDirectory, name))
-      if (debs.length !== 1) {
-        throw new Error(`Expected one Debian package, found ${debs.length}`)
-      }
-      mkdirSync(releaseDirectory, { recursive: true })
-      requireRegularDirectory(releaseDirectory, "release directory")
-      const stableDeb = path.join(releaseDirectory, path.basename(debs[0]))
-      promoteFileAtomically(debs[0], stableDeb)
-      console.log(`Built ${stableDeb}.`)
-      console.log(
-        `Install it with: sudo apt install '${stableDeb.replaceAll("'", "'\\''")}'`
-      )
-      console.log("Then verify it with: pmd doctor")
+      if (isArchLinuxHost()) await installArchLinux(temporaryDirectory)
+      else await installLinux(temporaryDirectory)
       return
     }
   } finally {
@@ -911,13 +2016,14 @@ async function installPlatformPackage() {
   }
 }
 
-if (process.platform === "darwin") {
-  installMac().catch((error) => {
-    console.error(`Installation failed: ${error.message}`)
-    process.exitCode = 1
-  })
-} else {
-  installPlatformPackage().catch((error) => {
+const isEntryPoint =
+  process.argv[1] &&
+  import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href
+
+if (isEntryPoint) {
+  const installation =
+    process.platform === "darwin" ? installMac() : installPlatformPackage()
+  installation.catch((error) => {
     console.error(`Installation failed: ${error.message}`)
     process.exitCode = 1
   })

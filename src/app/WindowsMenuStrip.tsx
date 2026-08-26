@@ -37,7 +37,7 @@ const menuStripStyle = {
   display: "flex",
   height: "var(--window-chrome-height)",
   left: 8,
-  maxWidth: "calc(100% - var(--windows-caption-controls-inset) - 16px)",
+  maxWidth: "calc(100% - var(--windows-caption-controls-safe-inset) - 8px)",
   overflowX: "auto",
   position: "absolute",
   scrollbarWidth: "none",

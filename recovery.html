@@ -29,6 +29,7 @@
           var(--recovery-background) 92%,
           var(--recovery-foreground)
         );
+        --recovery-window-zoom: 1;
       }
 
       * {
@@ -63,6 +64,86 @@
         left: 0;
         height: 44px;
         -webkit-app-region: drag;
+      }
+
+      html[data-platform="linux"] .recovery-drag-region {
+        right: calc(138px / var(--recovery-window-zoom));
+      }
+
+      .recovery-window-controls {
+        position: fixed;
+        z-index: 2;
+        top: 0;
+        right: 0;
+        display: none;
+        height: 46px;
+        color: var(--recovery-foreground);
+        -webkit-app-region: no-drag;
+      }
+
+      html[data-platform="linux"] .recovery-window-controls {
+        display: flex;
+      }
+
+      .recovery-window-control {
+        position: relative;
+        display: grid;
+        width: calc(46px / var(--recovery-window-zoom));
+        min-height: 0;
+        height: 100%;
+        place-items: center;
+        padding: 0;
+        border: 0;
+        border-radius: 0;
+        background: transparent;
+        color: inherit;
+        outline: none;
+      }
+
+      .recovery-window-control:not(.recovery-window-control-close):hover,
+      .recovery-window-control:not(
+          .recovery-window-control-close
+        ):focus-visible {
+        background: color-mix(
+          in oklab,
+          var(--recovery-foreground) 12%,
+          transparent
+        );
+      }
+
+      .recovery-window-control:not(.recovery-window-control-close):active {
+        background: color-mix(
+          in oklab,
+          var(--recovery-foreground) 20%,
+          transparent
+        );
+      }
+
+      .recovery-window-control-close:hover,
+      .recovery-window-control-close:focus-visible {
+        background: #c42b1c;
+        color: #ffffff;
+      }
+
+      .recovery-window-control-close:active {
+        background: #b22a1f;
+        color: #ffffff;
+      }
+
+      .recovery-window-control svg {
+        width: calc(10px / var(--recovery-window-zoom));
+        height: calc(10px / var(--recovery-window-zoom));
+        fill: none;
+        stroke: currentColor;
+      }
+
+      .recovery-restore-glyph,
+      .recovery-window-control[data-maximized="true"] .recovery-maximize-glyph {
+        display: none;
+      }
+
+      .recovery-window-control[data-maximized="true"] .recovery-restore-glyph {
+        display: block;
       }
 
       main {
@@ -191,6 +272,53 @@
   </head>
   <body>
     <div aria-hidden="true" class="recovery-drag-region"></div>
+    <div aria-label="Window controls" class="recovery-window-controls">
+      <button
+        aria-label="Minimize window"
+        class="recovery-window-control"
+        data-window-action="minimize"
+        title="Minimize"
+        type="button"
+      >
+        <svg aria-hidden="true" viewBox="0 0 10 10">
+          <path d="M0 9.5h10" />
+        </svg>
+      </button>
+      <button
+        aria-label="Maximize window"
+        class="recovery-window-control"
+        data-window-action="toggle-maximize"
+        title="Maximize"
+        type="button"
+      >
+        <svg
+          aria-hidden="true"
+          class="recovery-maximize-glyph"
+          viewBox="0 0 10 10"
+        >
+          <rect height="9" width="9" x="0.5" y="0.5" />
+        </svg>
+        <svg
+          aria-hidden="true"
+          class="recovery-restore-glyph"
+          viewBox="0 0 10 10"
+        >
+          <rect height="7" width="7" x="2.5" y="0.5" />
+          <path d="M2.5 2.5h-2v7h7v-2" />
+        </svg>
+      </button>
+      <button
+        aria-label="Close window"
+        class="recovery-window-control recovery-window-control-close"
+        data-window-action="close"
+        title="Close"
+        type="button"
+      >
+        <svg aria-hidden="true" viewBox="0 0 10 10">
+          <path d="m1 1 8 8m0-8-8 8" />
+        </svg>
+      </button>
+    </div>
     <main>
       <section aria-labelledby="recovery-title">
         <div aria-hidden="true" class="recovery-mark">!</div>

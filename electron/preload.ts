@@ -412,6 +412,8 @@ const pulseMd: PulseMdApi = {
     ipcRenderer.invoke(
       ipcChannels.getWindowProfiles
     ) as Promise<WindowProfilesSnapshot>,
+  getWindowMaximized: () =>
+    ipcRenderer.invoke(ipcChannels.getWindowMaximized) as Promise<boolean>,
   getCurrentWindowProfileSeed: (
     tabModes: readonly WindowProfileTabMode[],
     kind: WindowProfileCaptureKind
@@ -696,6 +698,8 @@ const pulseMd: PulseMdApi = {
   ) => onMessage(ipcChannels.launchVisualEffectReady, listener),
   onWindowActivationChanged: (listener: (active: boolean) => void) =>
     onMessage(ipcChannels.windowActivationChanged, listener),
+  onWindowMaximizedChanged: (listener: (maximized: boolean) => void) =>
+    onMessage(ipcChannels.windowMaximizedChanged, listener),
   onWindowZoomChanged: (listener: (zoomFactor: number) => void) => {
     reportedZoomFactor = webFrame.getZoomFactor()
     windowZoomListeners.add(listener)
@@ -708,6 +712,14 @@ const pulseMd: PulseMdApi = {
 
 contextBridge.exposeInMainWorld("pulseMd", pulseMd)
 contextBridge.exposeInMainWorld("pulseMdRecovery", {
+  getWindowMaximized: () =>
+    ipcRenderer.invoke(
+      ipcChannels.getRecoveryWindowMaximized
+    ) as Promise<boolean>,
+  onWindowMaximizedChanged: (listener: (maximized: boolean) => void) =>
+    onMessage(ipcChannels.windowMaximizedChanged, listener),
   perform: (action: RecoveryAction) =>
     ipcRenderer.invoke(ipcChannels.recoveryAction, action) as Promise<void>,
+  windowAction: (action: WindowAction) =>
+    ipcRenderer.send(ipcChannels.recoveryWindowAction, action),
 } satisfies PulseMdRecoveryApi)

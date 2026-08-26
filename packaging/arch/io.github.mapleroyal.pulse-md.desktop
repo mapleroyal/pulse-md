@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Name=Pulse MD
+GenericName=Markdown Reader and Editor
+Comment=A fast, local-first Markdown reader and editor for the desktop.
+Exec=/usr/bin/pulse-md %U
+Icon=pulse-md
+Terminal=false
+StartupNotify=true
+StartupWMClass=io.github.mapleroyal.pulse-md
+Categories=Utility;TextEditor;
+Keywords=markdown;read;write;notes;text;editor;
+MimeType=text/markdown;x-scheme-handler/pulse-md;

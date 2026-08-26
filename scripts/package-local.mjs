@@ -15,6 +15,8 @@ import {
 import os from "node:os"
 import path from "node:path"
 
+import { packageArchRuntime } from "./package-arch.mjs"
+
 const projectRoot = path.resolve(import.meta.dirname, "..")
 const releaseDirectory = path.join(projectRoot, "release")
 const packageMetadata = JSON.parse(
@@ -36,12 +38,12 @@ const builderArgumentByPlatform = {
 const artifactPrefix = `${packageMetadata.productName}-${packageMetadata.version}`
 const linuxArtifactArchitectures = {
   arm: { appImage: "armv7l", debian: "armv7l" },
-  arm64: { appImage: "arm64", debian: "arm64" },
+  arm64: { appImage: "arm64", arch: "aarch64", debian: "arm64" },
   ia32: { appImage: "i386", debian: "i386" },
-  x64: { appImage: "x86_64", debian: "amd64" },
+  x64: { appImage: "x86_64", arch: "x86_64", debian: "amd64" },
 }
 
-function artifactGroups(platform) {
+function artifactGroups(platform, linuxFormat) {
   if (platform === "darwin") {
     return [
       { label: "DMG", name: `${artifactPrefix}-${process.arch}.dmg` },
@@ -60,16 +62,21 @@ function artifactGroups(platform) {
   if (!architectures) {
     throw new Error(`Unsupported Linux package architecture: ${process.arch}`)
   }
-  return [
+  const groups = [
     {
+      format: "appimage",
       label: "AppImage",
       name: `${artifactPrefix}-${architectures.appImage}.AppImage`,
     },
     {
+      format: "deb",
       label: "Debian package",
       name: `${artifactPrefix}-${architectures.debian}.deb`,
     },
   ]
+  return linuxFormat
+    ? groups.filter(({ format }) => format === linuxFormat)
+    : groups
 }
 
 function failure(label, result) {
@@ -194,10 +201,10 @@ function unregisterMacBundleIfRegistered(appBundle) {
   })
 }
 
-function selectedArtifacts(outputDirectory, platform) {
+function selectedArtifacts(outputDirectory, platform, linuxFormat) {
   const entries = readdirSync(outputDirectory, { withFileTypes: true })
   const artifacts = []
-  for (const group of artifactGroups(platform)) {
+  for (const group of artifactGroups(platform, linuxFormat)) {
     const matches = entries.filter(
       (entry) =>
         entry.isFile() && !entry.isSymbolicLink() && entry.name === group.name
@@ -362,12 +369,16 @@ function promoteArtifacts(sources) {
 }
 
 function selectedPlatform() {
-  const [argument, ...unexpected] = process.argv.slice(2)
+  const [argument, linuxFormat, ...unexpected] = process.argv.slice(2)
   if (
     unexpected.length > 0 ||
-    (argument && !(argument in platformByArgument))
+    (argument && !(argument in platformByArgument)) ||
+    (linuxFormat && !new Set(["appimage", "arch", "deb"]).has(linuxFormat)) ||
+    (linuxFormat && argument !== "linux")
   ) {
-    throw new Error("Usage: node scripts/package-local.mjs [mac|win|linux]")
+    throw new Error(
+      "Usage: node scripts/package-local.mjs [mac|win|linux [appimage|arch|deb]]"
+    )
   }
   const requested = argument ? platformByArgument[argument] : process.platform
   if (requested !== process.platform) {
@@ -376,10 +387,10 @@ function selectedPlatform() {
   if (!(requested in builderArgumentByPlatform)) {
     throw new Error(`Pulse MD packaging is unsupported on ${requested}`)
   }
-  return requested
+  return { linuxFormat, platform: requested }
 }
 
-const platform = selectedPlatform()
+const { linuxFormat, platform } = selectedPlatform()
 const outputDirectory = mkdtempSync(
   path.join(os.tmpdir(), `pulse-md-source-package-${platform}-`)
 )
@@ -391,8 +402,14 @@ try {
   }
   const [npm, npmArgs] = npmInvocation(["run", "build"])
   runVisible(npm, npmArgs, { label: "application build" })
+  const linuxTarget = {
+    appimage: "AppImage",
+    arch: "dir",
+    deb: "deb",
+  }[linuxFormat]
   const [builder, builderArgs] = builderInvocation([
     builderArgumentByPlatform[platform],
+    ...(linuxTarget ? [linuxTarget] : []),
     "--config",
     "electron-builder.local.cjs",
     `--config.directories.output=${outputDirectory}`,
@@ -413,7 +430,15 @@ try {
   })
 
   verifyPackagedRuntime(outputDirectory, platform)
-  const artifacts = selectedArtifacts(outputDirectory, platform)
+  const artifacts =
+    platform === "linux" && linuxFormat === "arch"
+      ? [
+          packageArchRuntime(
+            packagedRuntimeRoot(outputDirectory, platform),
+            outputDirectory
+          ),
+        ]
+      : selectedArtifacts(outputDirectory, platform, linuxFormat)
   mkdirSync(releaseDirectory, { recursive: true })
   requireRegularDirectory(releaseDirectory, "release directory")
   const promoted = promoteArtifacts(artifacts)

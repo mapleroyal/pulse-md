@@ -162,6 +162,7 @@ interface TopChromeProps {
   tabs: TabDescriptor[]
   tabScrollerRef: React.RefObject<HTMLDivElement | null>
   windowZoomFactor: number
+  windowMaximized: boolean
   previewTitle?: string
   onActivateTab: (tabId: TabId, focusPolicy: TabFocusPolicy) => void
   onBeginTabDrag: (tabId: TabId, geometry: TabDragGeometry) => string
@@ -609,6 +610,7 @@ export function TopChrome({
   tabs,
   tabScrollerRef,
   windowZoomFactor,
+  windowMaximized,
   previewTitle,
   onActivateTab,
   onBeginTabDrag,
@@ -958,8 +960,8 @@ export function TopChrome({
     false
   )
   const showControlCluster = wideControlWidth > 0 || compactControlWidth > 0
-  const windowsChrome = platform === "win32"
-  const windowsMenuOpen = windowsChrome && !previewTitle && windowsMenuVisible
+  const desktopChrome = platform === "win32" || platform === "linux"
+  const windowsMenuOpen = desktopChrome && !previewTitle && windowsMenuVisible
   const hiddenForWindowsMenuStyle: React.CSSProperties | undefined =
     windowsMenuOpen ? { opacity: 0, pointerEvents: "none" } : undefined
 
@@ -1021,41 +1023,41 @@ export function TopChrome({
                 ? WINDOW_CONTROLS_SAFE_INSET / windowZoomFactor
                 : WINDOW_CONTROLS_SAFE_INSET
             }px`,
-            "--windows-caption-controls-inset": `${
-              windowsChrome
-                ? WINDOWS_CAPTION_CONTROLS_WIDTH / windowZoomFactor
-                : 0
-            }px`,
-            "--tc-hover-right": windowsChrome
+            "--windows-caption-controls-inset": desktopChrome
+              ? `${WINDOWS_CAPTION_CONTROLS_WIDTH / windowZoomFactor}px`
+              : "0px",
+            "--linux-caption-control-width": `${46 / windowZoomFactor}px`,
+            "--linux-caption-symbol-size": `${10 / windowZoomFactor}px`,
+            "--tc-hover-right": desktopChrome
               ? "var(--windows-caption-controls-safe-inset)"
               : "50px",
             "--tc-left": "auto",
-            "--tc-right": windowsChrome
+            "--tc-right": desktopChrome
               ? "var(--windows-app-controls-right)"
               : "var(--tc-edge)",
-            "--cf-max": windowsChrome
+            "--cf-max": desktopChrome
               ? "max(0px, calc(100% - max(var(--windows-caption-controls-safe-inset), var(--cf-rest, 0px)) * 2))"
               : "calc(100% - var(--window-controls-safe-inset) * 2)",
-            "--cf-active": windowsChrome
+            "--cf-active": desktopChrome
               ? "max(0px, calc(100% - var(--windows-active-top-safe-inset) * 2))"
               : "calc(100% - var(--window-controls-safe-inset) * 2)",
-            "--tab-left": windowsChrome
+            "--tab-left": desktopChrome
               ? "8px"
               : "var(--window-controls-safe-inset)",
-            "--tab-right": windowsChrome
+            "--tab-right": desktopChrome
               ? "var(--windows-active-top-safe-inset)"
               : "8px",
-            "--tab-active-left": windowsChrome
+            "--tab-active-left": desktopChrome
               ? "8px"
               : "var(--window-controls-safe-inset)",
-            "--tab-active-right": windowsChrome
+            "--tab-active-right": desktopChrome
               ? "var(--windows-active-top-safe-inset)"
               : "var(--tc-current)",
-            "--tab-inset": windowsChrome
+            "--tab-inset": desktopChrome
               ? "var(--windows-caption-controls-inset)"
               : "var(--window-controls-safe-inset)",
-            "--tab-narrow-offset": windowsChrome ? "66px" : "58px",
-            "--tab-compact-offset": windowsChrome ? "94px" : "86px",
+            "--tab-narrow-offset": desktopChrome ? "66px" : "58px",
+            "--tab-compact-offset": desktopChrome ? "94px" : "86px",
             WebkitAppRegion: windowsMenuOpen ? "no-drag" : undefined,
           } as React.CSSProperties
         }
@@ -1091,7 +1093,7 @@ export function TopChrome({
           if (dragToken) void onDropTab(dragToken, index)
         }}
       >
-        {windowsChrome && !previewTitle ? (
+        {desktopChrome && !previewTitle ? (
           <WindowsMenuStrip
             visible={windowsMenuVisible}
             onVisibleChange={setWindowsMenuVisible}
@@ -1152,28 +1154,52 @@ export function TopChrome({
           </>
         ) : null}
         {platform === "linux" ? (
-          <div aria-label="Window controls" className="window-controls">
-            <button
-              aria-label="Close window"
-              className="window-control window-control-close"
-              type="button"
-              onClick={() => onWindowAction("close")}
-            />
+          <div aria-label="Window controls" className="linux-window-controls">
             <button
               aria-label="Minimize window"
-              className="window-control window-control-minimize"
+              className="linux-window-control linux-window-control-minimize"
+              title="Minimize"
               type="button"
               onClick={() => onWindowAction("minimize")}
-            />
+            >
+              <svg aria-hidden="true" viewBox="0 0 10 10">
+                <path d="M0 9.5h10" />
+              </svg>
+            </button>
             <button
-              aria-label="Maximize or restore window"
-              className="window-control window-control-maximize"
+              aria-label={
+                windowMaximized ? "Restore window" : "Maximize window"
+              }
+              className="linux-window-control linux-window-control-maximize"
+              data-window-action="toggle-maximize"
+              title={windowMaximized ? "Restore" : "Maximize"}
               type="button"
               onClick={() => onWindowAction("toggle-maximize")}
-            />
+            >
+              <svg aria-hidden="true" viewBox="0 0 10 10">
+                {windowMaximized ? (
+                  <>
+                    <rect height="7" width="7" x="2.5" y="0.5" />
+                    <path d="M2.5 2.5h-2v7h7v-2" />
+                  </>
+                ) : (
+                  <rect height="9" width="9" x="0.5" y="0.5" />
+                )}
+              </svg>
+            </button>
+            <button
+              aria-label="Close window"
+              className="linux-window-control linux-window-control-close"
+              title="Close"
+              type="button"
+              onClick={() => onWindowAction("close")}
+            >
+              <svg aria-hidden="true" viewBox="0 0 10 10">
+                <path d="m1 1 8 8m0-8-8 8" />
+              </svg>
+            </button>
           </div>
         ) : null}
-
         {showControlCluster ? (
           <div
             className="top-chrome-controls"

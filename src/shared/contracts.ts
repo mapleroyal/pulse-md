@@ -1498,6 +1498,7 @@ export interface PulseMdApi {
     scope: ScratchInventoryScope
   ): Promise<ScratchInventory>
   getWindowProfiles(): Promise<WindowProfilesSnapshot>
+  getWindowMaximized(): Promise<boolean>
   getCurrentWindowProfileSeed(
     tabModes: readonly WindowProfileTabMode[],
     kind: WindowProfileCaptureKind
@@ -1618,6 +1619,7 @@ export interface PulseMdApi {
     listener: (effect: LaunchVisualEffectReady) => void
   ): () => void
   onWindowActivationChanged(listener: (active: boolean) => void): () => void
+  onWindowMaximizedChanged(listener: (maximized: boolean) => void): () => void
   onWindowZoomChanged(listener: (zoomFactor: number) => void): () => void
   onWindowZoomPersistenceFailed(
     listener: (zoomFactor: number) => void
@@ -1625,7 +1627,10 @@ export interface PulseMdApi {
 }
 
 export interface PulseMdRecoveryApi {
+  getWindowMaximized(): Promise<boolean>
+  onWindowMaximizedChanged(listener: (maximized: boolean) => void): () => void
   perform(action: RecoveryAction): Promise<void>
+  windowAction(action: WindowAction): void
 }
 
 declare global {

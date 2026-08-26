@@ -2891,6 +2891,111 @@ test("macOS background effects preview, cancel, persist, and keep chrome single-
   }
 })
 
+test("Linux background effects keep app tint and compositor blur responsibilities separate @renderer-isolated", async () => {
+  test.skip(process.platform !== "linux", "Linux compositor integration only")
+
+  const userData = await createTestUserData()
+  await writeFile(
+    path.join(userData, "settings.json"),
+    JSON.stringify({
+      ...DEFAULT_APP_SETTINGS,
+      appearanceMode: "dark",
+    })
+  )
+  let app: ElectronApplication | null = await launchApplication(
+    userData,
+    samplePath
+  )
+
+  try {
+    let page = await app.firstWindow()
+    await page.locator(".cm-editor").waitFor()
+    const html = page.locator("html")
+    const appShell = page.locator(".app-shell")
+    await expect(html).toHaveAttribute("data-background-effect", "opaque")
+    await expect(appShell).toHaveCSS("background-color", "rgb(24, 24, 24)")
+
+    await page.keyboard.press("Control+,")
+    await page.getByRole("button", { name: "Transparency & Blur" }).click()
+    await expect(
+      page.getByText(
+        "Pulse MD supplies the translucent tinted surface. Your Linux compositor adds behind-window blur when its desktop blur setting is enabled."
+      )
+    ).toBeVisible()
+    await expect(
+      page.getByText(
+        /Blur strength is controlled globally by the Linux compositor/
+      )
+    ).toBeVisible()
+    await expect(page.getByLabel("Background blur radius value")).toHaveCount(0)
+
+    const enabled = page.getByRole("switch", {
+      name: "Window transparency & blur",
+    })
+    await enabled.click()
+    await expect(html).toHaveAttribute("data-background-effect", "translucent")
+    await expect(html).toHaveCSS(
+      "--document-window-final-background",
+      "#181818d9"
+    )
+    await expect(appShell).toHaveCSS(
+      "background-color",
+      "rgba(24, 24, 24, 0.85)"
+    )
+    await expect
+      .poll(() =>
+        app!.evaluate(({ BrowserWindow }) =>
+          BrowserWindow.getAllWindows()[0]?.getBackgroundColor()
+        )
+      )
+      .toMatch(/000000/i)
+
+    await page.getByLabel("Background translucency percentage").fill("70")
+    await expect(html).toHaveCSS(
+      "--document-window-final-background",
+      "#1818184d"
+    )
+    await expect(appShell).toHaveCSS(
+      "background-color",
+      "rgba(24, 24, 24, 0.3)"
+    )
+    await page.getByRole("button", { name: "Cancel" }).click()
+    await expect(html).toHaveAttribute("data-background-effect", "opaque")
+    await expect(appShell).toHaveCSS("background-color", "rgb(24, 24, 24)")
+
+    await page.keyboard.press("Control+,")
+    await page.getByRole("button", { name: "Transparency & Blur" }).click()
+    await page
+      .getByRole("switch", { name: "Window transparency & blur" })
+      .click()
+    await page.getByLabel("Background translucency percentage").fill("70")
+    await settingsSaveButton(page).click()
+    await exitApplication(app)
+    app = null
+
+    app = await launchApplication(userData, samplePath)
+    page = await app.firstWindow()
+    await expect(page.locator("html")).toHaveAttribute(
+      "data-background-effect",
+      "translucent"
+    )
+    await expect(page.locator(".app-shell")).toHaveCSS(
+      "background-color",
+      "rgba(24, 24, 24, 0.3)"
+    )
+    await expect
+      .poll(() =>
+        app!.evaluate(({ BrowserWindow }) =>
+          BrowserWindow.getAllWindows()[0]?.getBackgroundColor()
+        )
+      )
+      .toMatch(/000000/i)
+  } finally {
+    if (app) await exitApplication(app)
+    await rm(userData, { force: true, recursive: true })
+  }
+})
+
 test("centered paths and tabs offer shadcn path actions and a bounded long-path popover", async () => {
   const userData = await createTestUserData()
   const secondPath = path.join(userData, "DISTRIBUTION_DEFERRED_CHANGES.md")
@@ -3302,9 +3407,7 @@ test("tab labels align fitted names left and feather overflowing names @renderer
       "data-platform",
       process.platform
     )
-    await expect(page.locator(".window-controls")).toHaveCount(
-      process.platform === "linux" ? 1 : 0
-    )
+    await expect(page.locator(".window-controls")).toHaveCount(0)
     const restingStrip = await tabStrip.evaluate((element) => {
       const bounds = element.getBoundingClientRect()
       return {
@@ -3316,8 +3419,16 @@ test("tab labels align fitted names left and feather overflowing names @renderer
     const restingRightInset =
       process.platform === "win32"
         ? WINDOWS_CAPTION_CONTROLS_WIDTH + TOP_CHROME_CONTENT_GAP
-        : TOP_CHROME_CONTENT_GAP
-    expect(restingStrip.rightInset).toBeCloseTo(restingRightInset, 0)
+        : process.platform === "linux"
+          ? restingStrip.rightInset
+          : TOP_CHROME_CONTENT_GAP
+    if (process.platform === "linux") {
+      expect(restingStrip.rightInset).toBeGreaterThanOrEqual(
+        TOP_CHROME_CONTENT_GAP
+      )
+    } else {
+      expect(restingStrip.rightInset).toBeCloseTo(restingRightInset, 0)
+    }
 
     await tabStrip.hover({ position: { x: 20, y: 15 } })
     await expect
@@ -3374,13 +3485,17 @@ test("revealing top controls keeps a covered active tab against their adjacent e
     await page.locator(".cm-editor").waitFor()
     const tabStrip = page.locator(".document-tab-strip")
     const activeTab = page.locator(".document-tab").nth(6)
-    const restingRightInset =
-      process.platform === "win32"
-        ? WINDOWS_CAPTION_CONTROLS_WIDTH + TOP_CHROME_CONTENT_GAP
-        : TOP_CHROME_CONTENT_GAP
     await activeTab.getByRole("tab").click()
     await page.locator(".cm-content").focus()
     await page.mouse.move(450, 160)
+    const restingRightInset =
+      process.platform === "win32"
+        ? WINDOWS_CAPTION_CONTROLS_WIDTH + TOP_CHROME_CONTENT_GAP
+        : process.platform === "linux"
+          ? await tabStrip.evaluate(
+              (element) => innerWidth - element.getBoundingClientRect().right
+            )
+          : TOP_CHROME_CONTENT_GAP
     await expect
       .poll(() =>
         tabStrip.evaluate(
@@ -3424,20 +3539,37 @@ test("revealing top controls keeps a covered active tab against their adjacent e
         const activeBounds = active.getBoundingClientRect()
         return {
           activeRight: activeBounds.right,
+          activeFits: activeBounds.right <= stripBounds.right + 0.5,
           aligned:
             Math.abs(stripBounds.right - (controlsBounds.left - 8)) <= 0.5 &&
             Math.abs(activeBounds.right - stripBounds.right) <= 0.5,
+          controlsAligned:
+            Math.abs(stripBounds.right - (controlsBounds.left - 8)) <= 0.5,
           scrollLeft: element.scrollLeft,
           stripRight: stripBounds.right,
         }
       })
 
     await tabStrip.hover({ position: { x: 20, y: 15 } })
-    await expect.poll(async () => (await revealedGeometry()).aligned).toBe(true)
+    await expect
+      .poll(async () => {
+        const geometry = await revealedGeometry()
+        return process.platform === "linux"
+          ? geometry.controlsAligned && geometry.activeFits
+          : geometry.aligned
+      })
+      .toBe(true)
     const firstReveal = await revealedGeometry()
-    expect(firstReveal.stripRight).toBeLessThan(restingGeometry.stripRight)
-    expect(restingGeometry.activeRight).toBeGreaterThan(firstReveal.stripRight)
-    expect(firstReveal.scrollLeft).toBeGreaterThan(restingGeometry.scrollLeft)
+    if (process.platform === "linux") {
+      expect(firstReveal.stripRight).toBeCloseTo(restingGeometry.stripRight, 0)
+      expect(firstReveal.scrollLeft).toBeCloseTo(restingGeometry.scrollLeft, 0)
+    } else {
+      expect(firstReveal.stripRight).toBeLessThan(restingGeometry.stripRight)
+      expect(restingGeometry.activeRight).toBeGreaterThan(
+        firstReveal.stripRight
+      )
+      expect(firstReveal.scrollLeft).toBeGreaterThan(restingGeometry.scrollLeft)
+    }
 
     const settingsShortcut =
       process.platform === "darwin" ? "Meta+," : "Control+,"
@@ -3473,15 +3605,33 @@ test("revealing top controls keeps a covered active tab against their adjacent e
     })
 
     await tabStrip.hover({ position: { x: 20, y: 15 } })
-    await expect.poll(async () => (await revealedGeometry()).aligned).toBe(true)
+    await expect
+      .poll(async () => {
+        const geometry = await revealedGeometry()
+        return process.platform === "linux"
+          ? geometry.controlsAligned && geometry.activeFits
+          : geometry.aligned
+      })
+      .toBe(true)
     const secondReveal = await revealedGeometry()
-    expect(secondReveal.stripRight).toBeLessThan(remountedGeometry.stripRight)
-    expect(remountedGeometry.activeRight).toBeGreaterThan(
-      secondReveal.stripRight
-    )
-    expect(secondReveal.scrollLeft).toBeGreaterThan(
-      remountedGeometry.scrollLeft
-    )
+    if (process.platform === "linux") {
+      expect(secondReveal.stripRight).toBeCloseTo(
+        remountedGeometry.stripRight,
+        0
+      )
+      expect(secondReveal.scrollLeft).toBeCloseTo(
+        remountedGeometry.scrollLeft,
+        0
+      )
+    } else {
+      expect(secondReveal.stripRight).toBeLessThan(remountedGeometry.stripRight)
+      expect(remountedGeometry.activeRight).toBeGreaterThan(
+        secondReveal.stripRight
+      )
+      expect(secondReveal.scrollLeft).toBeGreaterThan(
+        remountedGeometry.scrollLeft
+      )
+    }
   } finally {
     await exitApplication(app)
     await rm(userData, { force: true, recursive: true })
@@ -3632,16 +3782,25 @@ test("a newly created overflowing tab is fully revealed without owning later scr
     const windowsCaptionInset = await page
       .locator(".top-chrome")
       .evaluate((element) =>
-        Number.parseFloat(
-          getComputedStyle(element).getPropertyValue(
-            "--windows-caption-controls-inset"
-          )
-        )
+        getComputedStyle(element)
+          .getPropertyValue("--windows-caption-controls-inset")
+          .trim()
       )
-    expect(windowsCaptionInset).toBeCloseTo(
-      process.platform === "win32" ? WINDOWS_CAPTION_CONTROLS_WIDTH / 2 : 0,
+    expect(Number.parseFloat(windowsCaptionInset)).toBeCloseTo(
+      process.platform === "darwin" ? 0 : WINDOWS_CAPTION_CONTROLS_WIDTH / 2,
       5
     )
+    if (process.platform === "linux") {
+      const linuxControlGeometry = await page
+        .locator(".linux-window-controls")
+        .evaluate((element) => ({
+          glyphWidth: element.querySelector("svg")!.getBoundingClientRect()
+            .width,
+          laneWidth: element.getBoundingClientRect().width,
+        }))
+      expect(linuxControlGeometry.laneWidth).toBeCloseTo(69, 0)
+      expect(linuxControlGeometry.glyphWidth).toBeCloseTo(5, 0)
+    }
     await expect
       .poll(() =>
         tabStrip.evaluate((element) => {
@@ -3678,24 +3837,44 @@ test("a newly created overflowing tab is fully revealed without owning later scr
         ".document-tab-strip-content"
       )
       if (!stripContent) throw new Error("The tab strip content is unavailable")
+      const chrome = element.closest<HTMLElement>(".top-chrome")
+      if (!chrome) throw new Error("The top chrome is unavailable")
+      const chromeStyle = getComputedStyle(chrome)
       return {
         activeWidth: active.getBoundingClientRect().width,
+        compactOffset: Number.parseFloat(
+          chromeStyle.getPropertyValue("--tab-compact-offset")
+        ),
         inactiveWidth: inactive.getBoundingClientRect().width,
         itemGap: Number.parseFloat(getComputedStyle(stripContent).columnGap),
         stripWidth: element.getBoundingClientRect().width,
+        tabInset: Number.parseFloat(
+          chromeStyle.getPropertyValue("--windows-caption-controls-inset")
+        ),
+        viewportWidth: innerWidth,
       }
     })
     expect(compactGeometry.activeWidth).toBeGreaterThan(0)
-    expect(
-      Math.abs(
-        compactGeometry.activeWidth -
-          (compactGeometry.stripWidth - compactGeometry.itemGap)
+    if (process.platform === "linux") {
+      expect(compactGeometry.activeWidth).toBeCloseTo(
+        compactGeometry.viewportWidth -
+          compactGeometry.tabInset -
+          compactGeometry.compactOffset,
+        0
       )
-    ).toBeLessThanOrEqual(0.5)
+      expect(compactGeometry.stripWidth).toBeGreaterThan(128)
+    } else {
+      expect(
+        Math.abs(
+          compactGeometry.activeWidth -
+            (compactGeometry.stripWidth - compactGeometry.itemGap)
+        )
+      ).toBeLessThanOrEqual(0.5)
+      expect(compactGeometry.stripWidth).toBeLessThan(128)
+    }
     expect(
       Math.abs(compactGeometry.activeWidth - compactGeometry.inactiveWidth)
     ).toBeLessThanOrEqual(0.5)
-    expect(compactGeometry.stripWidth).toBeLessThan(128)
     expect(compactGeometry.activeWidth).toBeLessThanOrEqual(
       compactGeometry.stripWidth + 0.5
     )

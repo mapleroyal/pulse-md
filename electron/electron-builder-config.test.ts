@@ -3,7 +3,10 @@ import { createRequire } from "node:module"
 
 import { describe, expect, it } from "vitest"
 
-import { WINDOWS_APP_USER_MODEL_ID } from "./distribution-identity"
+import {
+  LINUX_DESKTOP_NAME,
+  WINDOWS_APP_USER_MODEL_ID,
+} from "./distribution-identity"
 import {
   COMMON_TEXT_DOCUMENT_EXTENSIONS,
   MARKDOWN_DOCUMENT_EXTENSIONS,
@@ -11,7 +14,8 @@ import {
 
 interface FileAssociation {
   description?: string
-  ext: string[]
+  ext: string | string[]
+  mimeType?: string
   name?: string
   rank?: string
   role?: string
@@ -42,10 +46,13 @@ interface BuilderConfiguration {
   fileAssociations?: FileAssociation[]
   files?: string[]
   linux?: {
+    category?: string
     desktop?: { entry?: Record<string, string> }
     executableName?: string
     extraResources?: ExtraResource[]
     icon?: string
+    fileAssociations?: FileAssociation[]
+    mimeTypes?: string[]
     syncDesktopName?: boolean
   }
   protocols?: Array<{ name?: string; schemes?: string[] }>
@@ -65,6 +72,7 @@ interface BuilderConfiguration {
   productName?: string
   win?: {
     extraResources?: ExtraResource[]
+    fileAssociations?: FileAssociation[]
     icon?: string
     signExts?: string[]
     target?: string | TargetConfiguration | Array<string | TargetConfiguration>
@@ -103,7 +111,7 @@ describe("electron-builder configuration", () => {
       from: "build/icons/linux/512x512.png",
       to: "icons/pulse-md.png",
     })
-    expect(metadata.desktopName).toBe("pulse-md.desktop")
+    expect(metadata.desktopName).toBe(LINUX_DESKTOP_NAME)
   })
 
   it("ships complete native Windows and Linux icon sets", async () => {
@@ -154,18 +162,31 @@ describe("electron-builder configuration", () => {
     expect(localBuilderConfiguration().win?.target).toEqual(expectedTarget)
   })
 
-  it("keeps Markdown global and adds alternate text/code editing on macOS", async () => {
+  it("keeps native Markdown associations and Linux-safe MIME metadata", async () => {
     const configuration = await builderConfiguration()
-    const markdown = configuration.fileAssociations?.find(
+    const macMarkdown = configuration.mac?.fileAssociations?.find(
+      ({ name }) => name === "PulseMD.Markdown"
+    )
+    const windowsMarkdown = configuration.win?.fileAssociations?.find(
+      ({ name }) => name === "PulseMD.Markdown"
+    )
+    const linuxMarkdown = configuration.linux?.fileAssociations?.find(
       ({ name }) => name === "PulseMD.Markdown"
     )
     const macText = configuration.mac?.fileAssociations?.find(
       ({ name }) => name === "Plain text and code document"
     )
 
-    expect(markdown?.ext).toEqual([...MARKDOWN_DOCUMENT_EXTENSIONS])
-    expect(markdown?.description).toBe("Markdown document")
-    expect(markdown?.role).toBe("Editor")
+    expect(macMarkdown?.ext).toEqual([...MARKDOWN_DOCUMENT_EXTENSIONS])
+    expect(windowsMarkdown?.ext).toEqual([...MARKDOWN_DOCUMENT_EXTENSIONS])
+    expect(macMarkdown?.description).toBe("Markdown document")
+    expect(windowsMarkdown?.role).toBe("Editor")
+    expect(linuxMarkdown).toMatchObject({
+      ext: "mdown",
+      mimeType: "text/markdown",
+    })
+    expect(configuration.linux?.mimeTypes).toBeUndefined()
+    expect(configuration.linux?.category).toBe("Utility;TextEditor")
     expect(macText).toMatchObject({
       rank: "Alternate",
       role: "Editor",
@@ -175,7 +196,7 @@ describe("electron-builder configuration", () => {
 
   it("owns and safely removes its Windows shell registrations", async () => {
     const configuration = await builderConfiguration()
-    const markdown = configuration.fileAssociations?.find(
+    const markdown = configuration.win?.fileAssociations?.find(
       ({ name }) => name === "PulseMD.Markdown"
     )
     const installerInclude = await readFile(
@@ -192,7 +213,7 @@ describe("electron-builder configuration", () => {
       name: "PulseMD.Markdown",
     })
     expect(
-      configuration.fileAssociations?.map(({ name }) => name)
+      configuration.win?.fileAssociations?.map(({ name }) => name)
     ).not.toContain("Markdown document")
     expect(installerInclude).toContain(
       'WriteRegStr SHCTX "Software\\Classes\\PulseMD.Markdown\\shell\\open\\command" "" \'$\\"$appExe$\\" $\\"%1$\\"\''
@@ -356,7 +377,7 @@ describe("electron-builder configuration", () => {
     expect(configuration.deb?.packageName).toBe("pulse-md")
     expect(configuration.linux?.desktop?.entry).toMatchObject({
       Name: "Pulse MD",
-      StartupWMClass: "pulse-md",
+      StartupWMClass: "io.github.mapleroyal.pulse-md",
     })
     expect(JSON.stringify(configuration)).not.toContain("pmd-local")
   })

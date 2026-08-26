@@ -1057,11 +1057,20 @@ function documentSurfaceBackground(
 function documentWindowBackground(
   backgroundColor: string,
   effect: AppSettings["backgroundEffect"],
-  supported: boolean
+  backgroundCapability: string | undefined
 ) {
-  return supported && effect.enabled && effect.translucency > 0
-    ? `${backgroundColor}00`
-    : backgroundColor
+  const supported =
+    backgroundCapability === "darwin" ||
+    backgroundCapability === "win32" ||
+    backgroundCapability === "linux"
+  if (!supported || !effect.enabled || effect.translucency <= 0) {
+    return backgroundColor
+  }
+  // macOS and Windows own their tint in the native backdrop. Linux exposes a
+  // genuinely alpha renderer surface so Hyprland can blur behind it.
+  return backgroundCapability === "linux"
+    ? documentSurfaceBackground(backgroundColor, effect, true)
+    : `${backgroundColor}00`
 }
 
 let colorResolutionCanvas: HTMLCanvasElement | null = null
@@ -1375,6 +1384,7 @@ export function App() {
     tabId: null as TabId | null,
   })
   const [windowZoomFactor, setWindowZoomFactor] = React.useState(1)
+  const [windowMaximized, setWindowMaximized] = React.useState(false)
   const [navigationAvailability, setNavigationAvailability] = React.useState({
     back: false,
     forward: false,
@@ -2120,7 +2130,9 @@ export function App() {
       const backgroundCapability =
         document.documentElement.dataset.backgroundCapability
       const supportsBackgroundEffect =
-        backgroundCapability === "darwin" || backgroundCapability === "win32"
+        backgroundCapability === "darwin" ||
+        backgroundCapability === "win32" ||
+        backgroundCapability === "linux"
       const backgroundEffectEnabled =
         supportsBackgroundEffect &&
         nextSettings.backgroundEffect.enabled &&
@@ -2157,7 +2169,7 @@ export function App() {
       const windowBackground = documentWindowBackground(
         resolvedProfile.backgroundColor,
         nextSettings.backgroundEffect,
-        supportsBackgroundEffect
+        backgroundCapability
       )
       document.documentElement.style.setProperty(
         "--document-window-final-background",
@@ -6006,6 +6018,18 @@ export function App() {
     () => window.pulseMd.onWindowZoomChanged(handleWindowZoomChanged),
     [handleWindowZoomChanged]
   )
+  React.useEffect(() => {
+    let active = true
+    const unsubscribe =
+      window.pulseMd.onWindowMaximizedChanged(setWindowMaximized)
+    void window.pulseMd.getWindowMaximized().then((maximized) => {
+      if (active) setWindowMaximized(maximized)
+    })
+    return () => {
+      active = false
+      unsubscribe()
+    }
+  }, [])
   React.useEffect(
     () =>
       window.pulseMd.onWindowZoomPersistenceFailed((zoomFactor) => {
@@ -6980,7 +7004,11 @@ export function App() {
     formattingBarEnabled
   )
   const windowsControlDrawerMetrics = React.useMemo(() => {
-    if (platform !== "win32" || settingsWorkspacePreviewOpen || !activeTabId) {
+    if (
+      (platform !== "win32" && platform !== "linux") ||
+      settingsWorkspacePreviewOpen ||
+      !activeTabId
+    ) {
       return null
     }
 
@@ -7189,7 +7217,11 @@ export function App() {
   return (
     <main
       ref={appShellRef}
-      className="app-shell"
+      className={
+        platform === "win32" || platform === "linux"
+          ? "app-shell desktop-chrome"
+          : "app-shell"
+      }
       data-platform={platform ?? undefined}
       data-windows-controls-drawer={
         windowsControlDrawerMetrics ? true : undefined
@@ -7247,6 +7279,7 @@ export function App() {
           tabScrollerRef={topChromeTabScrollerRef}
           tabs={tabDescriptors}
           windowZoomFactor={windowZoomFactor}
+          windowMaximized={windowMaximized}
           failurePortalTarget={recoveryNoticeStackElement}
           previewTitle={settingsWorkspacePreviewTitle}
           onActivateTab={(tabId, focusPolicy) =>

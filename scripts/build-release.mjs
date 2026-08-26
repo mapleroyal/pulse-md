@@ -65,6 +65,18 @@ function runVisible(command, args, options = {}) {
   }
 }
 
+function commandAvailable(command, environment) {
+  const result = spawnSync(command, ["--version"], {
+    cwd: projectRoot,
+    env: environment,
+    stdio: "ignore",
+  })
+  if (result.error?.code === "ENOENT") return false
+  if (result.error)
+    throw commandFailure(`${command} availability check`, result)
+  return true
+}
+
 function verifyPackagedRuntime(root, environment, label) {
   runVisible(
     process.execPath,
@@ -839,14 +851,47 @@ export function validateLinuxDebianMetadata(
   }
 }
 
-function verifyLinuxDebianMetadata(artifact, architecture) {
-  const metadata = {}
-  for (const field of ["Package", "Version", "Architecture"]) {
-    metadata[field] = run("dpkg-deb", ["--field", artifact, field], {
-      label: `Debian package ${field} check`,
-    }).stdout.trim()
+function verifyLinuxDebianMetadata(artifact, architecture, environment) {
+  const toolchain = resolveLinuxDebianToolchain((command) =>
+    commandAvailable(command, environment)
+  )
+  if (toolchain === "dpkg-deb") {
+    const metadata = {}
+    for (const field of ["Package", "Version", "Architecture"]) {
+      metadata[field] = run("dpkg-deb", ["--field", artifact, field], {
+        label: `Debian package ${field} check`,
+      }).stdout.trim()
+    }
+    validateLinuxDebianMetadata(metadata, architecture, artifact)
+    return
   }
-  validateLinuxDebianMetadata(metadata, architecture, artifact)
+
+  const extractionDirectory = mkdtempSync(
+    path.join(os.tmpdir(), linuxArtifactExtractionPrefix)
+  )
+  assertManagedLinuxArtifactExtraction(extractionDirectory)
+  try {
+    extractLinuxDebianArchiveMember(
+      artifact,
+      extractionDirectory,
+      "control",
+      environment
+    )
+    const controlPath = path.join(extractionDirectory, "control")
+    const controlStat = lstatIfPresent(controlPath)
+    if (!controlStat?.isFile() || controlStat.isSymbolicLink()) {
+      throw new Error(
+        `Debian package control archive is missing its control file: ${artifact}`
+      )
+    }
+    validateLinuxDebianMetadata(
+      parseLinuxDebianControl(readFileSync(controlPath, "utf8")),
+      architecture,
+      artifact
+    )
+  } finally {
+    removeLinuxArtifactExtraction(extractionDirectory)
+  }
 }
 
 export function validateLinuxAppImageHeader(
@@ -915,6 +960,120 @@ export function linuxArtifactExtractionPlan(artifact, extractionDirectory) {
     }
   }
   throw new Error(`Unsupported Linux release artifact: ${artifact}`)
+}
+
+export function resolveLinuxDebianToolchain(
+  isCommandAvailable = (command) => commandAvailable(command, process.env)
+) {
+  if (isCommandAvailable("dpkg-deb")) return "dpkg-deb"
+  const missing = ["ar", "bsdtar"].filter(
+    (command) => !isCommandAvailable(command)
+  )
+  if (missing.length > 0) {
+    throw new Error(
+      `Debian package verification requires dpkg-deb or both ar and bsdtar; missing ${missing.join(", ")}`
+    )
+  }
+  return "archive"
+}
+
+export function resolveLinuxDebianArchiveMember(
+  listing,
+  kind,
+  artifact = "Debian package"
+) {
+  if (kind !== "control" && kind !== "data") {
+    throw new Error(`Unsupported Debian archive member kind: ${kind}`)
+  }
+  const pattern = new RegExp(`^${kind}\\.tar(?:\\.[A-Za-z0-9]+)?$`)
+  const matches = String(listing)
+    .split(/\r?\n/u)
+    .map((member) => member.trim())
+    .filter((member) => pattern.test(member))
+  if (matches.length !== 1) {
+    throw new Error(
+      `Debian package must contain exactly one ${kind} archive; found ${matches.length}: ${artifact}`
+    )
+  }
+  return matches[0]
+}
+
+export function linuxDebianArchiveInspectionPlan(artifact) {
+  return {
+    args: ["t", path.resolve(artifact)],
+    command: "ar",
+    cwd: projectRoot,
+  }
+}
+
+export function linuxDebianArchiveExtractionPlan(
+  artifact,
+  extractionDirectory,
+  member
+) {
+  if (!/^(?:control|data)\.tar(?:\.[A-Za-z0-9]+)?$/u.test(member)) {
+    throw new Error(`Unsafe Debian archive member: ${member}`)
+  }
+  const absoluteArtifact = path.resolve(artifact)
+  const absoluteExtractionDirectory = path.resolve(extractionDirectory)
+  const archivePath = path.join(absoluteExtractionDirectory, member)
+  return {
+    archivePath,
+    commands: [
+      {
+        args: ["x", absoluteArtifact, member],
+        command: "ar",
+        cwd: absoluteExtractionDirectory,
+      },
+      {
+        args: ["-xf", archivePath, "-C", absoluteExtractionDirectory],
+        command: "bsdtar",
+        cwd: absoluteExtractionDirectory,
+      },
+    ],
+  }
+}
+
+export function parseLinuxDebianControl(contents) {
+  const metadata = {}
+  let field = null
+  for (const line of String(contents).split(/\r?\n/u)) {
+    if (/^[ \t]/u.test(line)) {
+      if (field) metadata[field] += `\n${line.trim()}`
+      continue
+    }
+    const match = /^([A-Za-z0-9][A-Za-z0-9-]*):[ \t]*(.*)$/u.exec(line)
+    field = match?.[1] ?? null
+    if (field) metadata[field] = match[2]
+  }
+  return metadata
+}
+
+function extractLinuxDebianArchiveMember(
+  artifact,
+  extractionDirectory,
+  kind,
+  environment
+) {
+  const inspection = linuxDebianArchiveInspectionPlan(artifact)
+  const listing = run(inspection.command, inspection.args, {
+    cwd: inspection.cwd,
+    env: environment,
+    label: `Debian package ${kind} archive inspection`,
+  }).stdout
+  const member = resolveLinuxDebianArchiveMember(listing, kind, artifact)
+  const plan = linuxDebianArchiveExtractionPlan(
+    artifact,
+    extractionDirectory,
+    member
+  )
+  for (const command of plan.commands) {
+    run(command.command, command.args, {
+      cwd: command.cwd,
+      env: environment,
+      label: `Debian package ${kind} archive extraction`,
+    })
+  }
 }
 
 export function linuxArtifactRuntimeRootCandidates(
@@ -1041,11 +1200,25 @@ function verifyLinuxArtifactRuntime(artifact, environment) {
   assertManagedLinuxArtifactExtraction(extractionDirectory)
   try {
     const plan = linuxArtifactExtractionPlan(artifact, extractionDirectory)
-    run(plan.command, plan.args, {
-      cwd: plan.cwd,
-      env: environment,
-      label: `${plan.format} payload extraction`,
-    })
+    if (
+      plan.format === "debian" &&
+      resolveLinuxDebianToolchain((command) =>
+        commandAvailable(command, environment)
+      ) === "archive"
+    ) {
+      extractLinuxDebianArchiveMember(
+        artifact,
+        extractionDirectory,
+        "data",
+        environment
+      )
+    } else {
+      run(plan.command, plan.args, {
+        cwd: plan.cwd,
+        env: environment,
+        label: `${plan.format} payload extraction`,
+      })
+    }
     const runtimeRoot = resolveLinuxArtifactRuntimeRoot(
       plan.format,
       extractionDirectory
@@ -1069,7 +1242,7 @@ function verifyLinuxRelease(directory, architecture, environment) {
   const artifacts = linuxReleaseArtifacts(directory, architecture)
   const [appImage, debian] = artifacts
   verifyLinuxAppImageArchitecture(appImage, architecture)
-  verifyLinuxDebianMetadata(debian, architecture)
+  verifyLinuxDebianMetadata(debian, architecture, environment)
   verifyLinuxArtifactRuntime(appImage, environment)
   verifyLinuxArtifactRuntime(debian, environment)
   return artifacts

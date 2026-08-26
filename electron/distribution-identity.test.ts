@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest"
 import {
   DEVELOPMENT_PRODUCT_NAME,
   distributionShouldStartCliServer,
+  LINUX_DESKTOP_NAME,
   PRODUCT_NAME,
   resolveDistributionIdentity,
   USER_DATA_DIRECTORY_NAME,
@@ -20,6 +21,10 @@ describe("distribution identity", () => {
     expect(WINDOWS_APP_USER_MODEL_ID).toBe("io.github.mapleroyal.pulse-md")
   })
 
+  it("uses a reverse-DNS Linux desktop identity", () => {
+    expect(LINUX_DESKTOP_NAME).toBe("io.github.mapleroyal.pulse-md.desktop")
+  })
+
   it("gives source development a complete isolated identity", () => {
     expect(
       resolveDistributionIdentity(false, undefined, DEVELOPMENT_CHECKOUT)
@@ -29,6 +34,7 @@ describe("distribution identity", () => {
       cliIdentity: DEVELOPMENT_CHECKOUT.cliIdentity,
       isDevelopment: true,
       isCanonicalPackage: false,
+      linuxDesktopName: `io.github.mapleroyal.pulse-md-development-${DEVELOPMENT_CHECKOUT.checkoutHash}.desktop`,
       productName: DEVELOPMENT_PRODUCT_NAME,
       scratchLinkScheme: "pulse-md-development",
       userDataDirectoryName: DEVELOPMENT_CHECKOUT.userDataDirectoryName,
@@ -55,6 +61,7 @@ describe("distribution identity", () => {
       cliIdentity: "pulse-md",
       isDevelopment: false,
       isCanonicalPackage: true,
+      linuxDesktopName: LINUX_DESKTOP_NAME,
       productName: PRODUCT_NAME,
       scratchLinkScheme: "pulse-md",
       userDataDirectoryName: USER_DATA_DIRECTORY_NAME,

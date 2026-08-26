@@ -1,6 +1,14 @@
-import type { RecoveryAction } from "@/shared/contracts"
+import type { RecoveryAction, WindowAction } from "@/shared/contracts"
 
 const parameters = new URLSearchParams(window.location.search)
+const platform = parameters.get("platform")
+if (platform === "linux") document.documentElement.dataset.platform = platform
+window.pulseMd.onWindowZoomChanged((zoomFactor) => {
+  document.documentElement.style.setProperty(
+    "--recovery-window-zoom",
+    String(zoomFactor)
+  )
+})
 const appearanceMode = parameters.get("appearanceMode")
 const darkSlot =
   appearanceMode === "dark" ||
@@ -66,3 +74,25 @@ for (const button of buttons) {
     })
   })
 }
+
+for (const button of document.querySelectorAll<HTMLButtonElement>(
+  "[data-window-action]"
+)) {
+  button.addEventListener("click", () => {
+    const action = button.dataset.windowAction as WindowAction | undefined
+    if (action) window.pulseMdRecovery.windowAction(action)
+  })
+}
+
+const maximizeButton = document.querySelector<HTMLButtonElement>(
+  '[data-window-action="toggle-maximize"]'
+)
+const updateMaximizedState = (maximized: boolean) => {
+  if (!maximizeButton) return
+  maximizeButton.dataset.maximized = String(maximized)
+  const label = maximized ? "Restore" : "Maximize"
+  maximizeButton.ariaLabel = `${label} window`
+  maximizeButton.title = label
+}
+window.pulseMdRecovery.onWindowMaximizedChanged(updateMaximizedState)
+void window.pulseMdRecovery.getWindowMaximized().then(updateMaximizedState)

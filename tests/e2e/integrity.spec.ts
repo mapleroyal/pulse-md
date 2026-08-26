@@ -231,6 +231,39 @@ test("a renderer bootstrap failure can hand off to the in-window recovery surfac
     await expect(
       page.getByRole("heading", { name: "The editor could not start" })
     ).toBeVisible()
+    if (process.platform === "linux") {
+      await expect(page.getByLabel("Window controls")).toBeVisible()
+      const maximize = page.locator('[data-window-action="toggle-maximize"]')
+      const initiallyMaximized = await app.evaluate(
+        ({ BrowserWindow }) =>
+          BrowserWindow.getAllWindows()[0]?.isMaximized() ?? false
+      )
+      await expect(maximize).toHaveAccessibleName(
+        initiallyMaximized ? "Restore window" : "Maximize window"
+      )
+      await maximize.click()
+      await expect
+        .poll(() =>
+          app.evaluate(({ BrowserWindow }) =>
+            Boolean(BrowserWindow.getAllWindows()[0]?.isMaximized())
+          )
+        )
+        .toBe(!initiallyMaximized)
+      await expect(maximize).toHaveAccessibleName(
+        initiallyMaximized ? "Maximize window" : "Restore window"
+      )
+      await maximize.click()
+      await expect
+        .poll(() =>
+          app.evaluate(({ BrowserWindow }) =>
+            Boolean(BrowserWindow.getAllWindows()[0]?.isMaximized())
+          )
+        )
+        .toBe(initiallyMaximized)
+      await expect(maximize).toHaveAccessibleName(
+        initiallyMaximized ? "Restore window" : "Maximize window"
+      )
+    }
     await page.getByRole("button", { name: "Reload Window" }).click()
     await expect(page).toHaveURL(/\/index\.html/)
     await page.locator(".cm-editor").waitFor()

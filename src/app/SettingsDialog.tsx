@@ -1592,191 +1592,276 @@ export default function SettingsDialog({
             </CollapsibleContent>
           </Collapsible>
 
-          {platform !== "linux" ? (
-            <Collapsible
-              className="rounded-3xl border border-border/70"
-              data-settings-search-section="Transparency and Blur"
-              open={settingsSearchActive || openSections.background}
-              onOpenChange={(sectionOpen) =>
-                setSectionOpen("background", sectionOpen)
-              }
+          <Collapsible
+            className="rounded-3xl border border-border/70"
+            data-settings-search-section="Transparency and Blur"
+            open={settingsSearchActive || openSections.background}
+            onOpenChange={(sectionOpen) =>
+              setSectionOpen("background", sectionOpen)
+            }
+          >
+            <CollapsibleTrigger className="group flex w-full items-center justify-between rounded-3xl px-4 py-3 text-left font-medium outline-none focus-visible:ring-3 focus-visible:ring-ring/30">
+              <span className="inline-flex items-center gap-2">
+                <BlendIcon
+                  aria-hidden="true"
+                  className="size-4 text-muted-foreground"
+                />
+                <span>Transparency &amp; Blur</span>
+              </span>
+              <ChevronDownIcon className="size-4 text-muted-foreground transition-transform group-data-panel-open:rotate-180" />
+            </CollapsibleTrigger>
+            <CollapsibleContent
+              className="grid gap-4 px-4 pb-4"
+              data-settings-search-items
             >
-              <CollapsibleTrigger className="group flex w-full items-center justify-between rounded-3xl px-4 py-3 text-left font-medium outline-none focus-visible:ring-3 focus-visible:ring-ring/30">
-                <span className="inline-flex items-center gap-2">
-                  <BlendIcon
-                    aria-hidden="true"
-                    className="size-4 text-muted-foreground"
-                  />
-                  <span>Transparency &amp; Blur</span>
-                </span>
-                <ChevronDownIcon className="size-4 text-muted-foreground transition-transform group-data-panel-open:rotate-180" />
-              </CollapsibleTrigger>
-              <CollapsibleContent
-                className="grid gap-4 px-4 pb-4"
-                data-settings-search-items
+              <Field orientation="horizontal">
+                <FieldContent>
+                  <ResettableFieldLabel
+                    defaultValue={DEFAULT_APP_SETTINGS.backgroundEffect.enabled}
+                    htmlFor="background-effect-enabled"
+                    label="window transparency and blur"
+                    value={draftSettings.backgroundEffect.enabled}
+                    onReset={() =>
+                      updateBackgroundEffect({
+                        enabled: DEFAULT_APP_SETTINGS.backgroundEffect.enabled,
+                      })
+                    }
+                  >
+                    Window Transparency &amp; Blur
+                  </ResettableFieldLabel>
+                </FieldContent>
+                <Switch
+                  id="background-effect-enabled"
+                  aria-label="Window transparency & blur"
+                  checked={draftSettings.backgroundEffect.enabled}
+                  disabled={!backgroundEffectSupported}
+                  onCheckedChange={(enabled) =>
+                    updateBackgroundEffect({ enabled })
+                  }
+                />
+              </Field>
+
+              {platform === "win32" && !backgroundEffectSupported ? (
+                <FieldDescription>
+                  Native backdrop blur is unavailable on this Windows release.
+                  Pulse MD remains opaque; Windows 11 22H2 or later is required.
+                </FieldDescription>
+              ) : null}
+
+              {platform === "linux" ? (
+                <FieldDescription>
+                  Pulse MD supplies the translucent tinted surface. Your Linux
+                  compositor adds behind-window blur when its desktop blur
+                  setting is enabled.
+                </FieldDescription>
+              ) : null}
+
+              <div
+                className="grid gap-3 rounded-2xl border border-border/60 p-3"
+                data-disabled={!backgroundEffectControlsEnabled}
               >
-                <Field orientation="horizontal">
-                  <FieldContent>
+                <div>
+                  <p className="text-sm font-medium">Translucent Surfaces</p>
+                </div>
+                {(
+                  [
+                    ["translucentCallouts", "Callouts"],
+                    ["translucentCodeBlocks", "Code Blocks"],
+                    ["translucentInlineCode", "Inline Code"],
+                  ] as const
+                ).map(([setting, label]) => (
+                  <Field key={setting} orientation="horizontal">
                     <ResettableFieldLabel
                       defaultValue={
-                        DEFAULT_APP_SETTINGS.backgroundEffect.enabled
+                        DEFAULT_APP_SETTINGS.backgroundEffect[setting]
                       }
-                      htmlFor="background-effect-enabled"
-                      label="window transparency and blur"
-                      value={draftSettings.backgroundEffect.enabled}
+                      disabled={!backgroundEffectControlsEnabled}
+                      htmlFor={`background-effect-${setting}`}
+                      label={`${label.toLowerCase()} translucency`}
+                      value={draftSettings.backgroundEffect[setting]}
                       onReset={() =>
                         updateBackgroundEffect({
-                          enabled:
-                            DEFAULT_APP_SETTINGS.backgroundEffect.enabled,
+                          [setting]:
+                            DEFAULT_APP_SETTINGS.backgroundEffect[setting],
                         })
                       }
                     >
-                      Window Transparency &amp; Blur
+                      {label}
                     </ResettableFieldLabel>
-                  </FieldContent>
-                  <Switch
-                    id="background-effect-enabled"
-                    aria-label="Window transparency & blur"
-                    checked={draftSettings.backgroundEffect.enabled}
-                    disabled={!backgroundEffectSupported}
-                    onCheckedChange={(enabled) =>
-                      updateBackgroundEffect({ enabled })
-                    }
-                  />
-                </Field>
+                    <Switch
+                      id={`background-effect-${setting}`}
+                      aria-label={label}
+                      checked={draftSettings.backgroundEffect[setting]}
+                      disabled={!backgroundEffectControlsEnabled}
+                      onCheckedChange={(enabled) =>
+                        updateBackgroundEffect({ [setting]: enabled })
+                      }
+                    />
+                  </Field>
+                ))}
+              </div>
 
-                {platform === "win32" && !backgroundEffectSupported ? (
-                  <FieldDescription>
-                    Native backdrop blur is unavailable on this Windows release.
-                    Pulse MD remains opaque; Windows 11 22H2 or later is
-                    required.
-                  </FieldDescription>
-                ) : null}
-
-                <div
-                  className="grid gap-3 rounded-2xl border border-border/60 p-3"
-                  data-disabled={!backgroundEffectControlsEnabled}
+              <Field
+                data-disabled={!backgroundEffectControlsEnabled}
+                orientation="vertical"
+              >
+                <ResettableFieldLabel
+                  defaultValue={
+                    DEFAULT_APP_SETTINGS.backgroundEffect.translucency
+                  }
+                  disabled={!backgroundEffectControlsEnabled}
+                  htmlFor="background-translucency"
+                  label="background translucency"
+                  value={draftSettings.backgroundEffect.translucency}
+                  onReset={() => {
+                    const translucency =
+                      DEFAULT_APP_SETTINGS.backgroundEffect.translucency
+                    setBackgroundTranslucencyInput(
+                      formatBackgroundTranslucencyPercent(translucency)
+                    )
+                    updateBackgroundEffect({ translucency })
+                  }}
                 >
-                  <div>
-                    <p className="text-sm font-medium">Translucent Surfaces</p>
-                  </div>
-                  {(
-                    [
-                      ["translucentCallouts", "Callouts"],
-                      ["translucentCodeBlocks", "Code Blocks"],
-                      ["translucentInlineCode", "Inline Code"],
-                    ] as const
-                  ).map(([setting, label]) => (
-                    <Field key={setting} orientation="horizontal">
-                      <ResettableFieldLabel
-                        defaultValue={
-                          DEFAULT_APP_SETTINGS.backgroundEffect[setting]
-                        }
+                  Background Translucency
+                </ResettableFieldLabel>
+                <FieldContent>
+                  <div className="settings-input-pair grid grid-cols-[minmax(0,1fr)_5.5rem] items-center gap-3">
+                    <Slider
+                      id="background-translucency"
+                      aria-label="Background translucency"
+                      disabled={!backgroundEffectControlsEnabled}
+                      max={MAX_BACKGROUND_TRANSLUCENCY_PERCENT}
+                      min={MIN_BACKGROUND_TRANSLUCENCY_PERCENT}
+                      step={BACKGROUND_TRANSLUCENCY_PERCENT_STEP}
+                      value={[
+                        Math.round(
+                          draftSettings.backgroundEffect.translucency * 100
+                        ),
+                      ]}
+                      onValueChange={(value) => {
+                        const percentage = Math.round(
+                          typeof value === "number"
+                            ? value
+                            : (value[0] ??
+                                draftSettings.backgroundEffect.translucency *
+                                  100)
+                        )
+                        const translucency = clampBackgroundTranslucency(
+                          percentage / 100
+                        )
+                        setBackgroundTranslucencyInput(String(percentage))
+                        updateBackgroundEffect({ translucency })
+                      }}
+                    />
+                    <div className="relative">
+                      <Input
+                        aria-label="Background translucency percentage"
+                        className="pr-7 text-right tabular-nums"
                         disabled={!backgroundEffectControlsEnabled}
-                        htmlFor={`background-effect-${setting}`}
-                        label={`${label.toLowerCase()} translucency`}
-                        value={draftSettings.backgroundEffect[setting]}
-                        onReset={() =>
-                          updateBackgroundEffect({
-                            [setting]:
-                              DEFAULT_APP_SETTINGS.backgroundEffect[setting],
-                          })
-                        }
-                      >
-                        {label}
-                      </ResettableFieldLabel>
-                      <Switch
-                        id={`background-effect-${setting}`}
-                        aria-label={label}
-                        checked={draftSettings.backgroundEffect[setting]}
-                        disabled={!backgroundEffectControlsEnabled}
-                        onCheckedChange={(enabled) =>
-                          updateBackgroundEffect({ [setting]: enabled })
-                        }
+                        inputMode="numeric"
+                        max={MAX_BACKGROUND_TRANSLUCENCY_PERCENT}
+                        min={MIN_BACKGROUND_TRANSLUCENCY_PERCENT}
+                        step={BACKGROUND_TRANSLUCENCY_PERCENT_STEP}
+                        type="number"
+                        value={backgroundTranslucencyInput}
+                        onBlur={commitBackgroundTranslucencyInput}
+                        onChange={(event) => {
+                          const value = event.currentTarget.value
+                          setBackgroundTranslucencyInput(value)
+                          const parsed = Number(value)
+                          if (
+                            value.trim() !== "" &&
+                            Number.isFinite(parsed) &&
+                            parsed >= MIN_BACKGROUND_TRANSLUCENCY_PERCENT &&
+                            parsed <= MAX_BACKGROUND_TRANSLUCENCY_PERCENT
+                          ) {
+                            updateBackgroundEffect({
+                              translucency: clampBackgroundTranslucency(
+                                Math.round(parsed) / 100
+                              ),
+                            })
+                          }
+                        }}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter") event.currentTarget.blur()
+                        }}
                       />
-                    </Field>
-                  ))}
-                </div>
+                      <span className="pointer-events-none absolute inset-y-0 right-2 flex items-center text-xs text-muted-foreground">
+                        %
+                      </span>
+                    </div>
+                  </div>
+                </FieldContent>
+              </Field>
 
+              {platform === "darwin" || platform === "win32" ? (
                 <Field
                   data-disabled={!backgroundEffectControlsEnabled}
                   orientation="vertical"
                 >
                   <ResettableFieldLabel
                     defaultValue={
-                      DEFAULT_APP_SETTINGS.backgroundEffect.translucency
+                      DEFAULT_APP_SETTINGS.backgroundEffect.blurRadius
                     }
                     disabled={!backgroundEffectControlsEnabled}
-                    htmlFor="background-translucency"
-                    label="background translucency"
-                    value={draftSettings.backgroundEffect.translucency}
+                    htmlFor="background-blur-radius"
+                    label="background blur radius"
+                    value={draftSettings.backgroundEffect.blurRadius}
                     onReset={() => {
-                      const translucency =
-                        DEFAULT_APP_SETTINGS.backgroundEffect.translucency
-                      setBackgroundTranslucencyInput(
-                        formatBackgroundTranslucencyPercent(translucency)
+                      const blurRadius =
+                        DEFAULT_APP_SETTINGS.backgroundEffect.blurRadius
+                      setBackgroundBlurRadiusInput(
+                        formatBackgroundBlurRadius(blurRadius)
                       )
-                      updateBackgroundEffect({ translucency })
+                      updateBackgroundEffect({ blurRadius })
                     }}
                   >
-                    Background Translucency
+                    Blur Radius
                   </ResettableFieldLabel>
                   <FieldContent>
                     <div className="settings-input-pair grid grid-cols-[minmax(0,1fr)_5.5rem] items-center gap-3">
                       <Slider
-                        id="background-translucency"
-                        aria-label="Background translucency"
+                        id="background-blur-radius"
+                        aria-label="Background blur radius"
                         disabled={!backgroundEffectControlsEnabled}
-                        max={MAX_BACKGROUND_TRANSLUCENCY_PERCENT}
-                        min={MIN_BACKGROUND_TRANSLUCENCY_PERCENT}
-                        step={BACKGROUND_TRANSLUCENCY_PERCENT_STEP}
-                        value={[
-                          Math.round(
-                            draftSettings.backgroundEffect.translucency * 100
-                          ),
-                        ]}
+                        max={MAX_BACKGROUND_BLUR_RADIUS_VALUE}
+                        min={MIN_BACKGROUND_BLUR_RADIUS_VALUE}
+                        step={BACKGROUND_BLUR_RADIUS_STEP}
+                        value={[draftSettings.backgroundEffect.blurRadius]}
                         onValueChange={(value) => {
-                          const percentage = Math.round(
+                          const blurRadius = clampBackgroundBlurRadius(
                             typeof value === "number"
                               ? value
                               : (value[0] ??
-                                  draftSettings.backgroundEffect.translucency *
-                                    100)
+                                  draftSettings.backgroundEffect.blurRadius)
                           )
-                          const translucency = clampBackgroundTranslucency(
-                            percentage / 100
-                          )
-                          setBackgroundTranslucencyInput(String(percentage))
-                          updateBackgroundEffect({ translucency })
+                          setBackgroundBlurRadiusInput(String(blurRadius))
+                          updateBackgroundEffect({ blurRadius })
                         }}
                       />
                       <div className="relative">
                         <Input
-                          aria-label="Background translucency percentage"
+                          aria-label="Background blur radius value"
                           className="pr-7 text-right tabular-nums"
                           disabled={!backgroundEffectControlsEnabled}
                           inputMode="numeric"
-                          max={MAX_BACKGROUND_TRANSLUCENCY_PERCENT}
-                          min={MIN_BACKGROUND_TRANSLUCENCY_PERCENT}
-                          step={BACKGROUND_TRANSLUCENCY_PERCENT_STEP}
+                          max={MAX_BACKGROUND_BLUR_RADIUS_VALUE}
+                          min={MIN_BACKGROUND_BLUR_RADIUS_VALUE}
+                          step={BACKGROUND_BLUR_RADIUS_STEP}
                           type="number"
-                          value={backgroundTranslucencyInput}
-                          onBlur={commitBackgroundTranslucencyInput}
+                          value={backgroundBlurRadiusInput}
+                          onBlur={commitBackgroundBlurRadiusInput}
                           onChange={(event) => {
                             const value = event.currentTarget.value
-                            setBackgroundTranslucencyInput(value)
+                            setBackgroundBlurRadiusInput(value)
                             const parsed = Number(value)
                             if (
                               value.trim() !== "" &&
-                              Number.isFinite(parsed) &&
-                              parsed >= MIN_BACKGROUND_TRANSLUCENCY_PERCENT &&
-                              parsed <= MAX_BACKGROUND_TRANSLUCENCY_PERCENT
+                              Number.isInteger(parsed) &&
+                              parsed >= MIN_BACKGROUND_BLUR_RADIUS_VALUE &&
+                              parsed <= MAX_BACKGROUND_BLUR_RADIUS_VALUE
                             ) {
-                              updateBackgroundEffect({
-                                translucency: clampBackgroundTranslucency(
-                                  Math.round(parsed) / 100
-                                ),
-                              })
+                              updateBackgroundEffect({ blurRadius: parsed })
                             }
                           }}
                           onKeyDown={(event) => {
@@ -1785,159 +1870,74 @@ export default function SettingsDialog({
                           }}
                         />
                         <span className="pointer-events-none absolute inset-y-0 right-2 flex items-center text-xs text-muted-foreground">
-                          %
+                          px
                         </span>
                       </div>
                     </div>
                   </FieldContent>
                 </Field>
-
-                {platform === "darwin" || platform === "win32" ? (
-                  <Field
-                    data-disabled={!backgroundEffectControlsEnabled}
-                    orientation="vertical"
-                  >
-                    <ResettableFieldLabel
-                      defaultValue={
-                        DEFAULT_APP_SETTINGS.backgroundEffect.blurRadius
-                      }
-                      disabled={!backgroundEffectControlsEnabled}
-                      htmlFor="background-blur-radius"
-                      label="background blur radius"
-                      value={draftSettings.backgroundEffect.blurRadius}
-                      onReset={() => {
-                        const blurRadius =
-                          DEFAULT_APP_SETTINGS.backgroundEffect.blurRadius
-                        setBackgroundBlurRadiusInput(
-                          formatBackgroundBlurRadius(blurRadius)
-                        )
-                        updateBackgroundEffect({ blurRadius })
-                      }}
-                    >
-                      Blur Radius
-                    </ResettableFieldLabel>
-                    <FieldContent>
-                      <div className="settings-input-pair grid grid-cols-[minmax(0,1fr)_5.5rem] items-center gap-3">
-                        <Slider
-                          id="background-blur-radius"
-                          aria-label="Background blur radius"
-                          disabled={!backgroundEffectControlsEnabled}
-                          max={MAX_BACKGROUND_BLUR_RADIUS_VALUE}
-                          min={MIN_BACKGROUND_BLUR_RADIUS_VALUE}
-                          step={BACKGROUND_BLUR_RADIUS_STEP}
-                          value={[draftSettings.backgroundEffect.blurRadius]}
-                          onValueChange={(value) => {
-                            const blurRadius = clampBackgroundBlurRadius(
-                              typeof value === "number"
-                                ? value
-                                : (value[0] ??
-                                    draftSettings.backgroundEffect.blurRadius)
-                            )
-                            setBackgroundBlurRadiusInput(String(blurRadius))
-                            updateBackgroundEffect({ blurRadius })
-                          }}
-                        />
-                        <div className="relative">
-                          <Input
-                            aria-label="Background blur radius value"
-                            className="pr-7 text-right tabular-nums"
-                            disabled={!backgroundEffectControlsEnabled}
-                            inputMode="numeric"
-                            max={MAX_BACKGROUND_BLUR_RADIUS_VALUE}
-                            min={MIN_BACKGROUND_BLUR_RADIUS_VALUE}
-                            step={BACKGROUND_BLUR_RADIUS_STEP}
-                            type="number"
-                            value={backgroundBlurRadiusInput}
-                            onBlur={commitBackgroundBlurRadiusInput}
-                            onChange={(event) => {
-                              const value = event.currentTarget.value
-                              setBackgroundBlurRadiusInput(value)
-                              const parsed = Number(value)
-                              if (
-                                value.trim() !== "" &&
-                                Number.isInteger(parsed) &&
-                                parsed >= MIN_BACKGROUND_BLUR_RADIUS_VALUE &&
-                                parsed <= MAX_BACKGROUND_BLUR_RADIUS_VALUE
-                              ) {
-                                updateBackgroundEffect({ blurRadius: parsed })
-                              }
-                            }}
-                            onKeyDown={(event) => {
-                              if (event.key === "Enter")
-                                event.currentTarget.blur()
-                            }}
-                          />
-                          <span className="pointer-events-none absolute inset-y-0 right-2 flex items-center text-xs text-muted-foreground">
-                            px
-                          </span>
-                        </div>
-                      </div>
-                    </FieldContent>
-                  </Field>
-                ) : (
-                  <Field orientation="vertical">
-                    <FieldLabel>Blur Radius</FieldLabel>
-                    <FieldDescription>
-                      Native window transparency and blur are unavailable on
-                      this platform.
-                    </FieldDescription>
-                  </Field>
-                )}
-
-                <Field
-                  className="items-center! rounded-2xl border border-border/60 p-3"
-                  orientation="horizontal"
-                >
-                  <FieldContent>
-                    <ResettableFieldLabel
-                      defaultValue={
-                        DEFAULT_APP_SETTINGS.launchTransition.enabled
-                      }
-                      disabled={!backgroundEffectSupported}
-                      htmlFor="launch-transition-enabled"
-                      label="launch transition"
-                      value={draftSettings.launchTransition.enabled}
-                      onReset={() =>
-                        updateLaunchTransition({
-                          enabled:
-                            DEFAULT_APP_SETTINGS.launchTransition.enabled,
-                        })
-                      }
-                    >
-                      Launch Transition
-                    </ResettableFieldLabel>
-                  </FieldContent>
-                  <div className="flex items-center gap-2">
-                    <Switch
-                      id="launch-transition-enabled"
-                      aria-label="Launch transition"
-                      checked={draftSettings.launchTransition.enabled}
-                      disabled={!backgroundEffectSupported}
-                      onCheckedChange={(enabled) =>
-                        updateLaunchTransition({ enabled })
-                      }
-                    />
-                    <Button
-                      aria-label="Customize launch transition"
-                      disabled={
-                        !backgroundEffectSupported ||
-                        !draftSettings.launchTransition.enabled ||
-                        isSaving ||
-                        settingsTransferOperation !== null ||
-                        stagedSettingsImport !== null
-                      }
-                      type="button"
-                      variant="outline"
-                      onClick={() => onCustomizeLaunchTransition(draftSettings)}
-                    >
-                      Customize
-                      <ChevronRightIcon data-icon="inline-end" />
-                    </Button>
-                  </div>
+              ) : (
+                <Field orientation="vertical">
+                  <FieldLabel>Blur Radius</FieldLabel>
+                  <FieldDescription>
+                    Blur strength is controlled globally by the Linux
+                    compositor. On Omarchy, use Hyprland&apos;s desktop blur
+                    setting; Pulse MD continues to provide translucency when
+                    compositor blur is off.
+                  </FieldDescription>
                 </Field>
-              </CollapsibleContent>
-            </Collapsible>
-          ) : null}
+              )}
+
+              <Field
+                className="items-center! rounded-2xl border border-border/60 p-3"
+                orientation="horizontal"
+              >
+                <FieldContent>
+                  <ResettableFieldLabel
+                    defaultValue={DEFAULT_APP_SETTINGS.launchTransition.enabled}
+                    disabled={!backgroundEffectSupported}
+                    htmlFor="launch-transition-enabled"
+                    label="launch transition"
+                    value={draftSettings.launchTransition.enabled}
+                    onReset={() =>
+                      updateLaunchTransition({
+                        enabled: DEFAULT_APP_SETTINGS.launchTransition.enabled,
+                      })
+                    }
+                  >
+                    Launch Transition
+                  </ResettableFieldLabel>
+                </FieldContent>
+                <div className="flex items-center gap-2">
+                  <Switch
+                    id="launch-transition-enabled"
+                    aria-label="Launch transition"
+                    checked={draftSettings.launchTransition.enabled}
+                    disabled={!backgroundEffectSupported}
+                    onCheckedChange={(enabled) =>
+                      updateLaunchTransition({ enabled })
+                    }
+                  />
+                  <Button
+                    aria-label="Customize launch transition"
+                    disabled={
+                      !backgroundEffectSupported ||
+                      !draftSettings.launchTransition.enabled ||
+                      isSaving ||
+                      settingsTransferOperation !== null ||
+                      stagedSettingsImport !== null
+                    }
+                    type="button"
+                    variant="outline"
+                    onClick={() => onCustomizeLaunchTransition(draftSettings)}
+                  >
+                    Customize
+                    <ChevronRightIcon data-icon="inline-end" />
+                  </Button>
+                </div>
+              </Field>
+            </CollapsibleContent>
+          </Collapsible>
 
           <Collapsible
             className="rounded-3xl border border-border/70"

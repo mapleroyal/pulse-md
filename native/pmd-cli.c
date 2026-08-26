@@ -229,7 +229,9 @@ static void handle_interruption(int signal_number) {
     int socket_descriptor = (int)active_socket;
     active_socket = -1;
     const unsigned char cancellation = 0;
-    (void)write(socket_descriptor, &cancellation, sizeof(cancellation));
+    ssize_t cancellation_result =
+        write(socket_descriptor, &cancellation, sizeof(cancellation));
+    (void)cancellation_result;
     close(socket_descriptor);
   }
 }

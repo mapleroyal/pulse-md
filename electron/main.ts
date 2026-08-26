@@ -712,7 +712,7 @@ interface WindowState {
   appliedBackgroundEffectSignature: string | null
   appliedBackgroundBlurRadius: number
   appliedWindowsAlphaBootstrap: boolean
-  appliedWindowsTitleBarOverlaySignature: string | null
+  appliedDesktopTitleBarOverlaySignature: string | null
   appearancePreview: AppearanceSettings | null
   approvedTabCloses: Map<TabId, TabCloseApproval>
   bootstrapPending: boolean
@@ -1077,7 +1077,7 @@ let macWindowBlurAddon: MacWindowBlurAddon | null | undefined
 let macWindowBlurWarningShown = false
 let windowsWindowBlurAddon: WindowsWindowBlurAddon | null | undefined
 let windowsWindowBlurWarningShown = false
-let windowsNativeChromeWarningShown = false
+let desktopNativeChromeWarningShown = false
 let backgroundActivationPolicyActive = false
 
 function enterBackgroundActivationPolicy(): void {
@@ -1134,6 +1134,12 @@ protocol.registerSchemesAsPrivileged([
 
 if (process.platform === "win32" && app.isPackaged) {
   app.setAppUserModelId(WINDOWS_APP_USER_MODEL_ID)
+}
+if (process.platform === "linux") {
+  // Wayland app_id, X11 WM_CLASS, desktop portals, and the installed desktop
+  // entry must agree. Development stays checkout-scoped so it cannot merge
+  // with the canonical installed application in Hyprland.
+  app.setDesktopName(distributionIdentity.linuxDesktopName)
 }
 app.setName(PRODUCT_NAME)
 if (!isCanonicalDistribution && !isolatedUserDataLaunch) {
@@ -2920,7 +2926,7 @@ async function commitApplicationSettings(
       }
       settings = nextSettings
       committedSettings = nextSettings
-      applyWindowsNativeThemeSource(nextSettings)
+      applyDesktopNativeThemeSource(nextSettings)
       if (applicationInitialized && loginItemChanged) {
         Menu.setApplicationMenu(createApplicationMenu())
         updateViewMenuItems()
@@ -4539,6 +4545,30 @@ function stateForRecoverySender(event: IpcMainEvent | IpcMainInvokeEvent): {
   return { state, win }
 }
 
+function validatedWindowAction(rawAction: unknown): WindowAction {
+  if (
+    rawAction === "close" ||
+    rawAction === "minimize" ||
+    rawAction === "toggle-maximize"
+  ) {
+    return rawAction
+  }
+  throw new TypeError("Invalid window action")
+}
+
+function performWindowAction(win: BrowserWindow, rawAction: unknown): void {
+  const action = validatedWindowAction(rawAction)
+  if (action === "close") {
+    win.close()
+  } else if (action === "minimize") {
+    win.minimize()
+  } else if (win.isMaximized()) {
+    win.unmaximize()
+  } else {
+    win.maximize()
+  }
+}
+
 function ensureWindowMutable(state: WindowState): void {
   if (state.provisional) {
     throw new Error("Provisional windows cannot mutate application state")
@@ -5138,7 +5168,7 @@ function releaseSettingsSessionForWindow(windowId: WindowId): void {
   const state = windowStates.get(windowId)
   const hadAppearancePreview = Boolean(state?.appearancePreview)
   if (state) state.appearancePreview = null
-  applyWindowsNativeThemeSource(settings)
+  applyDesktopNativeThemeSource(settings)
   if (hadAppearancePreview && state && windowCanReceiveVisualEffect(state)) {
     applyWindowVisualEffect(state, settings)
   }
@@ -5631,7 +5661,7 @@ function beginInstallCliHelper(): void {
 
 function recentDocumentMenuLabel(filePath: string): string {
   const label = path.basename(filePath)
-  return process.platform === "win32" ? label.replaceAll("&", "&&") : label
+  return process.platform === "darwin" ? label : label.replaceAll("&", "&&")
 }
 
 function recentDocumentMenuItems(): MenuItemConstructorOptions[] {
@@ -6191,7 +6221,7 @@ function activateWindowsMenuItem(
   // the command prevents a stale renderer surface from replaying an action.
   state.windowsMenuActions.clear()
   if (!item || item.type === "separator" || item.submenu) {
-    throw new Error("The Windows menu action is unavailable")
+    throw new Error("The desktop menu action is unavailable")
   }
   item.click({}, state.win, state.win.webContents)
 }
@@ -6771,7 +6801,7 @@ function resolvedAppearance(mode: AppearanceMode): ResolvedAppearance {
   return nativeTheme.shouldUseDarkColors ? "dark" : "light"
 }
 
-function windowsNativeThemeSource(
+function desktopNativeThemeSource(
   value: Pick<AppSettings, "appearanceMode" | "themeByScheme">
 ): "system" | ResolvedAppearance {
   if (value.appearanceMode === "system") return "system"
@@ -6779,10 +6809,10 @@ function windowsNativeThemeSource(
     .surfaceScheme
 }
 
-function applyWindowsNativeThemeSource(
+function applyDesktopNativeThemeSource(
   value: Pick<AppSettings, "appearanceMode" | "themeByScheme">
 ): void {
-  if (process.platform !== "win32") return
+  if (process.platform !== "win32" && process.platform !== "linux") return
   const owner =
     settingsSessionOwnerWindowId === null
       ? null
@@ -6796,7 +6826,7 @@ function applyWindowsNativeThemeSource(
       : null
   // nativeTheme is process-wide. Keep the exclusive Settings owner's draft
   // authoritative across unrelated commits and additional window creation.
-  const source = windowsNativeThemeSource(preview ?? value)
+  const source = desktopNativeThemeSource(preview ?? value)
   if (nativeTheme.themeSource !== source) nativeTheme.themeSource = source
 }
 
@@ -6810,7 +6840,7 @@ function windowForegroundColor(value: AppearanceSettings): string {
   return resolveAppearanceProfile(profile).foregroundColor
 }
 
-function windowsTitleBarOverlaySignature(
+function desktopTitleBarOverlaySignature(
   overlay: WindowsTitleBarOverlay
 ): string {
   return `${overlay.color}:${overlay.symbolColor}:${overlay.height}`
@@ -6851,6 +6881,15 @@ function nativeWindowBackgroundEffectSignature(
 function nativeTranslucencyEnabled(value: AppearanceSettings): boolean {
   return (
     (process.platform === "darwin" || windowsNativeBackgroundSupported()) &&
+    value.backgroundEffect.enabled &&
+    value.backgroundEffect.translucency > 0 &&
+    !nativeTheme.prefersReducedTransparency
+  )
+}
+
+function backgroundTranslucencyEnabled(value: AppearanceSettings): boolean {
+  return (
+    rendererBackgroundCapability() !== "opaque" &&
     value.backgroundEffect.enabled &&
     value.backgroundEffect.translucency > 0 &&
     !nativeTheme.prefersReducedTransparency
@@ -6907,7 +6946,7 @@ function setWindowBackgroundColor(
   }
 }
 
-function updateWindowsTitleBarOverlay(
+function updateDesktopTitleBarOverlay(
   win: BrowserWindow,
   value: AppearanceSettings,
   zoomFactor?: number
@@ -6925,16 +6964,16 @@ function updateWindowsTitleBarOverlay(
       windowForegroundColor(value),
       resolvedZoomFactor
     )
-    const signature = windowsTitleBarOverlaySignature(overlay)
+    const signature = desktopTitleBarOverlaySignature(overlay)
     const state = windowStates.get(win.id)
-    if (state?.appliedWindowsTitleBarOverlaySignature === signature) return
+    if (state?.appliedDesktopTitleBarOverlaySignature === signature) return
     win.setTitleBarOverlay(overlay)
-    if (state) state.appliedWindowsTitleBarOverlaySignature = signature
+    if (state) state.appliedDesktopTitleBarOverlaySignature = signature
   } catch (error) {
     if (isDestroyedElectronObjectError(error)) return
-    if (!windowsNativeChromeWarningShown) {
-      windowsNativeChromeWarningShown = true
-      console.warn("Unable to update Windows native window controls", error)
+    if (!desktopNativeChromeWarningShown) {
+      desktopNativeChromeWarningShown = true
+      console.warn("Unable to update native desktop window controls", error)
     }
   }
 }
@@ -7321,9 +7360,18 @@ function applyWindowVisualEffectAtRevision(
   revision: number
 ): boolean {
   if (!windowCanReceiveVisualEffect(state, revision)) return false
-  updateWindowsTitleBarOverlay(state.win, value)
+  updateDesktopTitleBarOverlay(state.win, value)
 
-  if (allowTranslucency && nativeTranslucencyEnabled(value)) {
+  if (allowTranslucency && backgroundTranslucencyEnabled(value)) {
+    if (process.platform === "linux") {
+      // Wayland clients provide the alpha/tint surface. Hyprland and other
+      // compositors decide whether and how the desktop behind it is blurred.
+      return setWindowBackgroundColor(state, "rgba(0, 0, 0, 0)", revision)
+    }
+
+    if (!nativeTranslucencyEnabled(value)) {
+      return false
+    }
     const effect = nativeWindowBackgroundEffect(value)
     if (
       !state.appliedBackgroundBlurAnimationActive &&
@@ -7518,7 +7566,7 @@ function scheduleWindowVisualEffect(
 
     const configuredTransition = value.launchTransition
     const shouldTransition =
-      nativeTranslucencyEnabled(value) &&
+      backgroundTranslucencyEnabled(value) &&
       launchTransitionHasAnimation(configuredTransition) &&
       !prefersReducedMotion
     if (!shouldTransition) {
@@ -7536,14 +7584,15 @@ function scheduleWindowVisualEffect(
         return
       }
       state.eagerLaunchVisualEffectApplied = false
-      applyWindowVisualEffectAtRevision(state, value, true, revision)
+      const applied = applyWindowVisualEffectAtRevision(
+        state,
+        value,
+        true,
+        revision
+      )
       if (benchmark) {
         benchmark.visualEffectApplied =
-          !nativeTranslucencyEnabled(value) ||
-          state.appliedBackgroundEffectSignature ===
-            nativeWindowBackgroundEffectSignature(
-              nativeWindowBackgroundEffect(value)
-            )
+          !backgroundTranslucencyEnabled(value) || applied
         benchmark.visualEffectReadyEpochMs = launchBenchmarkEpochMs()
       }
       sendLaunchVisualEffectReady(state, null)
@@ -7556,7 +7605,18 @@ function scheduleWindowVisualEffect(
     const targetEffect = nativeWindowBackgroundEffect(value, targetRadius)
     let effectiveTransition = { ...configuredTransition }
     let applied: boolean
-    if (configuredTransition.strategy === "tint-blur" && targetRadius > 0) {
+    if (process.platform === "linux") {
+      applied = setWindowBackgroundColor(state, "rgba(0, 0, 0, 0)", revision)
+      // A client cannot animate Hyprland's compositor-owned blur radius. Keep
+      // the same opaque-cover fallback used when a native blur animation is
+      // unavailable on macOS or Windows.
+      if (configuredTransition.strategy === "tint-blur") {
+        effectiveTransition = { ...effectiveTransition, strategy: "cover" }
+      }
+    } else if (
+      configuredTransition.strategy === "tint-blur" &&
+      targetRadius > 0
+    ) {
       applied =
         setNativeWindowBackgroundEffect(state, {
           ...targetEffect,
@@ -7593,7 +7653,10 @@ function scheduleWindowVisualEffect(
       return
     }
 
-    if (!setWindowBackgroundColor(state, "rgba(0, 0, 0, 0)", revision)) {
+    if (
+      process.platform !== "linux" &&
+      !setWindowBackgroundColor(state, "rgba(0, 0, 0, 0)", revision)
+    ) {
       return
     }
     if (benchmark) {
@@ -7671,6 +7734,7 @@ function recoveryRendererUrl(
   const url = rendererUrl(launchAppearance)
   url.pathname = "/recovery.html"
   url.searchParams.set("reason", reason)
+  url.searchParams.set("platform", process.platform)
   return url
 }
 
@@ -7912,7 +7976,7 @@ function positionNativeWindowButtons(
       ? (state.appearancePreview ?? settings)
       : state.launchSettings
     : settings
-  updateWindowsTitleBarOverlay(win, appearance, zoomFactor)
+  updateDesktopTitleBarOverlay(win, appearance, zoomFactor)
 }
 
 function zoomFactorsMatch(left: number, right: number): boolean {
@@ -8827,7 +8891,7 @@ async function createDocumentWindow(
   const launchAppearance = await currentSettings()
   // Keep native dialogs and caption affordances aligned with an explicit app
   // appearance before the window is constructed.
-  applyWindowsNativeThemeSource(launchAppearance)
+  applyDesktopNativeThemeSource(launchAppearance)
   if (options.launchOverrides?.editorMode) {
     launchAppearance.initialEditorMode = options.launchOverrides.editorMode
   }
@@ -8844,7 +8908,7 @@ async function createDocumentWindow(
     launchAppearance.launchTransition.enabled = false
   }
   const launchRendererUrl = rendererUrl(launchAppearance)
-  const launchWindowsTitleBarOverlay =
+  const launchDesktopTitleBarOverlay =
     process.platform === "win32"
       ? windowsTitleBarOverlay(
           windowForegroundColor(launchAppearance),
@@ -8862,7 +8926,7 @@ async function createDocumentWindow(
       : process.platform === "win32"
         ? {
             titleBarStyle: "hidden",
-            titleBarOverlay: launchWindowsTitleBarOverlay!,
+            titleBarOverlay: launchDesktopTitleBarOverlay!,
           }
         : {
             frame: false,
@@ -8885,14 +8949,13 @@ async function createDocumentWindow(
     title: PRODUCT_NAME,
     show: false,
     resizable: true,
-    // The Windows compositor target sits behind Chromium without making the
-    // HWND transparent, preserving WCO maximize, Snap, and native resizing.
-    transparent: process.platform === "darwin",
+    // Linux needs an alpha-capable Wayland surface so the compositor can blur
+    // behind Pulse MD. Windows keeps its opaque HWND/native-backdrop strategy.
+    transparent: process.platform === "darwin" || process.platform === "linux",
     backgroundColor: windowBackgroundColor(launchAppearance),
-    // Windows uses the renderer access strip for bare Alt. Keep Electron's
-    // hidden native bar from competing for that key while retaining the
-    // application Menu as the source of submenu actions and accelerators.
-    autoHideMenuBar: process.platform === "linux",
+    // Windows and Linux use the renderer access strip for bare Alt while the
+    // hidden application Menu remains the command and accelerator authority.
+    autoHideMenuBar: false,
     ...(options.position
       ? { x: Math.round(options.position.x), y: Math.round(options.position.y) }
       : {}),
@@ -8995,8 +9058,8 @@ async function createDocumentWindow(
     appliedBackgroundEffectSignature: null,
     appliedBackgroundBlurRadius: 0,
     appliedWindowsAlphaBootstrap: false,
-    appliedWindowsTitleBarOverlaySignature: launchWindowsTitleBarOverlay
-      ? windowsTitleBarOverlaySignature(launchWindowsTitleBarOverlay)
+    appliedDesktopTitleBarOverlaySignature: launchDesktopTitleBarOverlay
+      ? desktopTitleBarOverlaySignature(launchDesktopTitleBarOverlay)
       : null,
     appearancePreview: null,
     approvedTabCloses: new Map(),
@@ -9195,6 +9258,11 @@ async function createDocumentWindow(
       win.webContents.send(ipcChannels.windowActivationChanged, active)
     }
   }
+  const sendWindowMaximized = (maximized: boolean) => {
+    if (!win.isDestroyed() && !win.webContents.isDestroyed()) {
+      win.webContents.send(ipcChannels.windowMaximizedChanged, maximized)
+    }
+  }
   win.on("focus", () => {
     lastFocusedWindowId = win.id
     updateViewMenuItems(state)
@@ -9202,6 +9270,8 @@ async function createDocumentWindow(
     verifyActivatedTabDocument(state)
   })
   win.on("blur", () => sendWindowActivation(false))
+  win.on("maximize", () => sendWindowMaximized(true))
+  win.on("unmaximize", () => sendWindowMaximized(false))
   win.on("resize", () => rememberWindowSize(win))
   if (process.platform === "darwin") {
     win.on("enter-full-screen", () => refreshMacWindowBackgroundShape(state))
@@ -9222,7 +9292,7 @@ async function createDocumentWindow(
   }
 
   if (process.platform !== "darwin") {
-    win.setAutoHideMenuBar(process.platform === "linux")
+    win.setAutoHideMenuBar(false)
     win.setMenuBarVisibility(false)
   }
   if (process.platform === "darwin" || process.platform === "win32") {
@@ -12066,6 +12136,19 @@ function registerIpc(): void {
     }
   )
 
+  ipcMain.handle(ipcChannels.getRecoveryWindowMaximized, (event): boolean => {
+    const { win } = stateForRecoverySender(event)
+    return win.isMaximized()
+  })
+
+  registerOneWayIpcHandler(
+    ipcChannels.recoveryWindowAction,
+    (event, rawAction: unknown): void => {
+      const { win } = stateForRecoverySender(event)
+      performWindowAction(win, rawAction)
+    }
+  )
+
   registerOneWayIpcHandler(ipcChannels.editorReady, (event): void => {
     const { state } = stateForSender(event)
     if (!state.rendererReady) {
@@ -12104,8 +12187,8 @@ function registerIpc(): void {
     ipcChannels.getWindowsMenuSnapshot,
     (event): WindowsMenuSnapshot => {
       const { state } = stateForSender(event)
-      if (process.platform !== "win32") {
-        throw new Error("The renderer application menu is Windows-only")
+      if (process.platform !== "win32" && process.platform !== "linux") {
+        throw new Error("The renderer application menu is desktop-only")
       }
       return windowsMenuSnapshot(state)
     }
@@ -12115,15 +12198,15 @@ function registerIpc(): void {
     ipcChannels.activateWindowsMenuItem,
     (event, rawActionToken: unknown): void => {
       const { state } = stateForSender(event)
-      if (process.platform !== "win32") {
-        throw new Error("The renderer application menu is Windows-only")
+      if (process.platform !== "win32" && process.platform !== "linux") {
+        throw new Error("The renderer application menu is desktop-only")
       }
       if (
         typeof rawActionToken !== "string" ||
         rawActionToken.length < 1 ||
         rawActionToken.length > 128
       ) {
-        throw new TypeError("Invalid Windows menu action")
+        throw new TypeError("Invalid desktop menu action")
       }
       activateWindowsMenuItem(state, rawActionToken)
     }
@@ -12366,6 +12449,11 @@ function registerIpc(): void {
       return windowProfilesSnapshot(state.profileId)
     })
   )
+
+  ipcMain.handle(ipcChannels.getWindowMaximized, (event): boolean => {
+    const { win } = stateForSender(event)
+    return win.isMaximized()
+  })
 
   ipcMain.handle(
     ipcChannels.getCurrentWindowProfileSeed,
@@ -12619,7 +12707,7 @@ function registerIpc(): void {
       // On Windows, nativeTheme controls both Electron chrome and Chromium's
       // prefers-color-scheme result. Let a live System draft release any
       // explicit source immediately; session teardown restores the commit.
-      applyWindowsNativeThemeSource(appearance)
+      applyDesktopNativeThemeSource(appearance)
       applyWindowVisualEffect(state, appearance)
     }
   )
@@ -14053,23 +14141,7 @@ function registerIpc(): void {
     ipcChannels.windowAction,
     (event, rawAction: unknown) => {
       const { win } = stateForSender(event)
-      const action: WindowAction =
-        rawAction === "close" ||
-        rawAction === "minimize" ||
-        rawAction === "toggle-maximize"
-          ? rawAction
-          : (() => {
-              throw new TypeError("Invalid window action")
-            })()
-      if (action === "close") {
-        win.close()
-      } else if (action === "minimize") {
-        win.minimize()
-      } else if (win.isMaximized()) {
-        win.unmaximize()
-      } else {
-        win.maximize()
-      }
+      performWindowAction(win, rawAction)
     }
   )
 

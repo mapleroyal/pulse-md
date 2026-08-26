@@ -9,7 +9,7 @@ import twAnimatePackageSource from "../../node_modules/tw-animate-css/package.js
 import projectLicense from "../../LICENSE?raw"
 import projectPackageSource from "../../package.json?raw"
 import manualNotices from "../../THIRD_PARTY_NOTICES.md?raw"
-import fontNotices from "../../public/THIRD_PARTY_FONT_LICENSES.txt?raw"
+import fontNotices from "../assets/THIRD_PARTY_FONT_LICENSES.txt?raw"
 
 export interface SoftwareLicenseEntry {
   id: string

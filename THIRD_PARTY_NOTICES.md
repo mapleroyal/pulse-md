@@ -140,7 +140,7 @@ Pulse MD includes these font families:
 
 The recorded copyright notices and complete SIL Open Font License 1.1 are
 distributed with the application in
-[`public/THIRD_PARTY_FONT_LICENSES.txt`](public/THIRD_PARTY_FONT_LICENSES.txt).
+[`src/assets/THIRD_PARTY_FONT_LICENSES.txt`](src/assets/THIRD_PARTY_FONT_LICENSES.txt).
 
 ## Lucide
 

@@ -1,0 +1,75 @@
+pkgname=pulse-md
+pkgver=@PKGVER@
+pkgrel=1
+pkgdesc="A fast, local-first Markdown reader and editor for the desktop"
+arch=('@ARCH@')
+url="https://github.com/mapleroyal/pulse-md"
+license=('LicenseRef-PolyForm-Noncommercial-1.0.0')
+depends=(
+  alsa-lib
+  at-spi2-core
+  cairo
+  dbus
+  expat
+  glib2
+  glibc
+  gtk3
+  hicolor-icon-theme
+  libgcc
+  libcups
+  libx11
+  libxcb
+  libxcomposite
+  libxdamage
+  libxext
+  libxfixes
+  libxkbcommon
+  libxrandr
+  mesa
+  nspr
+  nss
+  pango
+  systemd-libs
+  xdg-utils
+)
+options=('!debug' '!emptydirs' '!strip')
+source=(
+  'pulse-md-runtime.tar.zst'
+  'pulse-md-packaging.tar.zst'
+)
+sha256sums=(
+  '@RUNTIME_SHA256@'
+  '@PACKAGING_SHA256@'
+)
+
+package() {
+  install -d "$pkgdir/opt/pulse-md"
+  cp -a --no-preserve=ownership \
+    "$srcdir/pulse-md-runtime/." \
+    "$pkgdir/opt/pulse-md/"
+
+  chmod 0755 \
+    "$pkgdir/opt/pulse-md/pulse-md" \
+    "$pkgdir/opt/pulse-md/resources/bin/pmd"
+
+  install -d "$pkgdir/usr/bin"
+  ln -s /opt/pulse-md/pulse-md "$pkgdir/usr/bin/pulse-md"
+  ln -s /opt/pulse-md/resources/bin/pmd "$pkgdir/usr/bin/pmd"
+
+  install -Dm644 \
+    "$srcdir/pulse-md-packaging/io.github.mapleroyal.pulse-md.desktop" \
+    "$pkgdir/usr/share/applications/io.github.mapleroyal.pulse-md.desktop"
+  install -Dm644 \
+    "$srcdir/pulse-md-packaging/io.github.mapleroyal.pulse-md.xml" \
+    "$pkgdir/usr/share/mime/packages/io.github.mapleroyal.pulse-md.xml"
+  install -Dm644 \
+    "$srcdir/pulse-md-packaging/LICENSE" \
+    "$pkgdir/usr/share/licenses/pulse-md/LICENSE"
+
+  local _size
+  for _size in 16 24 32 48 64 96 128 256 512; do
+    install -Dm644 \
+      "$srcdir/pulse-md-packaging/icons/${_size}x${_size}.png" \
+      "$pkgdir/usr/share/icons/hicolor/${_size}x${_size}/apps/pulse-md.png"
+  done
+}

@@ -12,10 +12,13 @@ The two application identities use separate commands and endpoints:
 | Packaged Pulse MD             | `pmd`                        | Source, direct-download, or storefront build |
 | Pulse MD Development checkout | `npm run cli:dev -- <args…>` | Isolated checkout-development run            |
 
-On macOS and Linux, install a packaged app's command from **Install Command
-Line Tool…** in that app. Every packaged build installs `pmd` and uses the same
-application data. The all-users Windows installer adds the helper to the
-machine-wide `PATH`; open a new terminal afterward.
+On macOS and independently installed Linux packages, install a packaged app's
+command from **Install Command Line Tool…** in that app. On Arch and Omarchy,
+`npm run install:local` installs the pacman-owned command at `/usr/bin/pmd`;
+other Linux systems use the stable user-local command at `~/.local/bin/pmd`.
+Every packaged build uses the same application data. The all-users Windows
+installer adds the helper to the machine-wide `PATH`; open a new terminal
+afterward.
 
 Examples below use `pmd`. Prefix development arguments with
 `npm run cli:dev --` to use the same interface against the isolated Development

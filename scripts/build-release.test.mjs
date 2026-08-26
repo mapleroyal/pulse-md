@@ -19,11 +19,16 @@ import {
   isUnusedUpdateMetadata,
   linuxArtifactExtractionPlan,
   linuxArtifactRuntimeRootCandidates,
+  linuxDebianArchiveExtractionPlan,
+  linuxDebianArchiveInspectionPlan,
   linuxReleaseArtifactNames,
   notarizationAuthorization,
+  parseLinuxDebianControl,
   parseDeveloperIdIdentities,
   pruneReleaseStaging,
   releaseOutputNames,
+  resolveLinuxDebianArchiveMember,
+  resolveLinuxDebianToolchain,
   resolveLinuxArtifactRuntimeRoot,
   resolveMacSigningEnvironment,
   validateLinuxAppImageHeader,
@@ -232,6 +237,104 @@ test("Linux release artifacts extract into their canonical payload layouts", () 
         extractionDirectory
       ),
     /Unsupported Linux release artifact/
+  )
+})
+
+test("Linux Debian verification prefers dpkg-deb and requires the archive fallback tools", () => {
+  const preferredChecks = []
+  assert.equal(
+    resolveLinuxDebianToolchain((command) => {
+      preferredChecks.push(command)
+      return command === "dpkg-deb"
+    }),
+    "dpkg-deb"
+  )
+  assert.deepEqual(preferredChecks, ["dpkg-deb"])
+
+  const fallbackChecks = []
+  assert.equal(
+    resolveLinuxDebianToolchain((command) => {
+      fallbackChecks.push(command)
+      return command === "ar" || command === "bsdtar"
+    }),
+    "archive"
+  )
+  assert.deepEqual(fallbackChecks, ["dpkg-deb", "ar", "bsdtar"])
+  assert.throws(
+    () => resolveLinuxDebianToolchain((command) => command === "ar"),
+    /missing bsdtar/
+  )
+})
+
+test("Linux Debian archive fallback plans control inspection and data extraction", () => {
+  const artifact = path.join(
+    os.tmpdir(),
+    "pmd-release-artifacts",
+    "Pulse MD.deb"
+  )
+  const extractionDirectory = path.join(os.tmpdir(), "pmd-release-extraction")
+  const listing = "debian-binary\ncontrol.tar.zst\ndata.tar.xz\n"
+
+  assert.deepEqual(linuxDebianArchiveInspectionPlan(artifact), {
+    args: ["t", path.resolve(artifact)],
+    command: "ar",
+    cwd: path.resolve(import.meta.dirname, ".."),
+  })
+  assert.equal(
+    resolveLinuxDebianArchiveMember(listing, "control", artifact),
+    "control.tar.zst"
+  )
+  const dataMember = resolveLinuxDebianArchiveMember(listing, "data", artifact)
+  assert.equal(dataMember, "data.tar.xz")
+  assert.deepEqual(
+    linuxDebianArchiveExtractionPlan(artifact, extractionDirectory, dataMember),
+    {
+      archivePath: path.join(extractionDirectory, dataMember),
+      commands: [
+        {
+          args: ["x", path.resolve(artifact), dataMember],
+          command: "ar",
+          cwd: path.resolve(extractionDirectory),
+        },
+        {
+          args: [
+            "-xf",
+            path.join(extractionDirectory, dataMember),
+            "-C",
+            path.resolve(extractionDirectory),
+          ],
+          command: "bsdtar",
+          cwd: path.resolve(extractionDirectory),
+        },
+      ],
+    }
+  )
+  assert.throws(
+    () => resolveLinuxDebianArchiveMember("data.tar.xz\ndata.tar.zst", "data"),
+    /exactly one data archive; found 2/
+  )
+  assert.throws(
+    () =>
+      linuxDebianArchiveExtractionPlan(
+        artifact,
+        extractionDirectory,
+        "../data.tar.zst"
+      ),
+    /Unsafe Debian archive member/
+  )
+})
+
+test("Linux Debian control metadata parsing accepts folded fields", () => {
+  assert.deepEqual(
+    parseLinuxDebianControl(
+      "Package: pulse-md\nVersion: 1.0.0\nArchitecture: amd64\nDescription: Pulse MD\n continued\n"
+    ),
+    {
+      Architecture: "amd64",
+      Description: "Pulse MD\ncontinued",
+      Package: "pulse-md",
+      Version: "1.0.0",
+    }
   )
 })
 

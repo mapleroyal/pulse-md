@@ -78,8 +78,86 @@ async function expectHorizontallyReachable(surface: Locator) {
   }
 }
 
-test("Windows application menu supports access mode and sibling navigation @renderer-isolated", async () => {
-  test.skip(process.platform !== "win32", "Windows-only application chrome")
+test("Linux transparent chrome exposes functional renderer window controls @renderer-isolated", async () => {
+  test.skip(process.platform !== "linux", "Linux renderer window controls only")
+  const userData = await mkdtemp(
+    path.join(os.tmpdir(), "pulse-md-linux-window-controls-")
+  )
+  const app = await electron.launch({
+    args: [projectRoot, `--user-data-dir=${userData}`, samplePath],
+    cwd: projectRoot,
+  })
+
+  try {
+    const page = await app.firstWindow()
+    await page.locator(".cm-editor").waitFor()
+    const controls = page.getByLabel("Window controls")
+    const minimize = page.getByRole("button", { name: "Minimize window" })
+    const maximize = page.locator('[data-window-action="toggle-maximize"]')
+    const close = page.getByRole("button", { name: "Close window" })
+
+    await expect(controls).toBeVisible()
+    await expect(minimize).toBeVisible()
+    await expect(maximize).toBeVisible()
+    await expect(close).toBeVisible()
+    const ordinaryGeometry = await controls.evaluate((element) => {
+      const bounds = element.getBoundingClientRect()
+      return {
+        height: bounds.height,
+        rightInset: innerWidth - bounds.right,
+        width: bounds.width,
+      }
+    })
+    expect(ordinaryGeometry.height).toBeCloseTo(46, 0)
+    expect(ordinaryGeometry.rightInset).toBeCloseTo(0, 0)
+    expect(ordinaryGeometry.width).toBeCloseTo(138, 0)
+
+    const initiallyMaximized = await app.evaluate(
+      ({ BrowserWindow }) =>
+        BrowserWindow.getAllWindows()[0]?.isMaximized() ?? false
+    )
+    await expect(maximize).toHaveAccessibleName(
+      initiallyMaximized ? "Restore window" : "Maximize window"
+    )
+    await maximize.click()
+    await expect
+      .poll(() =>
+        app.evaluate(
+          ({ BrowserWindow }) =>
+            BrowserWindow.getAllWindows()[0]?.isMaximized() ?? false
+        )
+      )
+      .toBe(!initiallyMaximized)
+    await expect(maximize).toHaveAccessibleName(
+      initiallyMaximized ? "Maximize window" : "Restore window"
+    )
+    await maximize.click()
+    await expect
+      .poll(() =>
+        app.evaluate(
+          ({ BrowserWindow }) =>
+            BrowserWindow.getAllWindows()[0]?.isMaximized() ?? false
+        )
+      )
+      .toBe(initiallyMaximized)
+    await expect(maximize).toHaveAccessibleName(
+      initiallyMaximized ? "Restore window" : "Maximize window"
+    )
+
+    await page.evaluate(() => window.pulseMd.previewWindowZoom(2))
+    await expect
+      .poll(() =>
+        controls.evaluate((element) => element.getBoundingClientRect().width)
+      )
+      .toBeCloseTo(69, 0)
+  } finally {
+    await exitApplication(app)
+    await rm(userData, { force: true, recursive: true })
+  }
+})
+
+test("desktop application menu supports access mode and sibling navigation @renderer-isolated", async () => {
+  test.skip(process.platform === "darwin", "Desktop application chrome only")
   const userData = await mkdtemp(path.join(os.tmpdir(), "pulse-md-alt-menu-"))
   const app = await electron.launch({
     args: [projectRoot, `--user-data-dir=${userData}`, samplePath],
@@ -270,8 +348,8 @@ test("Windows application menu supports access mode and sibling navigation @rend
   }
 })
 
-test("Windows app controls share the narrow formatting lane without covering document chrome @renderer-isolated", async () => {
-  test.skip(process.platform !== "win32", "Windows-only application chrome")
+test("desktop app controls share the narrow formatting lane without covering document chrome @renderer-isolated", async () => {
+  test.skip(process.platform === "darwin", "Desktop application chrome only")
   const userData = await mkdtemp(
     path.join(os.tmpdir(), "pulse-md-windows-control-lane-")
   )
@@ -457,8 +535,8 @@ test("Windows app controls share the narrow formatting lane without covering doc
   }
 })
 
-test("Windows editor scrollbar clears overlay chrome and stays rail-less @renderer-isolated", async () => {
-  test.skip(process.platform !== "win32", "Windows-only scrollbar styling")
+test("desktop editor scrollbar clears overlay chrome and stays rail-less @renderer-isolated", async () => {
+  test.skip(process.platform === "darwin", "Desktop scrollbar styling only")
   const userData = await mkdtemp(
     path.join(os.tmpdir(), "pulse-md-windows-scrollbar-")
   )

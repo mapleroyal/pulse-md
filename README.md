@@ -7,7 +7,7 @@
 Pulse MD is a fast, local-first desktop Markdown reader and editor. It combines
 an editable live-rendered document with a deliberate Raw Markdown mode, while
 keeping the surrounding interface quiet. macOS and Windows x64 are currently
-verified; a source packaging target also exists for Linux.
+verified, along with Linux on the current Arch/Omarchy baseline.
 
 Pulse MD 1.0 is a personal source-available project. The source is provided
 as-is for noncommercial use; there is no support, maintenance, compatibility,
@@ -28,7 +28,8 @@ welcome.
 - **Minimal, configurable chrome.** Tabs, formatting tools, paths, and status
   information can be pinned, hidden, or shown contextually.
 - **Themes and typography.** Built-in light and dark themes, custom presets,
-  reading-width and zoom controls, bundled fonts, and macOS translucency.
+  reading-width and zoom controls, bundled fonts, and platform-aware
+  translucency.
 - **Profiles and scratches.** Reusable multi-tab window profiles and standalone
   auto-saved scratch documents with stable, channel-specific app links.
 - **Keyboard and CLI workflows.** Familiar shortcuts and a native `pmd` helper
@@ -61,8 +62,28 @@ npm run package
 ```
 
 Packages are written to `release/`. The command selects DMG/ZIP on macOS, NSIS
-on Windows, and AppImage/DEB on Linux. It does not upload anything and does not
-require storefront credentials or code-signing credentials.
+on Windows, and AppImage plus DEB on Linux. The AppImage is the portable,
+cross-distribution Linux download; the `.deb` is only for Debian, Ubuntu, Mint,
+and their derivatives. Linux also provides format-specific commands:
+
+```sh
+npm run package:linux            # AppImage plus DEB
+npm run package:linux:appimage   # AppImage only
+npm run package:linux:deb        # Debian-family package only
+npm run package:linux:arch       # Native Arch package only
+```
+
+The Arch command uses the checked-in `PKGBUILD` template and `makepkg` to create
+a conventional `.pkg.tar.zst` package managed by `pacman`; it does not
+repurpose the AppImage or `.deb`. On Arch and Omarchy, `npm run install:local`
+builds that native package, installs and verifies it through `pacman`, and
+migrates a validated legacy user-local Pulse MD installation. RPM and Flatpak
+are not current targets. Packaging does not upload anything or require
+storefront credentials or code-signing credentials.
+
+On Linux, Pulse MD provides its application icon and registers itself for
+Markdown files, but leaves the shared Markdown document artwork to the active
+desktop icon theme.
 
 Windows and Linux packages must be built and installed on their respective
 operating systems before they are distributed.

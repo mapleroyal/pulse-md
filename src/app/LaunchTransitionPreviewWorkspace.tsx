@@ -286,6 +286,10 @@ export function LaunchTransitionPreviewWorkspace({
     const cover = coverRef.current
     if (!mockWindow || !cover) return
     const transition = draftRef.current.launchTransition
+    const previewStrategy =
+      platform === "linux" && transition.strategy === "tint-blur"
+        ? "cover"
+        : transition.strategy
     const easing = launchTransitionCssEasing(transition)
     const transitionDisabled =
       !transition.enabled || transition.durationMs === 0
@@ -300,17 +304,17 @@ export function LaunchTransitionPreviewWorkspace({
     mockWindow.style.transform = "scale(0.992)"
     mockWindow.style.background = "var(--document-background)"
     mockWindow.style.backdropFilter =
-      transition.strategy === "tint"
+      previewStrategy === "tint"
         ? `blur(${DEMO_BLUR_RADIUS_PX}px)`
         : "blur(0px)"
     mockWindow.style.setProperty(
       "-webkit-backdrop-filter",
       mockWindow.style.backdropFilter
     )
-    cover.style.display = transition.strategy === "cover" ? "block" : "none"
+    cover.style.display = previewStrategy === "cover" ? "block" : "none"
     cover.style.transition = "none"
     cover.style.opacity = "1"
-    if (transition.strategy === "cover") {
+    if (previewStrategy === "cover") {
       mockWindow.style.background = finalBackground
       mockWindow.style.backdropFilter = `blur(${DEMO_BLUR_RADIUS_PX}px)`
       mockWindow.style.setProperty(
@@ -334,16 +338,16 @@ export function LaunchTransitionPreviewWorkspace({
         return
       }
       schedule(() => {
-        if (transition.strategy === "cover") {
+        if (previewStrategy === "cover") {
           cover.style.transition = `opacity ${transition.durationMs}ms ${easing}`
           cover.style.opacity = "0"
         } else {
           mockWindow.style.transition =
-            transition.strategy === "tint-blur"
+            previewStrategy === "tint-blur"
               ? `background-color ${transition.durationMs}ms ${easing}, backdrop-filter ${transition.durationMs}ms ${easing}, -webkit-backdrop-filter ${transition.durationMs}ms ${easing}`
               : `background-color ${transition.durationMs}ms ${easing}`
           mockWindow.style.background = finalBackground
-          if (transition.strategy === "tint-blur") {
+          if (previewStrategy === "tint-blur") {
             mockWindow.style.backdropFilter = `blur(${DEMO_BLUR_RADIUS_PX}px)`
             mockWindow.style.setProperty(
               "-webkit-backdrop-filter",
@@ -355,7 +359,7 @@ export function LaunchTransitionPreviewWorkspace({
     }, DEMO_WINDOW_APPEARANCE_DELAY_MS)
 
     return () => timers.forEach((timer) => window.clearTimeout(timer))
-  }, [run])
+  }, [platform, run])
 
   const resetAll = () => {
     const launchTransition = {
@@ -545,6 +549,13 @@ export function LaunchTransitionPreviewWorkspace({
                   <FieldDescription>
                     Tint and Blur Together animates the native blur radius with
                     the same timing as the renderer tint reveal.
+                  </FieldDescription>
+                ) : null}
+                {platform === "linux" ? (
+                  <FieldDescription>
+                    Linux compositor blur is already settled when Pulse MD
+                    appears, so Tint and Blur Together uses the opaque-cover
+                    reveal on this platform.
                   </FieldDescription>
                 ) : null}
               </FieldContent>

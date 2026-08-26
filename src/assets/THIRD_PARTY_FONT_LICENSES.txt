@@ -1,5 +1,5 @@
-Bundled font notices
-====================
+Bundled font licenses and notices
+=================================
 
 The application includes the following font software:
 
