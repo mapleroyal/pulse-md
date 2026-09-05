@@ -985,6 +985,13 @@ class MathWidget extends WidgetType {
 
     void loadKatex()
       .then((katex) => {
+        if (
+          !math.isConnected ||
+          math.dataset.mathSource !== this.source ||
+          math.dataset.mathDisplay !== String(this.display)
+        ) {
+          return
+        }
         const markup = katex.renderToString(this.source, {
           displayMode: this.display,
           output: "htmlAndMathml",
@@ -993,13 +1000,6 @@ class MathWidget extends WidgetType {
           trust: false,
         })
         cacheMathRender(cacheKey, markup)
-        if (
-          !math.isConnected ||
-          math.dataset.mathSource !== this.source ||
-          math.dataset.mathDisplay !== String(this.display)
-        ) {
-          return
-        }
         showRenderedMath(math, markup)
         requestMathMeasure(math, view, cacheKey)
       })

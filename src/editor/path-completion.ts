@@ -10,7 +10,7 @@ import {
   type CompletionResult,
 } from "@codemirror/autocomplete"
 import { syntaxTree } from "@codemirror/language"
-import { Prec, type Extension } from "@codemirror/state"
+import { Prec, type EditorState, type Extension } from "@codemirror/state"
 import {
   EditorView,
   keymap,
@@ -21,6 +21,7 @@ import {
 import type { PathCompletionEntry } from "../shared/contracts"
 
 const maximumInspectedLineLength = 4_096
+const maximumPendingCompletionCommands = 32
 const windowsAbsolutePath = /^[A-Za-z]:[\\/]/
 const uriScheme = /^[A-Za-z][A-Za-z0-9+.-]*:/
 const obviousPathStart =
@@ -170,12 +171,16 @@ const pathCompletionInteraction = ViewPlugin.fromClass(
     }
 
     update(update: ViewUpdate) {
+      if (update.state.readOnly || !update.state.facet(EditorView.editable)) {
+        pendingCompletionCommands.delete(this.view)
+      }
       if (completionStatus(update.state) === "active") {
         this.scheduleInsetCorrection()
       }
     }
 
     destroy() {
+      pendingCompletionCommands.delete(this.view)
       this.view.dom.removeEventListener(
         "pointermove",
         this.handlePointerMove,
@@ -262,6 +267,10 @@ function completionCommandWithPendingHandoff(
   command: (view: EditorView) => boolean
 ) {
   return (view: EditorView) => {
+    if (view.state.readOnly || !view.state.facet(EditorView.editable)) {
+      pendingCompletionCommands.delete(view)
+      return false
+    }
     const queued = pendingCompletionCommands.get(view)
     if (queued) {
       if (
@@ -269,7 +278,9 @@ function completionCommandWithPendingHandoff(
         view.state.doc === queued.doc &&
         view.state.selection.eq(queued.selection)
       ) {
-        queued.commands.push(command)
+        if (queued.commands.length < maximumPendingCompletionCommands) {
+          queued.commands.push(command)
+        }
         return true
       }
       pendingCompletionCommands.delete(view)
@@ -281,7 +292,7 @@ function completionCommandWithPendingHandoff(
     // will return null. Only hold the key for a real path target; otherwise Tab
     // must remain available to link/image field navigation and normal editing.
     const cursor = view.state.selection.main.head
-    const line = view.state.doc.lineAt(cursor)
+    const line = boundedCompletionLine(view.state, cursor)
     if (!pathCompletionTarget(line.text, cursor - line.from)) return false
 
     const pending = {
@@ -297,9 +308,11 @@ function completionCommandWithPendingHandoff(
       else setTimeout(callback, delay)
     }
     const retry = () => {
+      if (pendingCompletionCommands.get(view) !== pending) return
       if (
-        pendingCompletionCommands.get(view) !== pending ||
         !view.dom.isConnected ||
+        view.state.readOnly ||
+        !view.state.facet(EditorView.editable) ||
         view.state.doc !== pending.doc ||
         !view.state.selection.eq(pending.selection)
       ) {
@@ -309,7 +322,9 @@ function completionCommandWithPendingHandoff(
       const status = completionStatus(view.state)
       if (status === "active") {
         pendingCompletionCommands.delete(view)
-        for (const queuedCommand of pending.commands) queuedCommand(view)
+        for (const queuedCommand of pending.commands) {
+          completionCommandWithPendingHandoff(queuedCommand)(view)
+        }
       } else if (status === "pending" && Date.now() < pending.deadline) {
         schedule(retry, 8)
       } else {
@@ -430,12 +445,11 @@ function markdownDestinationTarget(
 
 function parsedMarkdownCompletion(
   context: CompletionContext,
-  lineText: string
+  lineText: string,
+  lineFrom: number
 ) {
-  const line = context.state.doc.lineAt(context.pos)
-  const opener = lineText.lastIndexOf("](", context.pos - line.from)
-  const position =
-    opener < 0 ? line.from + lineText.indexOf("[") : line.from + opener
+  const opener = lineText.lastIndexOf("](")
+  const position = lineFrom + (opener < 0 ? lineText.indexOf("[") : opener)
   const owner = syntaxTree(context.state).resolveInner(position, 1).parent?.name
   return owner === "Image" || owner === "Link" || owner === "LinkReference"
 }
@@ -451,11 +465,9 @@ export function pathCompletionTarget(
   explicit = false
 ): PathCompletionTarget | null {
   const boundedCursor = Math.max(0, Math.min(cursor, source.length))
-  const lineStart = source.lastIndexOf("\n", boundedCursor - 1) + 1
-  const inspectedStart = Math.max(
-    lineStart,
-    boundedCursor - maximumInspectedLineLength
-  )
+  const prefixStart = Math.max(0, boundedCursor - maximumInspectedLineLength)
+  const boundedPrefix = source.slice(prefixStart, boundedCursor)
+  const inspectedStart = prefixStart + boundedPrefix.lastIndexOf("\n") + 1
   const linePrefix = source.slice(inspectedStart, boundedCursor)
 
   const markdownTarget = markdownDestinationTarget(linePrefix, inspectedStart)
@@ -472,6 +484,13 @@ export function pathCompletionTarget(
     inspectedStart + linePrefix.length - query.length,
     "plain"
   )
+}
+
+function boundedCompletionLine(state: EditorState, position: number) {
+  const prefixFrom = Math.max(0, position - maximumInspectedLineLength)
+  const prefix = state.sliceDoc(prefixFrom, position)
+  const lineStart = prefix.lastIndexOf("\n") + 1
+  return { from: prefixFrom + lineStart, text: prefix.slice(lineStart) }
 }
 
 function decodedPercentEncoding(source: string) {
@@ -526,7 +545,7 @@ export function pathCompletionSource(
   return async (
     context: CompletionContext
   ): Promise<CompletionResult | null> => {
-    const line = context.state.doc.lineAt(context.pos)
+    const line = boundedCompletionLine(context.state, context.pos)
     const lineTarget = pathCompletionTarget(
       line.text,
       context.pos - line.from,
@@ -536,7 +555,7 @@ export function pathCompletionSource(
     const target = { ...lineTarget, from: line.from + lineTarget.from }
     if (
       target.style !== "plain" &&
-      !parsedMarkdownCompletion(context, line.text)
+      !parsedMarkdownCompletion(context, line.text, line.from)
     ) {
       return null
     }

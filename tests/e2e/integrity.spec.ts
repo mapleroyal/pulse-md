@@ -92,7 +92,9 @@ test("the dark e2e theme is resolved before the first window is created", async 
 
     expect(nativeAppearance).toMatchObject({
       shouldUseDarkColors: true,
-      themeSource: "dark",
+      // Desktop native controls track the committed system setting after
+      // startup; macOS retains the runner's explicit dark source.
+      themeSource: process.platform === "darwin" ? "dark" : "system",
     })
     expect(nativeAppearance.backgroundColor).toMatch(/^#181818(?:ff)?$/i)
     expect(new URL(page.url()).searchParams.get("appearanceMode")).toBe(
@@ -726,6 +728,39 @@ test("save requires confirmation before recreating an externally deleted file", 
       .toEqual(["Document Deleted on Disk"])
     await expect(stat(documentPath)).rejects.toMatchObject({ code: "ENOENT" })
     await expect(page.getByLabel("Modified")).toBeVisible()
+  } finally {
+    await exitApplication(app)
+    await rm(testDirectory, { force: true, recursive: true })
+  }
+})
+
+test("a clean missing file adopts external creation and later changes", async () => {
+  const testDirectory = await createTestDirectory()
+  const userData = path.join(testDirectory, "user-data")
+  const documentPath = path.join(testDirectory, "created-later.md")
+  const app = await launchApplication(userData, documentPath)
+
+  try {
+    const page = await app.firstWindow()
+    await page.locator(".cm-editor").waitFor()
+    await expect(page.getByRole("tab")).toContainText("created-later.md")
+    await expect(page.getByLabel("Modified")).toHaveCount(0)
+
+    await writeFile(documentPath, "Created by another application\n")
+    await expect(page.locator(".cm-content")).toContainText(
+      "Created by another application"
+    )
+    await expect(page.getByRole("tab")).toHaveAttribute(
+      "aria-label",
+      documentPath
+    )
+    await expect(page.getByLabel("Modified")).toHaveCount(0)
+
+    await writeFile(documentPath, "A later external edit\n")
+    await expect(page.locator(".cm-content")).toContainText(
+      "A later external edit"
+    )
+    await expect(page.getByLabel("Modified")).toHaveCount(0)
   } finally {
     await exitApplication(app)
     await rm(testDirectory, { force: true, recursive: true })

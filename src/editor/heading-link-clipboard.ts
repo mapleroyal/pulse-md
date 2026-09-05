@@ -78,7 +78,13 @@ export function pastedHeadingLinkExtension(
       EditorView.domEventHandlers({
         paste(event, view) {
           const data = event.clipboardData
-          if (!data) return false
+          if (
+            !data ||
+            view.state.readOnly ||
+            !view.state.facet(EditorView.editable)
+          ) {
+            return false
+          }
           const metadata = copiedHeadingLinkMetadata(
             data,
             view.dom.ownerDocument

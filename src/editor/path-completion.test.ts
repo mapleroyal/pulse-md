@@ -1,14 +1,27 @@
 import { CompletionContext } from "@codemirror/autocomplete"
+import * as autocomplete from "@codemirror/autocomplete"
 import { markdown } from "@codemirror/lang-markdown"
 import { EditorState } from "@codemirror/state"
+import { keymap, type EditorView } from "@codemirror/view"
 import { describe, expect, it, vi } from "vitest"
 
 import {
   decodedPathQuery,
   encodedPathSegment,
+  pathCompletionExtension,
   pathCompletionSource,
   pathCompletionTarget,
 } from "./path-completion"
+
+vi.mock("@codemirror/autocomplete", async (importOriginal) => {
+  const module =
+    await importOriginal<typeof import("@codemirror/autocomplete")>()
+  return {
+    ...module,
+    acceptCompletion: vi.fn(module.acceptCompletion),
+    completionStatus: vi.fn(module.completionStatus),
+  }
+})
 
 describe("path completion target", () => {
   it("recognizes unfinished inline link and image destinations", () => {
@@ -74,6 +87,26 @@ describe("path completion encoding", () => {
 })
 
 describe("path completion source", () => {
+  it("inspects only bounded text around a completion in a very long physical line", async () => {
+    const prefix = "x".repeat(100_000)
+    const doc = `${prefix} ./docs/cha`
+    const state = EditorState.create({ doc })
+    const slice = vi.spyOn(state, "sliceDoc")
+    const completePath = vi
+      .fn()
+      .mockResolvedValue([{ kind: "file", name: "chapter.md" }])
+    const result = await pathCompletionSource(completePath)(
+      new CompletionContext(state, doc.length, false)
+    )
+
+    expect(completePath).toHaveBeenCalledWith("./docs/cha")
+    expect(result?.from).toBe(prefix.length + " ./docs/".length)
+    expect(slice).toHaveBeenCalledOnce()
+    expect(
+      slice.mock.calls.every(([from = 0, to = doc.length]) => to - from <= 4096)
+    ).toBe(true)
+  })
+
   it("asks for the full path and replaces only the final segment", async () => {
     const completePath = vi.fn().mockResolvedValue([
       { kind: "directory", name: "chapters" },
@@ -170,5 +203,62 @@ describe("path completion source", () => {
       expect(result).toBeNull()
     }
     expect(completePath).not.toHaveBeenCalled()
+  })
+})
+
+describe("pending path completion commands", () => {
+  it("preserves newer handoffs through stale timers and consecutive directory lookups", () => {
+    vi.useFakeTimers()
+    const status = vi
+      .spyOn(autocomplete, "completionStatus")
+      .mockReturnValue("pending")
+    let accepted = 0
+    const accept = vi
+      .spyOn(autocomplete, "acceptCompletion")
+      .mockImplementation(() => {
+        if (status.getMockImplementation()?.(state) !== "active") return false
+        accepted += 1
+        state = state.update({
+          changes: { from: state.doc.length, insert: "/" },
+          selection: { anchor: state.doc.length + 1 },
+        }).state
+        status.mockReturnValue("pending")
+        return true
+      })
+    let state = EditorState.create({
+      doc: "./docs/cha",
+      selection: { anchor: "./docs/cha".length },
+      extensions: pathCompletionExtension(async () => []),
+    })
+    const view = {
+      get state() {
+        return state
+      },
+      dom: { isConnected: true, ownerDocument: { defaultView: null } },
+    } as unknown as EditorView
+    const tab = state
+      .facet(keymap)
+      .flat()
+      .find((binding) => binding.key === "Tab")!.run!
+    try {
+      expect(tab(view)).toBe(true)
+      state = state.update({
+        changes: { from: state.doc.length, insert: "p" },
+        selection: { anchor: state.doc.length + 1 },
+      }).state
+      expect(tab(view)).toBe(true)
+      expect(tab(view)).toBe(true)
+      vi.advanceTimersByTime(0)
+      status.mockReturnValue("active")
+      vi.advanceTimersByTime(8)
+      expect(accepted).toBe(1)
+      status.mockReturnValue("active")
+      vi.advanceTimersByTime(8)
+      expect(accepted).toBe(2)
+    } finally {
+      accept.mockRestore()
+      status.mockRestore()
+      vi.useRealTimers()
+    }
   })
 })

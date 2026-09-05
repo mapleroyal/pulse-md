@@ -1,14 +1,16 @@
 import { history, redo, redoDepth, undo, undoDepth } from "@codemirror/commands"
-import { EditorSelection, EditorState } from "@codemirror/state"
-import type { EditorView } from "@codemirror/view"
+import { Compartment, EditorSelection, EditorState } from "@codemirror/state"
+import { EditorView, type ViewUpdate } from "@codemirror/view"
 import { describe, expect, it, vi } from "vitest"
 
 import {
   headingLinkPasteFallbackTransaction,
   mapPendingHeadingLinkPaste,
+  pastedHeadingLinkExtension,
   resolvedHeadingLinkPasteChanges,
   resolvedHeadingLinkPasteTransaction,
 } from "./heading-link-clipboard"
+import { AsyncPasteTracker } from "./async-paste"
 
 function runHistoryCommand(
   state: EditorState,
@@ -28,6 +30,117 @@ function runHistoryCommand(
 }
 
 describe("async heading-link paste", () => {
+  it.each([EditorState.readOnly.of(true), EditorView.editable.of(false)])(
+    "declines heading clipboard handling while editing is disabled",
+    (extension) => {
+      const handlers = vi.spyOn(EditorView, "domEventHandlers")
+      try {
+        const resolve = vi.fn()
+        pastedHeadingLinkExtension(resolve)
+        const paste = handlers.mock.calls[0]![0].paste!
+        const getData = vi.fn()
+        const event = {
+          clipboardData: { getData },
+          preventDefault: vi.fn(),
+        } as unknown as ClipboardEvent
+        const view = {
+          state: EditorState.create({ extensions: extension }),
+          dispatch: vi.fn(),
+        } as unknown as EditorView
+
+        expect(paste.call({}, event, view)).toBe(false)
+        expect(getData).not.toHaveBeenCalled()
+        expect(resolve).not.toHaveBeenCalled()
+        expect(view.dispatch).not.toHaveBeenCalled()
+      } finally {
+        handlers.mockRestore()
+      }
+    }
+  )
+
+  it("tracks normalized Windows clipboard line endings by editor positions", () => {
+    const initial = EditorState.create({
+      doc: "before after",
+      selection: { anchor: 7 },
+    })
+    const inserted = headingLinkPasteFallbackTransaction(
+      initial,
+      "first\r\nsecond"
+    )
+    expect(inserted.transaction.state.doc.toString()).toBe(
+      "before first\nsecondafter"
+    )
+    expect(inserted.pending.ranges).toEqual([{ from: 7, to: 19 }])
+    expect(
+      resolvedHeadingLinkPasteTransaction(
+        inserted.transaction.state,
+        inserted.pending,
+        "#heading"
+      )?.state.doc.toString()
+    ).toBe("before #headingafter")
+  })
+
+  it("cancels delayed upgrades across a temporary read-only lease", () => {
+    const editability = new Compartment()
+    const initial = EditorState.create({
+      extensions: editability.of(EditorState.readOnly.of(false)),
+    })
+    const inserted = headingLinkPasteFallbackTransaction(initial, "fallback")
+    const tracker = new AsyncPasteTracker()
+    tracker.pastes.set({}, inserted.pending)
+    const locked = inserted.transaction.state.update({
+      effects: editability.reconfigure(EditorState.readOnly.of(true)),
+    })
+
+    expect(
+      resolvedHeadingLinkPasteTransaction(
+        locked.state,
+        inserted.pending,
+        "#heading"
+      )
+    ).toBeNull()
+    tracker.update({
+      state: locked.state,
+      docChanged: false,
+      selectionSet: false,
+    } as ViewUpdate)
+    expect(tracker.pastes.size).toBe(0)
+  })
+
+  it("does not revive an upgrade after an interior edit is undone", () => {
+    const inserted = headingLinkPasteFallbackTransaction(
+      EditorState.create(),
+      "fallback"
+    )
+    const edited = inserted.transaction.state.update({
+      changes: { from: 3, insert: "x" },
+    })
+    const pending = mapPendingHeadingLinkPaste(inserted.pending, edited.changes)
+    const restored = edited.state.update({ changes: { from: 3, to: 4 } })
+    expect(restored.state.doc.toString()).toBe("fallback")
+    expect(
+      resolvedHeadingLinkPasteChanges(
+        restored.state,
+        mapPendingHeadingLinkPaste(pending, restored.changes),
+        "#heading"
+      )
+    ).toEqual([])
+  })
+
+  it("cancels an HTML-only empty fallback when authored text arrives there", () => {
+    const inserted = headingLinkPasteFallbackTransaction(
+      EditorState.create(),
+      ""
+    )
+    const edited = inserted.transaction.state.update({
+      changes: { from: 0, insert: "typed" },
+    })
+    const pending = mapPendingHeadingLinkPaste(inserted.pending, edited.changes)
+    expect(
+      resolvedHeadingLinkPasteChanges(edited.state, pending, "converted")
+    ).toEqual([])
+  })
+
   it("keeps the synchronous fallback and maps its upgrade through later edits", () => {
     const initial = EditorState.create({
       doc: "before selection after",

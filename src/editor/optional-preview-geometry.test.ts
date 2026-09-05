@@ -11,6 +11,23 @@ import {
 } from "./optional-preview-geometry"
 
 describe("optional preview geometry", () => {
+  it("bounds retained source bytes independently of the height entry count", () => {
+    const heights = new PreviewHeightCache(128, 16)
+    heights.set("aaaa", 120)
+    heights.set("bbbb", 240)
+    expect(heights.get("aaaa")).toBe(120)
+    heights.set("cccc", 360)
+    expect(heights.get("bbbb")).toBeNull()
+    expect(heights.get("aaaa")).toBe(120)
+    heights.set("oversized-source", 480)
+    expect(heights.get("oversized-source")).toBeNull()
+    heights.set("aaaa", 200)
+    expect(heights.get("cccc")).toBe(360)
+    heights.invalidate()
+    heights.set("12345678", 100)
+    expect(heights.get("12345678")).toBe(100)
+  })
+
   it("invalidates measured heights before typography remeasurement", () => {
     const heights = new PreviewHeightCache(2)
     heights.set("math", 120)

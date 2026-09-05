@@ -306,6 +306,32 @@ describe.sequential("CLI server protocol", () => {
     await socketClosed
   })
 
+  it.each(["working directory", "argument"])(
+    "rejects invalid UTF-8 in the %s without dispatching a substituted path",
+    async (field) => {
+      const handler = vi.fn()
+      server = await startCliServer(runtimeDirectory, handler)
+      const request = encodeRequest({
+        argv: ["notes.md"],
+        cwd: runtimeDirectory,
+      })
+      const invalidByteOffset =
+        field === "working directory"
+          ? ACTIVE_WINDOW_BOUNDS_OFFSET +
+            16 +
+            Buffer.byteLength(runtimeDirectory) -
+            1
+          : request.length - 1
+      request[invalidByteOffset] = 0xff
+
+      expect(await exchange(endpoint, request)).toMatchObject({
+        kind: "e",
+        exitCode: 1,
+      })
+      expect(handler).not.toHaveBeenCalled()
+    }
+  )
+
   it("streams multiple output chunks before one terminal response", async () => {
     server = await startCliServer(runtimeDirectory, async ({ responder }) => {
       await responder.outputChunks(

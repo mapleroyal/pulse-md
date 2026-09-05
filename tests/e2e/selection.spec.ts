@@ -1516,6 +1516,16 @@ test("raw Markdown keeps bidi column geometry across virtualized rows @renderer-
       process.platform === "darwin" ? "Meta+Shift+V" : "Control+Shift+V"
     )
     await expect(editor).toHaveClass(/cm-md-source/)
+    await page.locator(".cm-content").evaluate(async (content) => {
+      await Promise.allSettled(
+        content.getAnimations().map((animation) => animation.finished)
+      )
+    })
+    await settleSelectionLayer(page)
+    await page.locator(".cm-scroller").evaluate((scroller) => {
+      scroller.scrollTop = 0
+    })
+    await settleSelectionLayer(page)
 
     await expect
       .poll(async () => (await wrappedVisualRows(lines.nth(1))).length)
@@ -1532,7 +1542,12 @@ test("raw Markdown keeps bidi column geometry across virtualized rows @renderer-
       wrappedText
     )
 
-    await page.mouse.click(origin.x, origin.y)
+    await page.locator(".cm-scroller").evaluate((scroller) => {
+      scroller.scrollTop = 0
+    })
+    await settleSelectionLayer(page)
+    const columnOrigin = await textBoundary(lines.nth(0), 8)
+    await page.mouse.click(columnOrigin.x, columnOrigin.y)
     await page.locator(".cm-scroller").evaluate((scroller) => {
       scroller.scrollTop = scroller.scrollHeight
     })

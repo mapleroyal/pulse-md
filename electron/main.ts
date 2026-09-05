@@ -3005,9 +3005,11 @@ function fileFingerprintsMatch(
   left: FileFingerprint | null,
   right: FileFingerprint | null
 ): boolean {
+  // A path-bound document can legitimately begin without a backing file.
+  // Two absent baselines still represent the same state while its first
+  // external creation is read; an observed file never matches absence.
+  if (left === null || right === null) return left === right
   return Boolean(
-    left &&
-    right &&
     left.ctimeMs === right.ctimeMs &&
     left.dev === right.dev &&
     left.ino === right.ino &&

@@ -14,6 +14,10 @@ const MAX_ARGUMENT_COUNT = 4_096
 const MAX_ARGUMENT_BYTES = 1_048_576
 const MAX_CWD_BYTES = 32_768
 const MAX_METADATA_BYTES = 8 * 1_048_576
+const metadataDecoder = new TextDecoder("utf-8", {
+  fatal: true,
+  ignoreBOM: true,
+})
 
 export interface CliRawRequest {
   activeWindowBounds: CliActiveWindowBounds | null
@@ -335,7 +339,9 @@ function decodeMetadata(buffer: Buffer): DecodedMetadata | null {
     )
   }
   if (buffer.length < offset + cwdLength) return null
-  const cwd = buffer.toString("utf8", offset, offset + cwdLength)
+  const cwd = metadataDecoder.decode(
+    buffer.subarray(offset, offset + cwdLength)
+  )
   offset += cwdLength
   if (!path.isAbsolute(cwd) || cwd.includes("\0")) {
     throw new TypeError("The CLI working directory must be absolute")
@@ -353,7 +359,9 @@ function decodeMetadata(buffer: Buffer): DecodedMetadata | null {
       throw new TypeError("The CLI request metadata is too large")
     }
     if (buffer.length < offset + argumentLength) return null
-    const argument = buffer.toString("utf8", offset, offset + argumentLength)
+    const argument = metadataDecoder.decode(
+      buffer.subarray(offset, offset + argumentLength)
+    )
     if (argument.includes("\0")) {
       throw new TypeError("CLI arguments cannot contain null bytes")
     }
@@ -512,7 +520,9 @@ async function receiveRequest(
         stdinFilePath = created.filePath
         stdinHandle = created.handle
       }
-      if (data.length > 0) await stdinHandle.write(data)
+      // A single write may successfully persist only part of the chunk.
+      // writeFile drains it completely or rejects before request dispatch.
+      if (data.length > 0) await stdinHandle.writeFile(data)
     })
     writeQueue = operation
     void operation.then(

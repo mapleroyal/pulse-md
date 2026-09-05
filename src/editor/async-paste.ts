@@ -6,7 +6,9 @@ import {
   Transaction,
 } from "@codemirror/state"
 import { isolateHistory } from "@codemirror/commands"
-import type { ViewUpdate } from "@codemirror/view"
+import { EditorView, type ViewUpdate } from "@codemirror/view"
+
+import { normalizeEditorContent } from "./content"
 
 export interface PendingAsyncPaste {
   readonly canJoinOriginalHistory: boolean
@@ -28,6 +30,7 @@ export function asyncPasteFallbackTransaction(
   state: EditorState,
   source: string
 ) {
+  source = normalizeEditorContent(source)
   const changes = state.changeByRange((range) => ({
     changes: { from: range.from, insert: source, to: range.to },
     range: EditorSelection.cursor(range.from + source.length),
@@ -57,6 +60,17 @@ export function mapPendingAsyncPaste(
     historyTime: pending.historyTime,
     source: pending.source,
     ranges: pending.ranges.flatMap((range) => {
+      let touched = false
+      changes.iterChangedRanges((from, to) => {
+        touched ||=
+          range.from === range.to
+            ? from <= range.from && to >= range.to
+            : (from < range.to && to > range.from) ||
+              (from === to && from > range.from && from < range.to)
+      })
+      // Once authored input touches a fallback, even an undo that restores its
+      // exact bytes must not let delayed clipboard work overwrite that input.
+      if (touched) return []
       if (range.from === range.to) {
         const position = changes.mapPos(range.from, -1)
         return [{ from: position, to: position }]
@@ -97,6 +111,7 @@ export function resolvedAsyncPasteTransaction(
   pending: PendingAsyncPaste,
   replacement: AsyncPasteReplacement
 ) {
+  if (state.readOnly || !state.facet(EditorView.editable)) return null
   const changes = resolvedAsyncPasteChanges(state, pending, replacement)
   if (changes.length === 0) return null
   return state.update({
@@ -114,6 +129,10 @@ export class AsyncPasteTracker {
   readonly pastes = new Map<object, PendingAsyncPaste>()
 
   update(update: ViewUpdate) {
+    if (update.state.readOnly || !update.state.facet(EditorView.editable)) {
+      this.pastes.clear()
+      return
+    }
     if (!update.docChanged && !update.selectionSet) return
     for (const [token, pending] of this.pastes) {
       this.pastes.set(token, {

@@ -22,6 +22,7 @@ import {
 import {
   exitApplication,
   openSettingsSection,
+  setWindowContentSize,
   waitForApplicationClose,
 } from "./electron-helpers"
 import { seedScratchStore } from "./scratch-helpers"
@@ -1318,46 +1319,60 @@ test("cold Settings replays a native zoom change when its handler mounts", async
   }
 })
 
-test("a rejected Settings chunk stays local and can be retried", async () => {
-  const userData = await mkdtemp(
-    path.join(os.tmpdir(), "pulse-md-settings-load-retry-e2e-")
-  )
-  const app = await launchApplication(userData)
-
-  try {
-    const page = await app.firstWindow()
-    await app.evaluate(({ session }) => {
-      let failed = false
-      session.defaultSession.webRequest.onBeforeRequest(
-        { urls: ["pulse-md://bundle/assets/SettingsDialog-*"] },
-        (_details, callback) => {
-          if (!failed) {
-            failed = true
-            callback({ cancel: true })
-          } else {
-            callback({})
-          }
-        }
-      )
-    })
-    await page.locator(".cm-editor").waitFor()
-    await page.keyboard.press(settingsShortcut)
-
-    const loadingSurface = page.locator("body > [data-settings-loading]")
-    await expect(loadingSurface.getByRole("alert")).toHaveText(
-      "Settings could not be loaded."
+for (const resource of ["JavaScript", "stylesheet"] as const) {
+  test(`a rejected Settings ${resource} stays local and can be retried`, async () => {
+    const userData = await mkdtemp(
+      path.join(os.tmpdir(), "pulse-md-settings-load-retry-e2e-")
     )
-    await loadingSurface.getByRole("button", { name: "Retry" }).click()
-    await expect(page.locator("[data-settings-dialog]")).toBeVisible()
-    await page
-      .getByRole("dialog", { name: "Settings" })
-      .getByRole("button", { name: "Cancel" })
-      .click()
-  } finally {
-    await exitApplication(app)
-    await rm(userData, { force: true, recursive: true })
-  }
-})
+    const app = await launchApplication(userData)
+
+    try {
+      const page = await app.firstWindow()
+      await app.evaluate(({ session }, failedResource) => {
+        let failed = false
+        session.defaultSession.webRequest.onBeforeRequest(
+          {
+            urls: [
+              `pulse-md://bundle/assets/SettingsDialog-*.${failedResource === "stylesheet" ? "css" : "js"}*`,
+            ],
+          },
+          (_details, callback) => {
+            if (!failed) {
+              failed = true
+              callback({ cancel: true })
+            } else {
+              callback({})
+            }
+          }
+        )
+      }, resource)
+      await page.locator(".cm-editor").waitFor()
+      await page.keyboard.press(settingsShortcut)
+
+      const loadingSurface = page.locator("body > [data-settings-loading]")
+      await expect(loadingSurface.getByRole("alert")).toHaveText(
+        "Settings could not be loaded."
+      )
+      await loadingSurface.getByRole("button", { name: "Retry" }).click()
+      await expect(page.locator("[data-settings-dialog]")).toBeVisible()
+      if (resource === "stylesheet") {
+        await setWindowContentSize(app, 540, 740)
+        await page.evaluate(() => window.pulseMd.previewWindowZoom(1.5))
+        await expect(page.locator("[data-settings-dialog-footer]")).toHaveCSS(
+          "gap",
+          "2px"
+        )
+      }
+      await page
+        .getByRole("dialog", { name: "Settings" })
+        .getByRole("button", { name: "Cancel" })
+        .click()
+    } finally {
+      await exitApplication(app)
+      await rm(userData, { force: true, recursive: true })
+    }
+  })
+}
 
 test("lazy specialized workspaces remain visible, cancelable, and focus-contained", async () => {
   test.skip(
@@ -1505,6 +1520,12 @@ test("the global Settings owner rebases allowed sibling chrome changes", async (
     })
     const fontSize = typography.getByLabel("Base font size in pixels")
     await fontSize.fill("22")
+    await fontSize.press("Tab")
+    const previewFontSize = () =>
+      primary.evaluate(() =>
+        document.documentElement.style.getPropertyValue("--editor-font-size")
+      )
+    await expect.poll(previewFontSize).toBe("22px")
 
     await app.evaluate(({ BrowserWindow, Menu }, windowId) => {
       const window = BrowserWindow.fromId(windowId)
@@ -1521,6 +1542,7 @@ test("the global Settings owner rebases allowed sibling chrome changes", async (
 
     await primary.bringToFront()
     await expect(fontSize).toHaveValue("22")
+    await expect.poll(previewFontSize).toBe("22px")
     await typography.getByRole("button", { name: "Cancel" }).click()
     await expect(primarySettings).toBeVisible()
     await expect(primaryWidth).toHaveValue("1200")
@@ -1559,7 +1581,23 @@ test("the global Settings owner rebases allowed sibling chrome changes", async (
         name: "Always show status bar",
       })
     ).toBeChecked()
+    await app.evaluate(({ BrowserWindow, Menu }, windowId) => {
+      const window = BrowserWindow.fromId(windowId)
+      const formatting = Menu.getApplicationMenu()?.getMenuItemById(
+        "view-formatting-bar"
+      )
+      if (!window || !formatting) {
+        throw new Error("The sibling Formatting Toolbar command is unavailable")
+      }
+      formatting.click(undefined, window, window.webContents)
+    }, primaryWindowId)
+    await expect(
+      primary.getByRole("toolbar", { name: "Formatting toolbar" })
+    ).toBeVisible()
     await secondarySettings.getByRole("button", { name: "Cancel" }).click()
+    await expect(
+      secondary.getByRole("toolbar", { name: "Formatting toolbar" })
+    ).toBeVisible()
   } finally {
     await exitApplication(app)
     await rm(userData, { force: true, recursive: true })

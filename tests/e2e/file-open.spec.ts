@@ -102,6 +102,7 @@ test("Open preserves a multi-selection's order and records each document", async
   const secondPath = path.join(testDirectory, "second.txt")
   const thirdPath = path.join(testDirectory, "third.markdown")
   const filePaths = [firstPath, secondPath, thirdPath]
+  const nativeRecentPaths = process.platform === "linux" ? [] : filePaths
   await Promise.all([
     writeFile(firstPath, "First document\n"),
     writeFile(secondPath, `Second document\n${"x".repeat(8 * 1024 * 1024)}`),
@@ -154,7 +155,19 @@ test("Open preserves a multi-selection's order and records each document", async
           return testGlobal.fileOpenRecentDocuments
         })
       )
-      .toEqual(filePaths)
+      .toEqual(nativeRecentPaths)
+    await expect
+      .poll(() =>
+        app.evaluate(({ Menu }) =>
+          Menu.getApplicationMenu()
+            ?.getMenuItemById("file-open-recent")
+            ?.submenu?.items.filter((item) =>
+              item.id?.startsWith("file-open-recent-")
+            )
+            .map((item) => item.toolTip)
+        )
+      )
+      .toEqual([...filePaths].reverse())
 
     // The oversized inactive selection must still be a hydration recipe, not
     // a retained eager read. Activation therefore observes the current bytes.
@@ -182,7 +195,7 @@ test("Open preserves a multi-selection's order and records each document", async
           return testGlobal.fileOpenRecentDocuments
         })
       )
-      .toEqual(filePaths)
+      .toEqual(nativeRecentPaths)
 
     await tabs.nth(2).click()
     await expect(page.locator(".cm-content")).toContainText("Third document")
@@ -195,7 +208,7 @@ test("Open preserves a multi-selection's order and records each document", async
           return testGlobal.fileOpenRecentDocuments
         })
       )
-      .toEqual(filePaths)
+      .toEqual(nativeRecentPaths)
   } finally {
     await exitApplication(app)
     await rm(testDirectory, { force: true, recursive: true })

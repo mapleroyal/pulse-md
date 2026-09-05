@@ -78,6 +78,7 @@ const styleLoaders: Readonly<Record<string, FontStyleLoader>> = {
 const pendingStyles = new Map<string, Promise<void>>()
 
 export function loadIncludedFontFamilyStyle(family: string): Promise<void> {
+  if (!Object.hasOwn(styleLoaders, family)) return Promise.resolve()
   const loader = styleLoaders[family]
   if (!loader) return Promise.resolve()
   const existing = pendingStyles.get(family)

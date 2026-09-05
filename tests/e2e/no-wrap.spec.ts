@@ -397,6 +397,10 @@ test("no-wrap bounds rendered blocks while prose and rules stay intrinsic", asyn
         const scroller = document.querySelector<HTMLElement>(".cm-scroller")
         if (!scroller) throw new Error("Editor scroller is unavailable")
         const scrollerBounds = scroller.getBoundingClientRect()
+        const scrollerScale = scrollerBounds.width / scroller.offsetWidth
+        const visibleLeft =
+          scrollerBounds.left + scroller.clientLeft * scrollerScale
+        const visibleRight = visibleLeft + scroller.clientWidth * scrollerScale
         const markers = [
           ...document.querySelectorAll<HTMLElement>(
             ".cm-app-selectionBackground"
@@ -404,13 +408,11 @@ test("no-wrap bounds rendered blocks while prose and rules stay intrinsic", asyn
         ].map((element) => element.getBoundingClientRect())
         return {
           reachesVisibleEnd: markers.some(
-            (marker) => marker.right >= scrollerBounds.right - 4
+            (marker) => marker.right >= visibleRight - 4
           ),
           scrollLeft: scroller.scrollLeft,
           visible: markers.some(
-            (marker) =>
-              marker.right > scrollerBounds.left &&
-              marker.left < scrollerBounds.right
+            (marker) => marker.right > visibleLeft && marker.left < visibleRight
           ),
         }
       })

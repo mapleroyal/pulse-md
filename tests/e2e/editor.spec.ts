@@ -5020,13 +5020,18 @@ test("overlay chrome preserves independent tab sessions and exposes configurable
     const hoverGeometry = await page.evaluate(() => {
       const chrome = document.querySelector<HTMLElement>(".top-chrome")
       const toolbar = document.querySelector<HTMLElement>(".formatting-toolbar")
-      if (!chrome || !toolbar) {
+      const hoverRegion = document.querySelector<HTMLElement>(
+        ".top-chrome-hover-region"
+      )
+      if (!chrome || !toolbar || !hoverRegion) {
         throw new Error("Top hover geometry is unavailable")
       }
       const chromeBounds = chrome.getBoundingClientRect()
       const toolbarBounds = toolbar.getBoundingClientRect()
+      const hoverBounds = hoverRegion.getBoundingClientRect()
       return {
-        chromeX: chromeBounds.right - 110,
+        // Keep the probe inside app chrome, clear of native caption controls.
+        chromeX: hoverBounds.right - 110,
         chromeY: chromeBounds.top + chromeBounds.height / 2,
         toolbarX: toolbarBounds.right - 110,
         toolbarY: (chromeBounds.bottom + toolbarBounds.bottom) / 2,
@@ -9062,7 +9067,7 @@ test("an empty document exposes editing affordances and dismisses editing intent
     await expect
       .poll(() =>
         findInput.evaluate((element) => {
-          if (!(element instanceof HTMLInputElement)) return false
+          if (!(element instanceof HTMLTextAreaElement)) return false
           return (
             element.selectionStart === 0 &&
             element.selectionEnd === element.value.length

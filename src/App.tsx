@@ -2300,7 +2300,11 @@ export function App() {
   )
 
   const acceptSettings = React.useCallback(
-    (nextSettings: AppSettings, persistedSettings?: AppSettings) => {
+    (
+      nextSettings: AppSettings,
+      persistedSettings?: AppSettings,
+      finishPreview = false
+    ) => {
       const previousCommittedSettings = settingsRef.current
       const effectiveChanged = !settingsEqual(
         previousCommittedSettings,
@@ -2309,32 +2313,12 @@ export function App() {
       const persistedChanged =
         persistedSettings !== undefined &&
         !settingsEqual(persistedSettingsRef.current, persistedSettings)
-      if (!effectiveChanged && !persistedChanged) return
+      if (!effectiveChanged && !persistedChanged && !finishPreview) return
 
       const committedSettings = effectiveChanged
         ? cloneAppSettings(nextSettings)
         : previousCommittedSettings
       settingsRef.current = committedSettings
-      if (
-        effectiveChanged &&
-        previousCommittedSettings.chrome.showFormattingBar !==
-          committedSettings.chrome.showFormattingBar
-      ) {
-        setTopDrawerCompensated(
-          committedSettings.chrome.showFormattingBar &&
-            currentDocumentKind() === "markdown" &&
-            shouldCompensateTopDrawer()
-        )
-      }
-      if (
-        effectiveChanged &&
-        committedSettings.chrome.showFormattingBar &&
-        currentDocumentKind() === "markdown" &&
-        !previousCommittedSettings.chrome.showFormattingBar
-      ) {
-        setFormattingToolbarActivated(true)
-        void loadFormattingToolbar().catch(() => undefined)
-      }
       if (persistedSettings && persistedChanged) {
         const committedPersistedSettings = cloneAppSettings(persistedSettings)
         persistedSettingsRef.current = committedPersistedSettings
@@ -2345,25 +2329,49 @@ export function App() {
           setSettingsDialogSettings(committedPersistedSettings)
         }
       }
-      if (!effectiveChanged) return
+      if (!effectiveChanged && !finishPreview) return
 
-      // Electron page zoom persists independently of the Settings save flow.
-      // Its broadcast must not replace a live draft's appearance or typography
-      // with the persisted base settings while a Settings surface owns them.
+      // The Settings transaction owns both its draft and its visible preview.
+      // Sibling commits advance the baseline for merge/cancel without replacing
+      // that preview. Native page zoom alone also updates the current draft.
       if (
-        (settingsOpenRef.current || settingsWorkspaceOpenRef.current) &&
-        settingsMatchExceptZoom(previousCommittedSettings, committedSettings)
+        !finishPreview &&
+        (settingsOpenRef.current || settingsWorkspaceOpenRef.current)
       ) {
-        const mergedSettings = cloneAppSettings(appliedSettingsRef.current)
-        mergedSettings.zoomFactor = committedSettings.zoomFactor
-        setAppSettings(mergedSettings)
-        applySettings(mergedSettings)
-        if (settingsOpenRef.current) {
-          settingsZoomHandlerRef.current?.(committedSettings.zoomFactor)
-        } else {
-          updateSettingsWorkspaceZoom(committedSettings.zoomFactor)
+        if (
+          settingsMatchExceptZoom(previousCommittedSettings, committedSettings)
+        ) {
+          const mergedSettings = cloneAppSettings(appliedSettingsRef.current)
+          mergedSettings.zoomFactor = committedSettings.zoomFactor
+          setAppSettings(mergedSettings)
+          applySettings(mergedSettings)
+          if (settingsOpenRef.current) {
+            settingsZoomHandlerRef.current?.(committedSettings.zoomFactor)
+          } else {
+            updateSettingsWorkspaceZoom(committedSettings.zoomFactor)
+          }
         }
         return
+      }
+
+      const previousAppliedSettings = appliedSettingsRef.current
+      if (
+        previousAppliedSettings.chrome.showFormattingBar !==
+        committedSettings.chrome.showFormattingBar
+      ) {
+        setTopDrawerCompensated(
+          committedSettings.chrome.showFormattingBar &&
+            currentDocumentKind() === "markdown" &&
+            shouldCompensateTopDrawer()
+        )
+      }
+      if (
+        committedSettings.chrome.showFormattingBar &&
+        currentDocumentKind() === "markdown" &&
+        !previousAppliedSettings.chrome.showFormattingBar
+      ) {
+        setFormattingToolbarActivated(true)
+        void loadFormattingToolbar().catch(() => undefined)
       }
 
       setAppSettings(committedSettings)
@@ -2962,7 +2970,7 @@ export function App() {
           persistedSettingsRef.current
         )
         const savedSettings = await window.pulseMd.setSettings(rebasedSettings)
-        acceptSettings(savedSettings.effective, savedSettings.persisted)
+        acceptSettings(savedSettings.effective, savedSettings.persisted, true)
         await window.pulseMd.launchWindowProfile(profileId)
         settingsWorkspaceOpenRef.current = false
         windowProfilesWorkspaceOpenRef.current = false
@@ -4211,34 +4219,41 @@ export function App() {
             return false
           }
           syncActiveSession()
-          const result = await requestLocalLink(
-            target.tabId,
-            target.filePath,
-            null,
-            "current-tab"
-          )
-          if (target.tabId === originalTabId) {
-            const refreshedCurrent = tabsRef.current.get(originalTabId)
-            if (refreshedCurrent?.navigationDocumentId === current.documentId) {
-              current.filePath = refreshedCurrent.document.filePath
+          const releaseDocumentOpenLease = beginDocumentOpenLease()
+          try {
+            const result = await requestLocalLink(
+              target.tabId,
+              target.filePath,
+              null,
+              "current-tab"
+            )
+            if (target.tabId === originalTabId) {
+              const refreshedCurrent = tabsRef.current.get(originalTabId)
+              if (
+                refreshedCurrent?.navigationDocumentId === current.documentId
+              ) {
+                current.filePath = refreshedCurrent.document.filePath
+              }
             }
+            if (
+              !result ||
+              result.kind !== "document" ||
+              result.disposition !== "current-tab" ||
+              !(await acceptLinkedDocument(
+                result.openedTab,
+                result.window,
+                target.documentId
+              ))
+            ) {
+              await restoreOriginalTab()
+              source.push(target)
+              publishNavigationAvailability()
+              return false
+            }
+            targetTab = tabsRef.current.get(target.tabId)
+          } finally {
+            releaseDocumentOpenLease()
           }
-          if (
-            !result ||
-            result.kind !== "document" ||
-            result.disposition !== "current-tab" ||
-            !(await acceptLinkedDocument(
-              result.openedTab,
-              result.window,
-              target.documentId
-            ))
-          ) {
-            await restoreOriginalTab()
-            source.push(target)
-            publishNavigationAvailability()
-            return false
-          }
-          targetTab = tabsRef.current.get(target.tabId)
         }
 
         if (
@@ -4275,6 +4290,7 @@ export function App() {
     [
       acceptLinkedDocument,
       activateTab,
+      beginDocumentOpenLease,
       publishNavigationAvailability,
       requestLocalLink,
       syncActiveSession,
@@ -4327,6 +4343,9 @@ export function App() {
               }
             : null
         pendingLocalNavigationRef.current = pending
+        const releaseDocumentOpenLease = pending
+          ? beginDocumentOpenLease()
+          : null
         try {
           const result =
             activation.kind === "scratch"
@@ -4394,6 +4413,7 @@ export function App() {
             }
           }
         } finally {
+          releaseDocumentOpenLease?.()
           if (pendingLocalNavigationRef.current === pending) {
             pendingLocalNavigationRef.current = null
           }
@@ -4413,6 +4433,7 @@ export function App() {
     [
       acceptLinkedDocument,
       activateTab,
+      beginDocumentOpenLease,
       rememberNavigationEntry,
       requestLocalLink,
       syncActiveSession,
@@ -4671,13 +4692,12 @@ export function App() {
         currentDocumentKind() === "markdown" &&
         shouldCompensateTopDrawer()
     )
-    setAppSettings(cloneAppSettings(settingsRef.current))
-    applySettings(settingsRef.current)
+    acceptSettings(settingsRef.current, undefined, true)
     window.pulseMd.previewAppearance(null)
     window.pulseMd.previewWindowZoom(settingsRef.current.zoomFactor)
     closeSettings()
   }, [
-    applySettings,
+    acceptSettings,
     closeSettings,
     currentDocumentKind,
     shouldCompensateTopDrawer,
@@ -4707,7 +4727,7 @@ export function App() {
             settingsImport.options
           )
         : await window.pulseMd.setSettings(settingsToSave)
-      acceptSettings(savedSettings.effective, savedSettings.persisted)
+      acceptSettings(savedSettings.effective, savedSettings.persisted, true)
       if (savedSettings.effective.spellCheck) {
         controllerRef.current?.refreshSpellCheck()
       }
@@ -5093,8 +5113,7 @@ export function App() {
 
       if (previewWasOpen || settingsOpenRef.current) {
         const committedSettings = cloneAppSettings(settingsRef.current)
-        setAppSettings(committedSettings)
-        applySettings(committedSettings)
+        acceptSettings(committedSettings, undefined, true)
         window.pulseMd.previewAppearance(null)
         window.pulseMd.previewWindowZoom(committedSettings.zoomFactor)
       }
@@ -5110,7 +5129,7 @@ export function App() {
       }
     },
     [
-      applySettings,
+      acceptSettings,
       closeOutline,
       resetSettingsNavigationHistory,
       restoreActiveDocumentSession,
@@ -5521,8 +5540,7 @@ export function App() {
             setWindowProfilesWorkspace(null)
             setScratchesWorkspace(null)
             resetSettingsNavigationHistory()
-            setAppSettings(cloneAppSettings(settingsRef.current))
-            applySettings(settingsRef.current)
+            acceptSettings(settingsRef.current, undefined, true)
             window.pulseMd.previewAppearance(null)
             window.pulseMd.previewWindowZoom(settingsRef.current.zoomFactor)
           }
@@ -5548,7 +5566,7 @@ export function App() {
       openSettings,
       openWindowProfileCapture,
       openWindowProfilePicker,
-      applySettings,
+      acceptSettings,
       prepareWindowClose,
       resetSettingsNavigationHistory,
       restoreActiveDocumentSession,
