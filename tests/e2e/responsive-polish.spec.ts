@@ -535,11 +535,8 @@ test("desktop app controls share the narrow formatting lane without covering doc
   }
 })
 
-test("desktop editor scrollbar clears overlay chrome and stays rail-less @renderer-isolated", async () => {
-  test.skip(process.platform === "darwin", "Desktop scrollbar styling only")
-  const userData = await mkdtemp(
-    path.join(os.tmpdir(), "pulse-md-windows-scrollbar-")
-  )
+test("editor scrollbar clears overlay chrome and stays rail-less @renderer-isolated", async () => {
+  const userData = await mkdtemp(path.join(os.tmpdir(), "pulse-md-scrollbar-"))
   const documentPath = path.join(userData, "scrollbar.md")
   await writeFile(
     documentPath,
@@ -754,6 +751,53 @@ test("desktop editor scrollbar clears overlay chrome and stays rail-less @render
     await expect
       .poll(async () => (await scrollbarStyles()).clipPath)
       .toBe("inset(74px 0px 28px)")
+
+    await app.evaluate(({ Menu, BrowserWindow }) => {
+      const item = Menu.getApplicationMenu()?.getMenuItemById("view-status-bar")
+      if (!item) throw new Error("Status Bar menu item is unavailable")
+      item.click(undefined, BrowserWindow.getAllWindows()[0], undefined)
+    })
+    await expect(revealRegion).toHaveAttribute("data-always-visible")
+    const insetBounds = await scroller.boundingBox()
+    const toolbarBounds = await page
+      .locator(".formatting-toolbar")
+      .boundingBox()
+    const statusBounds = await page.locator(".status-overlay").boundingBox()
+    if (!insetBounds || !toolbarBounds || !statusBounds) {
+      throw new Error("Scrollbar overlay boundaries are unavailable")
+    }
+
+    // At either end, grab the center of the minimum-size thumb immediately
+    // outside the chrome. A clipped thumb would turn this into a track click.
+    for (const edge of ["top", "bottom"] as const) {
+      await scroller.evaluate((element, target) => {
+        element.scrollTop = target === "top" ? 0 : element.scrollHeight
+      }, edge)
+      const beforeDrag = await scroller.evaluate((element) => element.scrollTop)
+      const y =
+        edge === "top"
+          ? toolbarBounds.y + toolbarBounds.height + 18
+          : statusBounds.y - 18
+      await page.mouse.move(insetBounds.x + insetBounds.width - 5, y)
+      await page.mouse.down()
+      try {
+        expect(await scroller.evaluate((element) => element.scrollTop)).toBe(
+          beforeDrag
+        )
+        await page.mouse.move(
+          insetBounds.x + insetBounds.width - 5,
+          y + (edge === "top" ? 30 : -30),
+          { steps: 5 }
+        )
+        const moved = expect.poll(() =>
+          scroller.evaluate((element) => element.scrollTop)
+        )
+        if (edge === "top") await moved.toBeGreaterThan(beforeDrag)
+        else await moved.toBeLessThan(beforeDrag)
+      } finally {
+        await page.mouse.up()
+      }
+    }
   } finally {
     await exitApplication(app)
     await rm(userData, { force: true, recursive: true })

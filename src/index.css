@@ -445,20 +445,20 @@ html[data-launch-transition="running"] .launch-tint-cover {
   padding-top: var(--editor-content-top-padding, var(--window-chrome-height));
 }
 
-/* Chromium cannot host WinUI's Notepad scrollbar control. Keep the Windows
-   editor scrollbar overlay-like instead: no rail, a quiet thumb that gains
-   contrast on hover, and a track inset that stays below every active top lane.
-   The document surface still fills the window, so chrome remains an overlay. */
-.desktop-chrome .editor-mount .cm-scroller::-webkit-scrollbar {
+/* Use the same inset Chromium scrollbar on every platform, including macOS:
+   its default overlay thumb otherwise runs behind the clipped chrome. Keep
+   the track transparent and the thumb quiet until hover. The document surface
+   still fills the window, so chrome remains an overlay. */
+.editor-mount .cm-scroller::-webkit-scrollbar {
   width: 10px;
   height: 10px;
 }
 
-.desktop-chrome .editor-mount .cm-scroller::-webkit-scrollbar-track {
+.editor-mount .cm-scroller::-webkit-scrollbar-track {
   background: transparent;
 }
 
-.desktop-chrome .editor-mount .cm-scroller::-webkit-scrollbar-track:vertical {
+.editor-mount .cm-scroller::-webkit-scrollbar-track:vertical {
   margin-block-start: max(
     var(--window-chrome-height, 46px),
     var(--editor-clip-top, 0px)
@@ -466,7 +466,7 @@ html[data-launch-transition="running"] .launch-tint-cover {
   margin-block-end: var(--editor-clip-bottom, 0px);
 }
 
-.desktop-chrome .editor-mount .cm-scroller::-webkit-scrollbar-thumb {
+.editor-mount .cm-scroller::-webkit-scrollbar-thumb {
   min-width: 36px;
   min-height: 36px;
   border: 3px solid transparent;
@@ -475,18 +475,18 @@ html[data-launch-transition="running"] .launch-tint-cover {
     padding-box;
 }
 
-.desktop-chrome .editor-mount .cm-scroller::-webkit-scrollbar-thumb:hover {
+.editor-mount .cm-scroller::-webkit-scrollbar-thumb:hover {
   background: color-mix(in oklab, var(--document-foreground) 48%, transparent)
     padding-box;
 }
 
-.desktop-chrome .editor-mount .cm-scroller::-webkit-scrollbar-button {
+.editor-mount .cm-scroller::-webkit-scrollbar-button {
   display: none;
   width: 0;
   height: 0;
 }
 
-.desktop-chrome .editor-mount .cm-scroller::-webkit-scrollbar-corner {
+.editor-mount .cm-scroller::-webkit-scrollbar-corner {
   background: transparent;
 }
 
