@@ -272,10 +272,19 @@ function platformShortcuts(
           label: "Select tab 1–10",
           description: mac
             ? "Command or Control selects tabs 1–9; Control-0 selects the tenth tab."
-            : "0 selects the tenth tab.",
+            : platform === "linux"
+              ? "0 selects the tenth tab. Super shortcuts work when your desktop passes them to Pulse MD; reassign conflicting desktop shortcuts to use them."
+              : "0 selects the tenth tab.",
           keys: mac
             ? [[[primary, "1–9"]], [[control, "1–9"]], [[control, "0"]]]
-            : [[[control, "1–9"]], [[control, "0"]]],
+            : platform === "linux"
+              ? [
+                  [[control, "1–9"]],
+                  [[control, "0"]],
+                  [["Super", "1–9"]],
+                  [["Super", "0"]],
+                ]
+              : [[[control, "1–9"]], [[control, "0"]]],
         },
         { label: "Next tab", keys: [[[control, "Tab"]]] },
         {

@@ -35,6 +35,7 @@ import {
   type SearchUiState,
 } from "@/app/search-handoff"
 import { prepareSearchOverlay } from "@/app/search-overlay-loader"
+import { tabIndexForDigitShortcut } from "@/app/tab-shortcuts"
 import { topControlGroupWidth } from "@/app/top-control-layout"
 import type { StatusOverlayHandle } from "@/app/StatusOverlay"
 import type { TabFocusPolicy } from "@/app/TopChrome"
@@ -5640,6 +5641,7 @@ export function App() {
         platformRef.current === "darwin"
           ? event.metaKey && !event.ctrlKey
           : event.ctrlKey && !event.metaKey
+      const tabDigitIndex = tabIndexForDigitShortcut(event, platformRef.current)
       if (
         settingsOpenRef.current ||
         settingsWorkspaceOpenRef.current ||
@@ -5691,15 +5693,7 @@ export function App() {
           event.ctrlKey &&
           !event.metaKey &&
           !event.altKey &&
-          (event.code === "Tab" ||
-            (!event.shiftKey && /^(?:Digit|Numpad)[0-9]$/.test(event.code)))
-        const commandTabSwitchShortcut =
-          platformRef.current === "darwin" &&
-          event.metaKey &&
-          !event.ctrlKey &&
-          !event.altKey &&
-          !event.shiftKey &&
-          /^(?:Digit|Numpad)[1-9]$/.test(event.code)
+          event.code === "Tab"
         const headingShortcut =
           (platformRef.current === "darwin"
             ? event.ctrlKey && event.metaKey && !event.altKey && !event.shiftKey
@@ -5736,7 +5730,7 @@ export function App() {
               event.code === "Comma"))
         if (
           controlTabSwitchShortcut ||
-          commandTabSwitchShortcut ||
+          tabDigitIndex !== null ||
           headingShortcut ||
           exactHeadingShortcut ||
           documentShortcut
@@ -5760,22 +5754,11 @@ export function App() {
         return
       }
 
-      const tabDigit = /^(?:Digit|Numpad)([0-9])$/.exec(event.code)
-      const controlTabDigit =
-        event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey
-      const commandTabDigit =
-        platformRef.current === "darwin" &&
-        tabDigit?.[1] !== "0" &&
-        event.metaKey &&
-        !event.ctrlKey &&
-        !event.altKey &&
-        !event.shiftKey
-      if (tabDigit && (controlTabDigit || commandTabDigit)) {
+      if (tabDigitIndex !== null) {
         event.preventDefault()
         event.stopPropagation()
         clearHeadingChord()
-        const digit = Number(tabDigit[1])
-        activateTabAtIndex(digit === 0 ? 9 : digit - 1)
+        activateTabAtIndex(tabDigitIndex)
         return
       }
 

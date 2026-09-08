@@ -7098,13 +7098,15 @@ test("outline, heading links, heading shortcuts, and tab shortcuts share navigat
       "aria-label",
       linkedDocument
     )
-    if (process.platform === "darwin") {
+    if (process.platform === "darwin" || process.platform === "linux") {
       await page.keyboard.press("Meta+1")
       await expect(activeDocumentTab(page)).toHaveAttribute(
         "aria-label",
         mainDocument
       )
-      await page.keyboard.press("Meta+2")
+      await page.keyboard.press(
+        process.platform === "linux" ? "MetaRight+2" : "Meta+2"
+      )
       await expect(activeDocumentTab(page)).toHaveAttribute(
         "aria-label",
         linkedDocument
@@ -7158,9 +7160,16 @@ test("outline, heading links, heading shortcuts, and tab shortcuts share navigat
       "data-active",
       "true"
     )
-    if (process.platform === "darwin") {
+    if (process.platform === "darwin" || process.platform === "linux") {
       await page.keyboard.press("Meta+9")
       await expect(page.locator(".document-tab").nth(8)).toHaveAttribute(
+        "data-active",
+        "true"
+      )
+    }
+    if (process.platform === "linux") {
+      await page.keyboard.press("Meta+0")
+      await expect(page.locator(".document-tab").nth(9)).toHaveAttribute(
         "data-active",
         "true"
       )
@@ -7174,8 +7183,11 @@ test("outline, heading links, heading shortcuts, and tab shortcuts share navigat
     await zoomInput.focus()
     await page.keyboard.press(exactH2Shortcut)
     await page.keyboard.press("Control+Shift+Tab")
-    if (process.platform === "darwin") {
+    if (process.platform === "darwin" || process.platform === "linux") {
       await page.keyboard.press("Meta+2")
+    }
+    if (process.platform === "linux") {
+      await page.keyboard.press("Meta+0")
     }
     await expect(activeDocumentTab(page)).toHaveAttribute(
       "aria-label",
@@ -7244,8 +7256,15 @@ test("outline, heading links, heading shortcuts, and tab shortcuts share navigat
     await expect(selectTabShortcut.locator("kbd")).toHaveText(
       process.platform === "darwin"
         ? ["⌘", "1–9", "⌃", "1–9", "⌃", "0"]
-        : ["Ctrl", "1–9", "Ctrl", "0"]
+        : process.platform === "linux"
+          ? ["Ctrl", "1–9", "Ctrl", "0", "Super", "1–9", "Super", "0"]
+          : ["Ctrl", "1–9", "Ctrl", "0"]
     )
+    if (process.platform === "linux") {
+      await expect(selectTabShortcut).toContainText(
+        "Super shortcuts work when your desktop passes them to Pulse MD"
+      )
+    }
     await expect
       .poll(() =>
         shortcuts
