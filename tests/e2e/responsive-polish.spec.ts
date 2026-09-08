@@ -220,9 +220,15 @@ test("desktop application menu supports access mode and sibling navigation @rend
       "true"
     )
     await page.keyboard.press("Escape")
-    await page.waitForTimeout(200)
+    await expect(menu).toBeHidden()
     await expect(page.locator(".cm-editor")).toHaveClass(/cm-focused/)
 
+    // Keep the earlier Find submenu hover out of this keyboard-only phase.
+    const parkedPointer = await page.evaluate(() => ({
+      x: innerWidth - 10,
+      y: innerHeight - 10,
+    }))
+    await page.mouse.move(parkedPointer.x, parkedPointer.y)
     await page.getByRole("button", { name: "Settings" }).focus()
     await page.evaluate(() => {
       const dispatch = (type: "keydown" | "keyup", key: string) =>
@@ -238,11 +244,14 @@ test("desktop application menu supports access mode and sibling navigation @rend
     await expect(menu.getByRole("menuitem", { name: "Format" })).toBeDisabled()
     await expect(menu.locator("button[data-active]")).toHaveText("View")
     await page.keyboard.press("Escape")
+    await expect(menu).toBeHidden()
+    await expect(page.getByRole("button", { name: "Settings" })).toBeFocused()
     await page.keyboard.press("Alt+E")
     await expect(menu.getByRole("menuitem", { name: "Edit" })).toHaveAttribute(
       "aria-expanded",
       "true"
     )
+    await expect(menu.getByRole("menuitem", { name: "Format" })).toBeDisabled()
     await page.keyboard.press("ArrowRight")
     await expect(menu.getByRole("menuitem", { name: "View" })).toHaveAttribute(
       "aria-expanded",

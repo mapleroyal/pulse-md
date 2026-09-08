@@ -19,16 +19,40 @@ export function waitForApplicationClose(
 export async function exitApplication(
   application: ElectronApplication
 ): Promise<void> {
-  const closed = waitForApplicationClose(application)
-  await application.evaluate(({ app, BrowserWindow }) => {
-    // Test profiles are disposable, so skip product save prompts while still
-    // ending the process through Electron's orderly quit lifecycle. app.exit()
-    // bypasses before-quit/will-quit and macOS can report that as an unexpected
-    // termination on the next launch.
-    for (const window of BrowserWindow.getAllWindows()) window.destroy()
-    app.quit()
-  })
-  await closed
+  const child = application.process()
+  if (child.exitCode !== null || child.signalCode !== null) return
+
+  const shutdown = async () => {
+    try {
+      await application.evaluate(({ app, BrowserWindow }) => {
+        // Teardown discards disposable windows, so bypass the product's async
+        // save/close transaction before destroying its renderer participants.
+        // Persistence assertions must complete before teardown; tests of close
+        // or quit behavior invoke those product actions themselves.
+        app.removeAllListeners("before-quit")
+        for (const window of BrowserWindow.getAllWindows()) window.destroy()
+      })
+    } catch (error) {
+      // The last window can trigger quit before evaluate replies. Confirm actual
+      // process closure below instead of treating this protocol race as failure.
+      if (
+        !(error instanceof Error) ||
+        !error.message.startsWith(
+          "electronApplication.evaluate: Target page, context or browser has been closed"
+        )
+      ) {
+        throw error
+      }
+    }
+
+    // Playwright quits orderly, disconnects its Node inspector, and waits for
+    // process exit. A bare evaluate(app.quit()) does not own that debugger state.
+    await application.close()
+  }
+  await Promise.all([
+    application.waitForEvent("close", { timeout: 10_000 }),
+    shutdown(),
+  ])
 }
 
 export async function setWindowContentSize(

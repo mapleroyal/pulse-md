@@ -434,17 +434,34 @@ test("the native clipboard converts rendered document content to Markdown", asyn
     await page.locator(".cm-editor").waitFor()
     await content.focus()
 
-    await app.evaluate(({ BrowserWindow, clipboard }) => {
+    const clipboardContent = {
+      text: "Imported\nBold normal bold and <em>literal</em>.\nMore\nBody",
+      html: [
+        "<h2>Imported</h2>",
+        '<p><strong>Bold <span style="font-weight:normal">normal</span> bold</strong> and &lt;em&gt;literal&lt;/em&gt;.</p>',
+        "<details><summary>More</summary><p>Body</p></details>",
+      ].join(""),
+    }
+    await app.evaluate(
+      ({ clipboard }, value) => clipboard.write(value),
+      clipboardContent
+    )
+    // Observe the native clipboard representations before issuing paste.
+    await expect
+      .poll(async () => {
+        const observed = await app.evaluate(({ clipboard }) => ({
+          text: clipboard.readText(),
+          html: clipboard.readHTML(),
+        }))
+        return {
+          text: observed.text,
+          htmlPresent: observed.html.includes(clipboardContent.html),
+        }
+      })
+      .toEqual({ text: clipboardContent.text, htmlPresent: true })
+    await app.evaluate(({ BrowserWindow }) => {
       const win = BrowserWindow.getFocusedWindow()
       if (!win) throw new Error("No focused window is available for paste")
-      clipboard.write({
-        text: "Imported\nBold normal bold and <em>literal</em>.\nMore\nBody",
-        html: [
-          "<h2>Imported</h2>",
-          '<p><strong>Bold <span style="font-weight:normal">normal</span> bold</strong> and &lt;em&gt;literal&lt;/em&gt;.</p>',
-          "<details><summary>More</summary><p>Body</p></details>",
-        ].join(""),
-      })
       win.webContents.paste()
     })
 

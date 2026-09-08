@@ -2970,6 +2970,7 @@ test("Linux background effects keep app tint and compositor blur responsibilitie
       .click()
     await page.getByLabel("Background translucency percentage").fill("70")
     await settingsSaveButton(page).click()
+    await expect(page.getByRole("dialog", { name: "Settings" })).toHaveCount(0)
     await exitApplication(app)
     app = null
 

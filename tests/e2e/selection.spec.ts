@@ -1440,6 +1440,19 @@ test("raw Markdown keeps wrapped column geometry across virtualized rows @render
     await page.keyboard.press(
       process.platform === "darwin" ? "Meta+Shift+V" : "Control+Shift+V"
     )
+    await expect(editor).toHaveClass(/cm-md-source/)
+    // Source-mode transition restores its viewport on completion. Finish that
+    // setup before establishing the column-selection origin and scrolling away.
+    await page.locator(".cm-content").evaluate(async (content) => {
+      await Promise.allSettled(
+        content.getAnimations().map((animation) => animation.finished)
+      )
+    })
+    await settleSelectionLayer(page)
+    await page.locator(".cm-scroller").evaluate((scroller) => {
+      scroller.scrollTop = 0
+    })
+    await settleSelectionLayer(page)
 
     await expect
       .poll(async () => (await wrappedVisualRows(lines.nth(1))).length)
