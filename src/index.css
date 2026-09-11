@@ -96,6 +96,11 @@
   --syntax-keyword-color: #770088;
   --syntax-number-color: #221199;
   --syntax-string-color: #aa1111;
+  --callout-layer-background: color-mix(
+    in oklab,
+    var(--document-surface-tint) 7%,
+    transparent
+  );
   --callout-surface-background: color-mix(
     in oklab,
     var(--document-surface-tint) 7%,
@@ -278,11 +283,7 @@
 }
 
 html[data-translucent-callouts] {
-  --callout-surface-background: color-mix(
-    in oklab,
-    var(--document-surface-tint) 7%,
-    transparent
-  );
+  --callout-surface-background: var(--callout-layer-background);
 }
 
 html[data-translucent-code-blocks] {

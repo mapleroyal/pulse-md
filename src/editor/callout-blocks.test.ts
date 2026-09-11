@@ -1436,6 +1436,62 @@ describe("callout block structure", () => {
     expect(stateCalloutWrapperTypes(state)).toEqual(expectedWrapperTypes)
   })
 
+  test.each(["forward", "backward"])(
+    "reveals the containing parent for a %s selection ending inside its last child",
+    (direction) => {
+      const doc = [
+        "intro",
+        "",
+        "> [!appointments]",
+        "> outer body",
+        "> > [!dental]-",
+        "> > dental body",
+        ">",
+        "> > [!tccc]",
+        "> > tccc body",
+      ].join("\n")
+      const [outer, dental, tccc] = callouts(doc)
+      let state = EditorState.create({
+        doc,
+        extensions: [
+          markdown({ base: markdownLanguage }),
+          calloutBlockExtension({ selectionActiveState: () => true }),
+        ],
+      })
+      const select = (from: number, to: number) => {
+        state = state.update({
+          selection:
+            direction === "forward"
+              ? { anchor: from, head: to }
+              : { anchor: to, head: from },
+        }).state
+      }
+
+      for (const from of [outer!.wrapperFrom, doc.indexOf("outer body")]) {
+        select(from, outer!.to)
+        expect(state.facet(calloutEditingRange)).toEqual({
+          from: outer!.wrapperFrom,
+          to: outer!.to,
+        })
+        expect(stateCalloutWrapperTypes(state)).toEqual([])
+        expect(stateFoldRanges(state)).toEqual([])
+      }
+
+      select(tccc!.wrapperFrom, tccc!.to)
+      expect(state.facet(calloutEditingRange)).toEqual({
+        from: tccc!.wrapperFrom,
+        to: tccc!.to,
+      })
+      expect(stateCalloutWrapperTypes(state)).toEqual([
+        "appointments",
+        "dental",
+      ])
+      expect(stateFoldRanges(state)).toEqual([
+        `${dental!.bodyFrom! - 1}:${dental!.to}`,
+      ])
+    }
+  )
+
   test("edits the deepest containing callout without changing disclosure state", () => {
     const selectionEnabled = Facet.define<boolean, boolean>({
       combine: (values) => values.at(-1) ?? false,

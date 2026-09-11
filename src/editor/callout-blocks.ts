@@ -44,6 +44,7 @@ import {
   editorSearchQuery,
 } from "./search-state"
 import { markdownContainerPrefix } from "./markdown-prefix"
+import { sourceLinePointerPosition } from "./semantic-preview-selection"
 import { boundedPreviewMaxWidth } from "./theme"
 
 export type CalloutFoldModifier = "+" | "-" | null
@@ -568,19 +569,29 @@ function calloutContainingSelection(
 ) {
   if (!selectionActive) return null
 
-  const position = state.selection.main.head
+  const selection = state.selection.main
+  const position = selection.head
   let editing: CalloutBlock | null = null
+  let headCallout: CalloutBlock | null = null
   const callouts = calloutsInRanges(
     index,
     rangesAroundPosition(state, position)
   )
   for (const callout of callouts) {
     const contains = position >= callout.wrapperFrom && position <= callout.to
-    if (contains && (!editing || callout.depth > editing.depth)) {
+    if (!contains) continue
+    if (!headCallout || callout.depth > headCallout.depth) headCallout = callout
+    // Selecting an entire parent preview can end inside its last child. The
+    // whole selected source must reveal together in either selection direction.
+    if (
+      selection.from >= callout.wrapperFrom &&
+      selection.to <= callout.to &&
+      (!editing || callout.depth > editing.depth)
+    ) {
       editing = callout
     }
   }
-  return editing
+  return editing ?? headCallout
 }
 
 function blockIsInsideEditingCallout(
@@ -1222,22 +1233,33 @@ function rangesOverlap(left: DocumentRange, right: DocumentRange) {
   return left.from < right.to && right.from < left.to
 }
 
-function calloutHeaderPresentationRange(callout: CalloutBlock): DocumentRange {
+function nestedCalloutSeparator(state: EditorState, callout: CalloutBlock) {
+  if (callout.depth <= 1 || callout.wrapperFrom === 0) return null
+  const previous = state.doc.lineAt(callout.wrapperFrom - 1)
+  return /^[\t ]*(?:>[\t ]*)+$/.test(previous.text) ? previous : null
+}
+
+function calloutHeaderPresentationRange(
+  state: EditorState,
+  callout: CalloutBlock
+): DocumentRange {
   return {
     from:
-      callout.depth > 1 && callout.wrapperFrom > 0
+      nestedCalloutSeparator(state, callout)?.from ??
+      (callout.depth > 1 && callout.wrapperFrom > 0
         ? callout.wrapperFrom - 1
-        : callout.headerLineFrom,
+        : callout.headerLineFrom),
     to: callout.headerTo,
   }
 }
 
 function calloutsWithHeadersInRanges(
+  state: EditorState,
   index: RangeSet<IndexedMarkdownQuoteBlock>,
   ranges: readonly DocumentRange[]
 ) {
   return calloutsInRanges(index, ranges).filter((callout) => {
-    const header = calloutHeaderPresentationRange(callout)
+    const header = calloutHeaderPresentationRange(state, callout)
     return ranges.some((range) => rangesOverlap(header, range))
   })
 }
@@ -1297,7 +1319,11 @@ function selectionHeaderRefreshRanges(
       )
     )
   }
-  return mergeDocumentRanges(touched.map(calloutHeaderPresentationRange))
+  return mergeDocumentRanges(
+    touched.map((callout) =>
+      calloutHeaderPresentationRange(transaction.state, callout)
+    )
+  )
 }
 
 function wordCharactersAtSelection(state: EditorState) {
@@ -1445,12 +1471,13 @@ function refreshCalloutHeaders(
   field: StateField<CalloutBlockState>
 ) {
   // Rebuilding a header adds its replacement, line decoration, and possible
-  // nested-gap point as one unit. Remove that same complete presentation first
-  // so a narrow search/selection refresh cannot retain one point while adding
-  // another copy of it.
+  // nested gap (a separator line or point) as one unit. Remove that complete
+  // presentation so a narrow refresh cannot retain and duplicate part of it.
   const presentationRanges = mergeDocumentRanges([
     ...ranges,
-    ...callouts.map(calloutHeaderPresentationRange),
+    ...callouts.map((callout) =>
+      calloutHeaderPresentationRange(state, callout)
+    ),
   ])
   return refreshRangeSet(
     previous,
@@ -1788,16 +1815,20 @@ function buildHeaderDecorationRanges(
   for (const callout of callouts) {
     if (blockIsInsideEditingCallout(callout, editing)) continue
     if (callout.depth > 1 && callout.wrapperFrom > 0) {
-      // Keep the inter-card gap outside the nested card while making it a
-      // complete state-backed block. A BlockWrapper may be split at viewport
-      // boundaries, so leading padding on that wrapper would be repeated each
-      // time a new fragment mounts and would move the document while scrolling.
+      const separator = nestedCalloutSeparator(state, callout)
+      // Reuse the quote-only separator instead of adding another blank row.
+      // Keep this geometry in complete state: leading wrapper padding would
+      // repeat when a new viewport fragment mounts and shift the document.
       ranges.push(
-        Decoration.widget({
-          block: true,
-          side: 1,
-          widget: new CalloutNestedGapWidget(),
-        }).range(callout.wrapperFrom - 1)
+        separator
+          ? Decoration.line({ class: "cm-md-callout-separator" }).range(
+              separator.from
+            )
+          : Decoration.widget({
+              block: true,
+              side: 1,
+              widget: new CalloutNestedGapWidget(),
+            }).range(callout.wrapperFrom - 1)
       )
     }
     const firstBodyCallout =
@@ -2217,12 +2248,24 @@ const calloutBlockTheme = EditorView.baseTheme({
     overflowX: "clip",
     padding: "0 0.75rem 0.55rem",
   },
+  "&.cm-md-live .cm-md-callout .cm-md-callout": {
+    // A child blends over its parent even when the outer card is opaque.
+    // Internal layering must not depend on behind-window transparency.
+    backgroundColor:
+      "var(--callout-layer-background, color-mix(in oklab, var(--cm-md-callout-foreground) 7%, transparent))",
+  },
   "&.cm-md-live .cm-md-callout-gap": {
     boxSizing: "border-box",
   },
   "&.cm-md-live .cm-md-callout-nested-gap": {
-    height: "1lh",
+    height: "0.75rem",
     pointerEvents: "none",
+  },
+  "&.cm-md-live .cm-md-callout-separator": {
+    height: "0.75rem",
+    lineHeight: "0.75rem",
+    minHeight: "0",
+    paddingBlock: "0",
   },
   "&.cm-md-live .cm-md-callout-body": {
     minHeight: "0",
@@ -2634,6 +2677,7 @@ export function calloutBlockExtension(
           ])
           if (transaction.docChanged || headerRanges.length > 0) {
             const callouts = calloutsWithHeadersInRanges(
+              transaction.state,
               blockIndex,
               headerRanges
             )
@@ -2719,13 +2763,34 @@ export function calloutBlockExtension(
   }
   const pointerSelection = semanticPreviewSelectionResolvers.of({
     priority: 100,
-    resolveTarget(_view, target) {
+    resolveTarget(view, target, pointer) {
+      const editing = view.state.facet(calloutEditingRange)
+      if (editing) {
+        const position = sourceLinePointerPosition(view, {
+          clientX: pointer.x,
+          clientY: pointer.y,
+          target,
+        })?.pos
+        if (
+          position != null &&
+          position >= editing.from &&
+          position <= editing.to
+        ) {
+          return null
+        }
+      }
       // A source-origin drag treats a nested card as part of the complete
       // outer rendered unit it first entered. Rendered-origin gestures still
       // use the deepest card below through the precise resolver.
       return outermostPointerSelection(target)
     },
-    resolve(_view, target) {
+    resolve(view, target, position) {
+      const editing = view.state.facet(calloutEditingRange)
+      // A child reveals source inside its parent's rendered wrapper. That
+      // ancestor must not capture the next click needed to place the caret.
+      if (editing && position >= editing.from && position <= editing.to) {
+        return null
+      }
       return deepestPointerSelection(target)
     },
   })

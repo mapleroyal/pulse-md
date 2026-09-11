@@ -1691,8 +1691,8 @@ test("rendering chrome, lists, and fenced-code controls stay structural", async 
           firstBodyChild(fenced).getBoundingClientRect().top -
           fencedHeader.bottom,
         nestedGap: nested.getBoundingClientRect().top - nestedHeader.bottom,
-        nestedLineHeight: Number.parseFloat(
-          getComputedStyle(nestedContainer).lineHeight
+        nestedInset: Number.parseFloat(
+          getComputedStyle(nestedContainer).paddingLeft
         ),
         nestedOutlineStyle: getComputedStyle(nested).outlineStyle,
         ordinary: offsets(ordinary),
@@ -1706,11 +1706,8 @@ test("rendering chrome, lists, and fenced-code controls stay structural", async 
       Math.abs(calloutGeometry.fencedGap - calloutGeometry.ordinaryGap)
     ).toBeLessThanOrEqual(0.5)
     expect(
-      Math.abs(calloutGeometry.nestedGap - calloutGeometry.nestedLineHeight)
+      Math.abs(calloutGeometry.nestedGap - calloutGeometry.nestedInset)
     ).toBeLessThanOrEqual(0.5)
-    expect(calloutGeometry.nestedGap).toBeGreaterThan(
-      calloutGeometry.ordinaryGap + 10
-    )
     expect(calloutGeometry.nestedOutlineStyle).toBe("none")
     for (const key of ["body", "title", "headerHeight"] as const) {
       expect(
