@@ -1294,6 +1294,42 @@ describe("live list indentation semantics", () => {
     expect(harness.doc).toBe("- parent\n  - child\n- additional content")
   })
 
+  test("lifts retained continuation prose and children together with their list item", () => {
+    for (const [source, expected, childDepth] of [
+      [
+        "10. parent\n\n    continuation\n\n        code\n\n    - child",
+        "parent\n\ncontinuation\n\n    code\n\n- child",
+        1,
+      ],
+      [
+        "10. parent\n\n    A. child\n       continuation",
+        "parent\n\nA.  child\n    continuation",
+        1,
+      ],
+      [
+        "> - root\n>   - parent\n>\n>     continuation\n>     - child",
+        "> - root\n> - parent\n>\n>   continuation\n>   - child",
+        2,
+      ],
+    ] as const) {
+      const harness = editor(source, source.indexOf("parent"))
+      expect(insertNewlineContinueList(harness.view)).toBe(true)
+      expect(harness.doc).toBe(expected)
+      const tree = syntaxTree(harness.view.state)
+      expect(
+        tree.resolveInner(harness.doc.indexOf("continuation"), 1).name
+      ).toBe("Paragraph")
+      expect(
+        listItemDepthAt(harness.view.state, harness.doc.indexOf("child") + 1)
+      ).toBe(childDepth)
+      if (harness.doc.includes("code")) {
+        expect(tree.resolveInner(harness.doc.indexOf("code"), 1).name).toBe(
+          "CodeText"
+        )
+      }
+    }
+  })
+
   test("Shift+Enter exits list indentation while retaining quote containers", () => {
     const source = "> - item additional content"
     const harness = editor(source, source.indexOf("additional content"))

@@ -130,17 +130,21 @@ function toggleSymmetricMarker(view: EditorView, marker: string) {
       }
     }
 
+    // Emphasis delimiters cannot open or close against whitespace. Keep
+    // selected boundary whitespace outside the formatted content.
+    const leading = range.empty ? 0 : source.length - source.trimStart().length
+    const trailing = range.empty ? 0 : source.length - source.trimEnd().length
+    if (!range.empty && leading === source.length) return { range }
+    const from = range.from + leading
+    const to = range.to - trailing
     return {
       changes: [
-        { from: range.from, insert: marker },
-        { from: range.to, insert: marker },
+        { from, insert: marker },
+        { from: to, insert: marker },
       ],
       range: range.empty
         ? EditorSelection.cursor(range.head + marker.length)
-        : EditorSelection.range(
-            range.anchor + marker.length,
-            range.head + marker.length
-          ),
+        : directedRange(range, from + marker.length, to + marker.length),
     }
   })
 
@@ -170,12 +174,39 @@ function longestRun(source: string, character: string) {
 function toggleInlineCode(view: EditorView) {
   const { state } = view
   const transaction = state.changeByRange((range) => {
-    const before = repeatedBefore(state, range.from, "`")
-    const after = repeatedAfter(state, range.to, "`")
+    let padding = 0
+    let before = repeatedBefore(state, range.from, "`")
+    let after = repeatedAfter(state, range.to, "`")
+    // A code span with boundary backticks or significant boundary spaces
+    // needs one padding space on each side. Recognize that same span when
+    // toggling its still-selected content back to plain text.
+    if (
+      !range.empty &&
+      state.sliceDoc(Math.max(0, range.from - 1), range.from) === " " &&
+      state.sliceDoc(range.to, Math.min(state.doc.length, range.to + 1)) === " "
+    ) {
+      const paddedBefore = repeatedBefore(state, range.from - 1, "`")
+      const paddedAfter = repeatedAfter(state, range.to + 1, "`")
+      if (paddedBefore > 0 && paddedBefore === paddedAfter) {
+        const node = completeMarkdownSyntaxTree(state).resolveInner(
+          range.from,
+          1
+        )
+        if (
+          node.name === "InlineCode" &&
+          node.from === range.from - paddedBefore - 1 &&
+          node.to === range.to + paddedAfter + 1
+        ) {
+          padding = 1
+          before = paddedBefore
+          after = paddedAfter
+        }
+      }
+    }
     // Only remove a delimiter pair when the complete adjacent runs match.
     // Taking the shorter side corrupts source such as ``foo`, which is not a
     // valid symmetric code span around the selection.
-    const existingFence = before > 0 && before === after ? before : 0
+    const existingFence = before > 0 && before === after ? before + padding : 0
     if (existingFence > 0) {
       return {
         changes: [
@@ -198,7 +229,7 @@ function toggleInlineCode(view: EditorView) {
       source.length > 0 &&
       (source.startsWith("`") ||
         source.endsWith("`") ||
-        (source.startsWith(" ") && source.endsWith(" ")))
+        (source.startsWith(" ") && source.endsWith(" ") && /[^ ]/.test(source)))
         ? " "
         : ""
     const open = fence + pad
@@ -1305,7 +1336,7 @@ function insertHorizontalRule(view: EditorView) {
           : line.to
       const leading = nested || line.text.length > 0 ? "\n" : ""
       return {
-        changes: { from, insert: `${leading}---` },
+        changes: { from, insert: `${leading}***` },
         range: EditorSelection.cursor(from + leading.length + 3),
       }
     }
@@ -1318,7 +1349,7 @@ function insertHorizontalRule(view: EditorView) {
       state.sliceDoc(range.to, range.to + 1) !== "\n"
         ? "\n"
         : ""
-    const inserted = `${leading}---${trailing}`
+    const inserted = `${leading}***${trailing}`
     return {
       changes: { from: range.from, to: range.to, insert: inserted },
       range: EditorSelection.cursor(range.from + leading.length + 3),

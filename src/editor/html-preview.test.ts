@@ -1,4 +1,8 @@
-import { commonmarkLanguage, markdown } from "@codemirror/lang-markdown"
+import {
+  commonmarkLanguage,
+  markdown,
+  markdownLanguage,
+} from "@codemirror/lang-markdown"
 import { ensureSyntaxTree, syntaxTreeAvailable } from "@codemirror/language"
 import { EditorState, type Extension } from "@codemirror/state"
 import {
@@ -195,6 +199,92 @@ describe("sanitized HTML detection", () => {
       { block: true, source: expect.stringContaining("onclick") },
     ])
     expect(buildSanitizedHtmlPreviewDecorations(state).size).toBeGreaterThan(0)
+  })
+
+  test.each([
+    ["> <pre>\n> > literal\n> </pre>", "<pre>\n> literal\n</pre>"],
+    ["> <pre>\n>\ttext\n> </pre>", "<pre>\n  text\n</pre>"],
+    ["- <pre>\n\ttext\n  </pre>", "<pre>\n  text\n</pre>"],
+    ["> - <pre>\n>\t  text\n>   </pre>", "<pre>\n  text\n</pre>"],
+    [
+      "- <pre>\n  text\n    indented\n  </pre>",
+      "<pre>\ntext\n  indented\n</pre>",
+    ],
+    [
+      "> - <pre>\n>   text\n>     indented\n>   </pre>",
+      "<pre>\ntext\n  indented\n</pre>",
+    ],
+    [
+      "- > - <pre>\n  >   text\n  >     indented\n  >   </pre>",
+      "<pre>\ntext\n  indented\n</pre>",
+    ],
+    [
+      "-\t<pre>\n\ttext\n\t  indented\n\t</pre>",
+      "<pre>\ntext\n  indented\n</pre>",
+    ],
+    [
+      "> [!TIP]\n> > <pre>\n> > > literal\n> > </pre>",
+      "<pre>\n> literal\n</pre>",
+    ],
+    ["- > <pre>\n  >   indented\n  > </pre>", "<pre>\n  indented\n</pre>"],
+  ])(
+    "removes parsed quote containers from HTML payloads: %s",
+    (doc, source) => {
+      const state = markdownState(
+        doc,
+        0,
+        sanitizedHtmlLivePreviewExtension({
+          selectionActive: () => false,
+        })
+      )
+      const from = doc.indexOf("<pre>")
+      const expected = { block: true, from, source, to: doc.length }
+
+      expect(sanitizedHtmlPreviews(state)).toContainEqual(expected)
+      expect(sanitizedHtmlBlockAt(state, from)).toEqual(expected)
+      expect(stateHtmlDecorations(state)).toContainEqual(
+        expect.objectContaining({
+          kind: "sanitized-html-block",
+          text: source,
+        })
+      )
+      expect(state.sliceDoc(from, doc.length)).toMatch(/\n[\t >]/)
+    }
+  )
+
+  test("finds inline HTML in headings and keeps each table cell independent", () => {
+    const doc = [
+      "# <em>ATX</em><br>next",
+      "",
+      "Setext <sup>title</sup>",
+      "---------------------",
+      "",
+      "| <strong>Header</strong> | Other |",
+      "| --- | --- |",
+      "| <em>left | right</em> |",
+      "| <sub>cell</sub><br>next | value |",
+    ].join("\n")
+    const state = EditorState.create({
+      doc,
+      extensions: markdown({ addKeymap: false, base: markdownLanguage }),
+    })
+    const previews = sanitizedHtmlPreviews(state)
+    expect(
+      previews.map((preview) => (preview.block ? "block" : preview.tagName))
+    ).toEqual(["em", "br", "sup", "strong", "sub", "br"])
+    for (const text of ["ATX", "title", "Header", "cell"]) {
+      const from = doc.indexOf(text)
+      const decorations = buildSanitizedHtmlPreviewDecorations(state, false, [
+        { from, to: from + text.length },
+      ])
+      const rendered: string[] = []
+      decorations.between(0, doc.length, (start, end, value) => {
+        if (value.spec.markdownPreviewKind === "sanitized-html-inline") {
+          rendered.push(state.sliceDoc(start, end))
+        }
+      })
+      expect(rendered).toEqual([text])
+    }
   })
 
   test("finds a far block outside the published syntax tree for caret anchoring", () => {

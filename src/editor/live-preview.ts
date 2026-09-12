@@ -59,6 +59,7 @@ import {
 } from "./interactive-preview"
 import {
   changedMarkdownLinkReferenceRanges,
+  decodeMarkdownCharacterReferences,
   markdownLinkReferenceBlocks,
   markdownLinkReferenceIndexExtension,
   resolveMarkdownLinkNode,
@@ -81,6 +82,12 @@ import {
   markdownRemoteImagesEnabled,
   resolveMarkdownImageSource,
 } from "./media"
+import {
+  inlineCodeNormalization,
+  inlineCodeNormalizationExtension,
+  inlineCodeReplacementDecoration,
+  MarkdownTextWidget,
+} from "./inline-code"
 import { nestedHorizontalSelectionScrollExtension } from "./nested-horizontal-scroll"
 import { sourceLinePointerPosition } from "./semantic-preview-selection"
 
@@ -209,9 +216,10 @@ const inlineCodeMark = Decoration.mark({
   tagName: "code",
   class: "cm-md-inline-code",
 })
-const linkMark = Decoration.mark({ class: "cm-md-link" })
+const linkMark = Decoration.mark({ class: "cm-md-link", inclusive: true })
 const webLinkMark = Decoration.mark({
   class: "cm-md-link cm-md-openable-link cm-md-web-link",
+  inclusive: true,
 })
 const webLinkCursorMark = Decoration.mark({
   class: "cm-md-openable-link cm-md-web-link",
@@ -3627,6 +3635,7 @@ function decorateLink(context: BuildContext, node: SyntaxNodeRef) {
   // explicitly authored Markdown title opts into the shared tooltip at rest.
   const renderedLinkMark = resolved.title
     ? Decoration.mark({
+        inclusive: true,
         class: resolved.activation
           ? "cm-md-link cm-md-openable-link cm-md-web-link"
           : "cm-md-link",
@@ -4153,8 +4162,80 @@ function decorateNode(context: BuildContext, node: SyntaxNodeRef) {
         )
       }
       return
+    case "Escape":
+      if (!selectionTouches(context, node.from, node.to)) {
+        addDecoration(
+          context,
+          node.from,
+          node.from + 1,
+          hiddenDelimiter,
+          "escape-marker"
+        )
+      }
+      return
+    case "Entity": {
+      if (selectionTouches(context, node.from, node.to)) return
+      const source = context.state.sliceDoc(node.from, node.to)
+      const decoded = decodeMarkdownCharacterReferences(source)
+      if (decoded !== source) {
+        addDecoration(
+          context,
+          node.from,
+          node.to,
+          Decoration.replace({
+            inclusive: false,
+            markdownPreviewKind: "character-reference",
+            widget: new MarkdownTextWidget(
+              decoded,
+              "cm-md-character-reference",
+              true
+            ),
+          }),
+          "character-reference"
+        )
+      }
+      return
+    }
+    case "HardBreak": {
+      if (selectionTouches(context, node.from, node.to)) return
+      // Preserve the physical newline; only its backslash/two-space marker
+      // disappears. Viewport decorations must never replace a line boundary.
+      const to =
+        context.state.sliceDoc(node.to - 1, node.to) === "\n"
+          ? node.to - 1
+          : node.to
+      if (node.from < to) {
+        addDecoration(
+          context,
+          node.from,
+          to,
+          hiddenDelimiter,
+          "hard-break-marker"
+        )
+      }
+      return
+    }
     case "InlineCode":
       addDecoration(context, node.from, node.to, inlineCodeMark, "inline-code")
+      if (
+        !selectionTouches(context, node.from, node.to) &&
+        context.state.doc.lineAt(node.from).number ===
+          context.state.doc.lineAt(node.to).number
+      ) {
+        for (const replacement of inlineCodeNormalization(
+          context.state,
+          node.node,
+          context.tree
+        ).replacements) {
+          addDecoration(
+            context,
+            replacement.from,
+            replacement.to,
+            inlineCodeReplacementDecoration(replacement),
+            "inline-code-normalization"
+          )
+        }
+      }
       return
     case "Link":
     case "Autolink":
@@ -5756,6 +5837,7 @@ export function livePreviewExtension(
     yamlFrontMatterWrapperState,
     markdownLinkReferenceIndexExtension(),
     linkReferencePreviewExtension(),
+    inlineCodeNormalizationExtension(livePreviewSelectionIsActive),
     codeBlockExtension(options.codeBlock),
     livePreviewSourceLineMouseSelection,
     // A table can live inside a quote/callout wrapper. Block-wrapper facet

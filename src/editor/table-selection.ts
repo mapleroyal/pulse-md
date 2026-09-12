@@ -16,6 +16,8 @@ import {
 } from "@codemirror/view"
 import type { SyntaxNode } from "@lezer/common"
 
+import { calloutEditingRange } from "./callout-blocks"
+
 const tableRangeSelectionClass = "cm-md-table-range-selection"
 const tableCellClass = "cm-md-table-cell"
 const tableLineClass = "cm-md-table-line"
@@ -686,6 +688,15 @@ function tablePasteTarget(
   state: EditorState,
   pointerTarget: TableCellTarget | null
 ): TablePasteTarget | null {
+  const editing = state.facet(calloutEditingRange)
+  if (
+    editing &&
+    state.selection.ranges.some(
+      (range) => range.from <= editing.to && range.to >= editing.from
+    )
+  ) {
+    return null
+  }
   const rangeSelection = state.field(tableCellRangeSelectionState, false)
   if (rangeSelection) {
     const table = tableNodeForSelection(state, rangeSelection)
@@ -705,7 +716,20 @@ function tablePasteTarget(
     }
   }
 
+  if (state.selection.ranges.length !== 1) return null
   const selection = state.selection.main
+  // Ordinary source selections must remain replacement operations. A cell
+  // paste may use a caret or text selected wholly inside that one cell.
+  const selectedRow = tableNodeAtPosition(state, selection.head)
+  if (!selection.empty) {
+    const cell = selectedRow
+      ? tableSegments(selectedRow).find(
+          (segment) =>
+            selection.from >= segment.from && selection.to <= segment.to
+        )
+      : null
+    if (!cell) return null
+  }
   if (
     pointerTarget &&
     selection.head === pointerTarget.cursor.pos &&
@@ -736,7 +760,7 @@ function tablePasteTarget(
     }
   }
 
-  const rowNode = tableNodeAtPosition(state, selection.head)
+  const rowNode = selectedRow
   const table = rowNode?.parent
   if (!rowNode || table?.name !== "Table") return null
   const column = tableColumnAtPosition(rowNode, selection.head, selection.assoc)
@@ -847,7 +871,8 @@ function pasteTableCellRange(
   event: ClipboardEvent,
   pointerTarget: TableCellTarget | null
 ) {
-  if (!view.state.facet(EditorView.editable)) return false
+  if (view.state.readOnly || !view.state.facet(EditorView.editable))
+    return false
   const data = event.clipboardData
   if (!data) return false
   const clipboard =

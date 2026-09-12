@@ -80,3 +80,43 @@ test("find and replace accept literal line breaks through the lazy search handof
     await rm(userData, { force: true, recursive: true })
   }
 })
+
+test("previous-match navigation retains multiline lookahead context @renderer-isolated", async () => {
+  const userData = await mkdtemp(path.join(os.tmpdir(), "pulse-md-lookahead-"))
+  const documentPath = path.join(userData, "lookahead.md")
+  await writeFile(documentPath, "a\nb\na\nb")
+  const app = await electron.launch({
+    args: [projectRoot, `--user-data-dir=${userData}`, documentPath],
+    cwd: projectRoot,
+  })
+  try {
+    const page = await app.firstWindow()
+    await page.locator(".cm-editor").waitFor()
+    await page.keyboard.press(
+      process.platform === "darwin" ? "Meta+f" : "Control+f"
+    )
+    await page
+      .getByRole("button", { name: "Use regular expression", exact: true })
+      .click()
+    await page
+      .getByRole("textbox", { name: "Find", exact: true })
+      .fill("a(?=\\nb)|b")
+    const status = page.locator('[data-search-overlay-state="ready"] output')
+    await expect(status).toHaveText("0/4")
+    for (let ordinal = 1; ordinal <= 4; ordinal += 1) {
+      await page
+        .getByRole("button", { name: "Next match", exact: true })
+        .click()
+      await expect(status).toHaveText(`${ordinal}/4`)
+    }
+    for (const ordinal of [3, 2, 1, 4]) {
+      await page
+        .getByRole("button", { name: "Previous match", exact: true })
+        .click()
+      await expect(status).toHaveText(`${ordinal}/4`)
+    }
+  } finally {
+    await exitApplication(app)
+    await rm(userData, { force: true, recursive: true })
+  }
+})

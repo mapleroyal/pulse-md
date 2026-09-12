@@ -789,6 +789,51 @@ describe("editor search scaling", () => {
     })
   })
 
+  test.each([{ checkpoints: [] }, { checkpoints: [0, 1] }])(
+    "navigates backward through lookahead matches with checkpoints $checkpoints",
+    ({ checkpoints }) => {
+      const state = EditorState.create({ doc: "a\nb\na\nb" })
+      const query = new SearchQuery({ regexp: true, search: "a(?=\\nb)|b" })
+      let current = { from: 6, to: 7 }
+      for (const expectedFrom of [4, 2, 0, 6]) {
+        const previous = editorSearchSupport.previousMatch(
+          state,
+          query,
+          current.from,
+          current,
+          checkpoints,
+          0
+        )
+        expect(previous).toMatchObject({
+          from: expectedFrom,
+          to: expectedFrom + 1,
+        })
+        current = { from: previous!.from, to: previous!.to }
+      }
+    }
+  )
+
+  test("bounds returned regexp matches without truncating lookahead context", () => {
+    const state = EditorState.create({ doc: "a\nb\na\nb" })
+    const ranges = (search: string, to: number) =>
+      collectMatches(
+        contextPreservingRegexpCursor(
+          state,
+          new SearchQuery({ regexp: true, search }),
+          0,
+          to
+        )
+      ).map(({ from, to }) => ({ from, to }))
+
+    expect(ranges("a(?=\\nb)|b", 6)).toEqual([
+      { from: 0, to: 1 },
+      { from: 2, to: 3 },
+      { from: 4, to: 5 },
+    ])
+    expect(ranges("a(?!\\nb)|b", 6)).toEqual([{ from: 2, to: 3 }])
+    expect(ranges("a\\nb", 6)).toEqual([{ from: 0, to: 3 }])
+  })
+
   test("preserves multiline lookbehind when replacing an active late match", () => {
     const query = new SearchQuery({
       regexp: true,

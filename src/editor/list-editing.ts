@@ -876,7 +876,8 @@ function recursiveListItemBranchIndentChanges(
   state: EditorState,
   root: SyntaxNode,
   rootQuoteDepth: number,
-  delta: number
+  delta: number,
+  rootRemainsListItem = true
 ) {
   const rootItem = semanticListItem(state, root)
   if (!rootItem || delta === 0) return []
@@ -907,12 +908,16 @@ function recursiveListItemBranchIndentChanges(
   for (const item of descendantListItems(state, root)) {
     const original = state.doc.line(item.startLine).text
     const shifted = replacements.get(item.startLine) ?? original
+    const owner = parentListItem(item.node.parent)
+    const nested =
+      owner != null &&
+      (rootRemainsListItem || owner.from !== root.from || owner.to !== root.to)
     const replacement = normalizeTransformedListMarkerPadding(
       original,
       shifted,
       state.tabSize,
       item.quoteDepth,
-      parentListItem(item.node.parent) != null
+      nested
     )
     if (replacement !== original) {
       replacements.set(item.startLine, replacement)
@@ -1169,6 +1174,27 @@ function customListEnter(
 
     const from = line.from + marker.containerLength
     changes.push({ from, to: contentEmpty ? line.to : range.head, insert })
+    // Lifting the item also lifts its continuation paragraphs and children.
+    // Leaving their old content column can turn prose into code or erase a
+    // child list from the parsed structure.
+    const originalPrefix = linePrefix(line.text, state.tabSize, true)
+    const liftedPrefix = linePrefix(
+      line.text.slice(0, marker.containerLength) + insert,
+      state.tabSize,
+      true
+    )
+    changes.push(
+      ...recursiveListItemBranchIndentChanges(
+        state,
+        item,
+        marker.quoteDepth,
+        liftedPrefix.indentColumns +
+          liftedPrefix.contentIndentColumns -
+          originalPrefix.indentColumns -
+          originalPrefix.contentIndentColumns,
+        liftedPrefix.markerLength > 0
+      )
+    )
     return { changes, cursor: from + insert.length }
   }
 

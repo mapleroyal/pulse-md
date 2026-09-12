@@ -292,6 +292,40 @@ describe("math live preview", () => {
     expect(state.sliceDoc(expressionTo, expressionTo + 2)).toBe("\n\n")
   })
 
+  test.each([
+    ["   $$", "$$"],
+    ["$$", "$$   \t  "],
+    ["  \\[", "\\]  \t"],
+  ])(
+    "includes delimiter whitespace in block presentation: %s / %s",
+    (opening, closing) => {
+      const doc = ["Before", "", opening, "x^2", closing, "", "After"].join(
+        "\n"
+      )
+      const extension = mathLivePreviewExtension()
+      let state = mathState(doc, 0, extension)
+      const from = state.doc.line(3).from - 1
+      const to = state.doc.line(5).to + 1
+      expect(directMathPreviewRanges(state)).toContainEqual({
+        display: true,
+        from,
+        source: "x^2",
+        to,
+      })
+      for (const position of [state.doc.line(3).from, state.doc.line(5).to]) {
+        state = state.update({ selection: { anchor: position } }).state
+        expect(directMathPreviewRanges(state)).toEqual([])
+        state = state.update({ selection: { anchor: 0 } }).state
+        expect(directMathPreviewRanges(state)).toContainEqual({
+          display: true,
+          from,
+          source: "x^2",
+          to,
+        })
+      }
+    }
+  )
+
   test("creates inline and block replacements with safe widget metadata", () => {
     const doc = "Before $x^2$.\n\n$$\ny = mx + b\n$$"
     const ranges = previewRanges(mathState(doc))

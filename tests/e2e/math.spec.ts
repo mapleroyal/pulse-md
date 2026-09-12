@@ -145,3 +145,111 @@ test("live preview renders inline and multiline LaTeX and reveals its source", a
     await rm(userData, { force: true, recursive: true })
   }
 })
+
+test("display delimiter whitespace keeps rendered geometry and source navigation", async () => {
+  const userData = await mkdtemp(
+    path.join(os.tmpdir(), "pulse-md-math-whitespace-")
+  )
+  const filePath = path.join(userData, "math.md")
+  const source = [
+    "Intro",
+    "",
+    "Before plain",
+    "$$",
+    "x^2",
+    "$$",
+    "After plain",
+    "",
+    "Before padded",
+    "  $$",
+    "x^2",
+    "$$   \t  ",
+    "After padded",
+    "",
+    "End",
+  ].join("\n")
+  const settings = cloneAppSettings(DEFAULT_APP_SETTINGS)
+  settings.markdownExtensions.latex = true
+  await Promise.all([
+    writeFile(filePath, source),
+    writeFile(path.join(userData, "settings.json"), JSON.stringify(settings)),
+  ])
+  const app = await electron.launch({
+    args: [projectRoot, `--user-data-dir=${userData}`, filePath],
+    cwd: projectRoot,
+  })
+  try {
+    const page = await app.firstWindow()
+    const content = page.locator(".cm-content")
+    await content.waitFor()
+    const assertGeometry = async () => {
+      await expect(page.locator(".cm-md-math-block .katex")).toHaveCount(2)
+      await expect
+        .poll(() =>
+          content.evaluate((element) => {
+            const formulas = [...element.querySelectorAll(".cm-md-math-block")]
+            return Math.max(
+              ...formulas.flatMap((formula) => {
+                const before =
+                  formula.previousElementSibling!.getBoundingClientRect()
+                const after =
+                  formula.nextElementSibling!.getBoundingClientRect()
+                const bounds = formula.getBoundingClientRect()
+                return [
+                  Math.abs(bounds.top - before.bottom),
+                  Math.abs(after.top - bounds.bottom),
+                ]
+              })
+            )
+          })
+        )
+        .toBeLessThanOrEqual(0.5)
+      for (const [index, kind] of ["plain", "padded"].entries()) {
+        const formula = page.locator(".cm-md-math-block").nth(index)
+        expect(
+          await formula.evaluate(
+            (element) => element.previousElementSibling?.textContent
+          )
+        ).toBe(`Before ${kind}`)
+        expect(
+          await formula.evaluate(
+            (element) => element.nextElementSibling?.textContent
+          )
+        ).toBe(`After ${kind}`)
+      }
+    }
+    await assertGeometry()
+    await page.locator(".cm-line").filter({ hasText: /^End$/ }).click()
+    const paddedEnd = source.indexOf("$$   \t  ") + "$$   \t  ".length
+    await content.evaluate((element, position) => {
+      const view = (
+        element as HTMLElement & {
+          cmTile?: {
+            view?: { dispatch(spec: { selection: { anchor: number } }): void }
+          }
+        }
+      ).cmTile?.view
+      if (!view) throw new Error("CodeMirror view is unavailable")
+      view.dispatch({ selection: { anchor: position } })
+    }, paddedEnd)
+    await expect(page.locator(".cm-md-math-block")).toHaveCount(1)
+    expect(
+      await page
+        .locator(".cm-line")
+        .evaluateAll(
+          (lines) =>
+            lines.filter((line) => line.textContent === "$$   \t  ").length
+        )
+    ).toBe(1)
+    await page.keyboard.press("Escape")
+    await assertGeometry()
+    await page.keyboard.press(`${modifier}+Shift+V`)
+    await expect(page.locator(".cm-editor")).toHaveClass(/cm-md-source/)
+    await expect(page.locator(".cm-line")).toHaveText(source.split("\n"))
+    await page.keyboard.press(`${modifier}+Shift+V`)
+    await assertGeometry()
+  } finally {
+    await exitApplication(app)
+    await rm(userData, { recursive: true, force: true })
+  }
+})

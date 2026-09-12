@@ -4,6 +4,8 @@ import { EditorSelection, Prec, type Extension } from "@codemirror/state"
 import type { SyntaxNode } from "@lezer/common"
 import { EditorView } from "@codemirror/view"
 
+import { completeMarkdownSyntaxTree } from "./complete-markdown-tree"
+
 export interface SelectedTextWrapper {
   close: string
   open: string
@@ -244,6 +246,46 @@ export function moveSelectionToMarkdownLinkDestination(view: EditorView) {
   return true
 }
 
+const urlWrappingProtectedNodes = new Set([
+  "CodeBlock",
+  "FencedCode",
+  "InlineCode",
+  "InlineDisplayMath",
+  "InlineMath",
+  "BlockMath",
+  "YAMLFrontMatter",
+  "Link",
+  "Image",
+  "Autolink",
+  "LinkReference",
+])
+
+function selectionAllowsUrlWrapping(state: EditorView["state"]) {
+  if (
+    state.selection.ranges.some(
+      (range) =>
+        range.empty ||
+        !markdownLanguage.isActiveAt(state, range.from, 1) ||
+        !markdownLanguage.isActiveAt(state, range.to, -1)
+    )
+  ) {
+    return false
+  }
+  const tree = completeMarkdownSyntaxTree(state)
+  return state.selection.ranges.every((range) => {
+    for (const position of [range.from, range.to - 1]) {
+      for (
+        let node: SyntaxNode | null = tree.resolveInner(position, 1);
+        node;
+        node = node.parent
+      ) {
+        if (urlWrappingProtectedNodes.has(node.name)) return false
+      }
+    }
+    return true
+  })
+}
+
 const pastedUrlWrappingHandler = EditorView.domEventHandlers({
   paste: (event, view) => {
     const { state } = view
@@ -273,16 +315,7 @@ const pastedUrlWrappingHandler = EditorView.domEventHandlers({
       return true
     }
 
-    if (
-      state.selection.ranges.some(
-        (range) =>
-          range.empty ||
-          !markdownLanguage.isActiveAt(state, range.from, 1) ||
-          !markdownLanguage.isActiveAt(state, range.to, -1)
-      )
-    ) {
-      return false
-    }
+    if (!selectionAllowsUrlWrapping(state)) return false
 
     const changes = state.changeByRange((range) => {
       const source = state.sliceDoc(range.from, range.to)

@@ -7839,7 +7839,7 @@ test("live Markdown renders nested quotes and foldable callout cards", async () 
       const deeperStyle = getComputedStyle(deeper)
       const deeperRect = deeper.getBoundingClientRect()
       const answerBodyRect = answerBody.getBoundingClientRect()
-      const answerBodyStyle = getComputedStyle(answerBody)
+      const answerRect = answer.getBoundingClientRect()
 
       return {
         calloutTags: [question.tagName, answer.tagName, deeper.tagName],
@@ -7864,7 +7864,7 @@ test("live Markdown renders nested quotes and foldable callout cards", async () 
           },
         },
         nestedOuterGap: deeperRect.top - answerBodyRect.bottom,
-        parentLineHeight: Number.parseFloat(answerBodyStyle.lineHeight),
+        nestedHorizontalInset: deeperRect.left - answerRect.left,
         quoteTags: quotes.map((quote) => quote.tagName),
         quoteDepths: quotes.map((quote) => quote.dataset.quoteDepth),
         quotesAreNested:
@@ -7888,9 +7888,12 @@ test("live Markdown renders nested quotes and foldable callout cards", async () 
       quotesAreNested: true,
       quotesHaveRails: true,
     })
-    expect(nestedStructure.nestedOuterGap).toBeGreaterThanOrEqual(
-      nestedStructure.parentLineHeight - 0.5
-    )
+    expect(nestedStructure.nestedHorizontalInset).toBeGreaterThan(0)
+    expect(
+      Math.abs(
+        nestedStructure.nestedOuterGap - nestedStructure.nestedHorizontalInset
+      )
+    ).toBeLessThanOrEqual(0.5)
 
     const deeperToggle = deeper.locator(".cm-md-callout-toggle")
     await expect(page.locator(".cm-content")).not.toContainText(

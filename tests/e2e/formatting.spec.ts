@@ -1,3 +1,4 @@
+import type { EditorView } from "@codemirror/view"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
@@ -1559,5 +1560,75 @@ test("live list Tab commands indent items while source Tab follows settings @ren
   } finally {
     await exitApplication(app)
     await rm(userData, { force: true, recursive: true })
+  }
+})
+
+test("URL paste replaces selected code and existing link text literally @renderer-isolated", async () => {
+  const { filePath, userData } = await createDocument("probe")
+  const app = await launchApplication(userData, filePath)
+  try {
+    const page = await app.firstWindow()
+    await page.locator(".cm-content").waitFor()
+    const target = "https://example.com/new"
+    for (const source of [
+      "`old`",
+      "```\nold\n```",
+      "```text\nold\n```",
+      "[old](https://existing.example)",
+    ]) {
+      await page.locator(".cm-content").evaluate((element, source) => {
+        const view = (element as HTMLElement & { cmTile: { view: EditorView } })
+          .cmTile.view
+        const anchor = source.indexOf("old")
+        view.dispatch({
+          changes: { from: 0, to: view.state.doc.length, insert: source },
+          selection: { anchor, head: anchor + 3 },
+        })
+        view.focus()
+      }, source)
+      await pasteText(page, target)
+      expect((await editorDocumentSelection(page)).doc).toBe(
+        source.replace("old", target)
+      )
+    }
+  } finally {
+    await exitApplication(app)
+    await rm(userData, { recursive: true, force: true })
+  }
+})
+
+test("tabular paste respects ordinary selections and revealed callout source @renderer-isolated", async () => {
+  const { filePath, userData } = await createDocument("probe")
+  const app = await launchApplication(userData, filePath)
+  try {
+    const page = await app.firstWindow()
+    await page.locator(".cm-content").waitFor()
+    for (const source of [
+      "Before\n\n| A | B |\n| --- | --- |\n| one | two |",
+      "> [!note]\n> | A | B |\n> | --- | --- |\n> | one | two |",
+    ]) {
+      const head = source.indexOf("one") + 3
+      await page.locator(".cm-content").evaluate(
+        (element, { source, head }) => {
+          const view = (
+            element as HTMLElement & { cmTile: { view: EditorView } }
+          ).cmTile.view
+          view.dispatch({
+            changes: { from: 0, to: view.state.doc.length, insert: source },
+            selection: { anchor: 0, head },
+          })
+          view.focus()
+        },
+        { source, head }
+      )
+      const pasted = "x\ty\nu\tv"
+      await pasteText(page, pasted)
+      expect((await editorDocumentSelection(page)).doc).toBe(
+        pasted + source.slice(head)
+      )
+    }
+  } finally {
+    await exitApplication(app)
+    await rm(userData, { recursive: true, force: true })
   }
 })

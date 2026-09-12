@@ -1,5 +1,5 @@
 import { markdown, markdownLanguage } from "@codemirror/lang-markdown"
-import { syntaxTreeAvailable } from "@codemirror/language"
+import { syntaxTree, syntaxTreeAvailable } from "@codemirror/language"
 import { EditorSelection, EditorState } from "@codemirror/state"
 import type { EditorView } from "@codemirror/view"
 import { describe, expect, test } from "vitest"
@@ -41,6 +41,41 @@ describe("structural Markdown formatting", () => {
       true
     )
     expect(harness.doc).toBe("`foo`")
+  })
+
+  test("formats selected words while leaving boundary whitespace outside emphasis", () => {
+    for (const [source, command, expected, nodeName] of [
+      ["foo ", "bold", "**foo** ", "StrongEmphasis"],
+      [" foo", "italic", " *foo*", "Emphasis"],
+      [" foo ", "strikethrough", " ~~foo~~ ", "Strikethrough"],
+    ] as const) {
+      const harness = editor(source, 0, source.length)
+      applyMarkdownFormatting(harness.view, { type: command })
+      expect(harness.doc).toBe(expected)
+      expect(syntaxTree(harness.view.state).toString()).toContain(nodeName)
+      expect(syntaxTree(harness.view.state).toString()).not.toContain(
+        "ListItem"
+      )
+      applyMarkdownFormatting(harness.view, { type: command })
+      expect(harness.doc).toBe(source)
+    }
+  })
+
+  test("round-trips inline code with significant spaces and boundary backticks", () => {
+    for (const source of [" foo ", "`foo`", "  "]) {
+      const harness = editor(source, 0, source.length)
+      applyMarkdownFormatting(harness.view, { type: "inline-code" })
+      expect(syntaxTree(harness.view.state).toString()).toBe(
+        "Document(Paragraph(InlineCode(CodeMark,CodeMark)))"
+      )
+      if (source === "  ") expect(harness.doc).toBe("`  `")
+      applyMarkdownFormatting(harness.view, { type: "inline-code" })
+      expect(harness.doc).toBe(source)
+      expect(harness.selection.main).toMatchObject({
+        from: 0,
+        to: source.length,
+      })
+    }
   })
 
   test.each([
@@ -438,7 +473,7 @@ describe("structural Markdown formatting", () => {
     expect(applyMarkdownFormatting(view, { type: "horizontal-rule" })).toBe(
       true
     )
-    expect(state.doc.toString()).toBe("plain\n---\n- nested\n---")
+    expect(state.doc.toString()).toBe("plain\n***\n- nested\n***")
   })
 
   test("turns a current top-level line into a fenced code block", () => {
@@ -510,7 +545,10 @@ describe("structural Markdown formatting", () => {
   test("inserts top-level rules and tables after non-empty lines", () => {
     const rule = editor("alpha", 2)
     applyMarkdownFormatting(rule.view, { type: "horizontal-rule" })
-    expect(rule.doc).toBe("alpha\n---")
+    expect(rule.doc).toBe("alpha\n***")
+    expect(syntaxTree(rule.view.state).toString()).toBe(
+      "Document(Paragraph,HorizontalRule)"
+    )
 
     const table = editor("alpha", 2)
     applyMarkdownFormatting(table.view, {

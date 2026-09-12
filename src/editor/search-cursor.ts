@@ -67,7 +67,7 @@ export function contextPreservingRegexpSearchSupported(
 /**
  * Creates a multiline regexp cursor rooted at document position zero, then
  * seeks with RegExp.lastIndex. Unlike CodeMirror's range-rooted flattened
- * cursor, this preserves lookbehind context without replaying earlier matches.
+ * cursor, this preserves lookaround context without replaying earlier matches.
  */
 export function contextPreservingRegexpCursor(
   state: EditorState,
@@ -95,9 +95,9 @@ export function createContextPreservingRegexpSearch(
       `Multiline regular expressions are limited to ${maximumContextPreservingRegexpDocumentLength.toLocaleString()} UTF-16 code units.`
     )
   }
-  const fullDocument = flattenedDocument(state.doc)
-  const input =
-    to === state.doc.length ? fullDocument : fullDocument.slice(0, to)
+  // Bound the returned matches, not the regexp input: a lookahead may need
+  // source beyond the requested range, and truncation invents an end of input.
+  const input = flattenedDocument(state.doc)
   const unicodeFlag = /x/.unicode == null ? "" : "u"
   const flags = `gm${unicodeFlag}${query.caseSensitive ? "" : "i"}`
   const categorizer = query.wholeWord
@@ -122,7 +122,7 @@ export function createContextPreservingRegexpSearch(
               expression.lastIndex = regexpCharacterEnd(input, offset + 1)
               match = expression.exec(input)
             }
-            if (!match) {
+            if (!match || match.index + match[0].length > to) {
               finished = true
               break
             }
@@ -176,7 +176,7 @@ export function searchCursorForRange(
   from: number,
   to: number
 ): Iterator<SearchCursorMatch> {
-  return from > 0 && query.regexp && regexpMayCrossLines(query.search)
+  return query.regexp && regexpMayCrossLines(query.search)
     ? contextPreservingRegexpCursor(state, query, from, to)
     : (query.getCursor(state, from, to) as Iterator<SearchCursorMatch>)
 }

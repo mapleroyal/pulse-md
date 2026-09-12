@@ -1,5 +1,6 @@
 import { syntaxTree } from "@codemirror/language"
 import {
+  countColumn,
   Prec,
   RangeSet,
   RangeValue,
@@ -204,10 +205,102 @@ export function basicHtmlSourceIsSupported(source: string) {
   return safeTagCount > 0 && stack.length === 0
 }
 
+function htmlListIndentColumns(state: EditorState, item: SyntaxNode) {
+  const marker = item.getChild("ListMark")
+  if (!marker) return 0
+  const line = state.doc.lineAt(marker.from)
+  const markerEnd = marker.to - line.from
+  const spacing = /^[\t ]*/.exec(line.text.slice(markerEnd))![0]
+  const baseColumn = countColumn(line.text.slice(0, item.from - line.from), 4)
+  const markerColumn = countColumn(line.text.slice(0, markerEnd), 4)
+  const contentColumn = countColumn(
+    line.text.slice(0, markerEnd + spacing.length),
+    4
+  )
+  const padding = contentColumn - markerColumn
+  return (
+    markerColumn - baseColumn + (padding >= 1 && padding <= 4 ? padding : 1)
+  )
+}
+
+/** Remove parser-owned quote/list containers while preserving HTML whitespace. */
+function htmlBlockSource(state: EditorState, node: SyntaxNode) {
+  // Preserve the authored-source budget before expanding container structure.
+  if (node.to - node.from > 50_000) return null
+  const containers: Array<
+    { kind: "quote" } | { kind: "list"; columns: number }
+  > = []
+  for (let parent = node.parent; parent; parent = parent.parent) {
+    if (parent.name === "Blockquote") containers.push({ kind: "quote" })
+    else if (parent.name === "ListItem") {
+      containers.push({
+        kind: "list",
+        columns: htmlListIndentColumns(state, parent),
+      })
+    }
+  }
+  if (containers.length === 0) return state.sliceDoc(node.from, node.to)
+  containers.reverse()
+
+  const quoteMarks: SyntaxNode[] = []
+  for (let child = node.firstChild; child; child = child.nextSibling) {
+    if (child.name === "QuoteMark") quoteMarks.push(child)
+  }
+  const firstLine = state.doc.lineAt(node.from)
+  const lastLine = state.doc.lineAt(Math.max(node.from, node.to - 1))
+  const pieces = [state.sliceDoc(node.from, Math.min(firstLine.to, node.to))]
+  let quoteIndex = 0
+  for (
+    let number = firstLine.number + 1;
+    number <= lastLine.number;
+    number += 1
+  ) {
+    const line = state.doc.line(number)
+    let from = line.from
+    let remainingTabSpaces = 0
+    for (const container of containers) {
+      if (container.kind === "quote") {
+        const marker = quoteMarks[quoteIndex]
+        if (!marker || marker.from < line.from || marker.from > line.to)
+          continue
+        from = marker.to
+        const padding = line.text[from - line.from]
+        const column = countColumn(line.text.slice(0, from - line.from), 4)
+        remainingTabSpaces = padding === "\t" ? 4 - (column % 4) - 1 : 0
+        if (padding === " " || padding === "\t") from += 1
+        quoteIndex += 1
+      } else {
+        let column = countColumn(line.text.slice(0, from - line.from), 4)
+        const target = column + container.columns - remainingTabSpaces
+        while (from < line.to && column < target) {
+          const character = line.text[from - line.from]
+          if (character !== " " && character !== "\t") break
+          column += character === "\t" ? 4 - (column % 4) : 1
+          from += 1
+        }
+        remainingTabSpaces = Math.max(0, column - target)
+      }
+    }
+    pieces.push(
+      " ".repeat(remainingTabSpaces) +
+        state.sliceDoc(from, Math.min(line.to, node.to))
+    )
+  }
+  return pieces.join("\n")
+}
+
+function inlineHtmlContainer(node: SyntaxNode) {
+  return (
+    node.name === "Paragraph" ||
+    node.name === "TableCell" ||
+    /^(?:ATX|Setext)Heading[1-6]$/.test(node.name)
+  )
+}
+
 function inlinePreviewsForTags(
   state: EditorState,
   nodes: readonly SyntaxNode[],
-  requireCompleteParagraph: boolean
+  requireCompleteContainer: boolean
 ): readonly SanitizedHtmlPreview[] {
   const tokens: HtmlTagToken[] = []
   for (const node of nodes) {
@@ -240,7 +333,7 @@ function inlinePreviewsForTags(
 
     const opening = stack.pop()
     if (!opening || opening.name !== token.name) {
-      if (requireCompleteParagraph) {
+      if (requireCompleteContainer) {
         invalidNesting = true
         break
       }
@@ -262,7 +355,7 @@ function inlinePreviewsForTags(
     })
   }
 
-  return invalidNesting || (requireCompleteParagraph && stack.length > 0)
+  return invalidNesting || (requireCompleteContainer && stack.length > 0)
     ? []
     : previews
 }
@@ -294,21 +387,21 @@ interface BoundarySpanningHtmlTags {
 /**
  * Recovers inline elements whose source tags sit outside a materialized
  * range. Syntax siblings let this skip arbitrarily large text gaps without
- * slicing the paragraph or walking each character in it.
+ * slicing the container or walking each character in it.
  */
 function boundarySpanningHtmlTags(
   state: EditorState,
-  paragraph: SyntaxNode,
+  container: SyntaxNode,
   range: DocumentRange,
   includeVisibleOpenings: boolean
 ): BoundarySpanningHtmlTags {
-  const from = Math.max(paragraph.from, range.from)
-  const to = Math.min(paragraph.to, range.to)
+  const from = Math.max(container.from, range.from)
+  const to = Math.min(container.to, range.to)
   if (from >= to) return { tags: [], valid: true }
 
   const activeInnerFirst: ParsedHtmlTagNode[] = []
   const unmatchedClosings: string[] = []
-  let preceding = paragraph.childBefore(from)
+  let preceding = container.childBefore(from)
   if (preceding && preceding.to > from) preceding = preceding.prevSibling
   for (let node = preceding; node; node = node.prevSibling) {
     if (node.name !== "HTMLTag") continue
@@ -332,7 +425,7 @@ function boundarySpanningHtmlTags(
   const stack = activeInnerFirst.reverse()
   const candidates = new Set(stack.map(({ node }) => node.from))
   const recovered = new Map<number, SyntaxNode>()
-  for (let node = paragraph.childAfter(from); node; node = node.nextSibling) {
+  for (let node = container.childAfter(from); node; node = node.nextSibling) {
     if (node.from >= to && candidates.size === 0 && stack.length === 0) break
     if (node.name !== "HTMLTag") {
       if (node.from >= to && candidates.size === 0) break
@@ -372,7 +465,7 @@ function htmlPreviewsInRanges(
   const previews: SanitizedHtmlPreview[] = []
   const seenBlocks = new Set<number>()
   const seenTags = new Set<number>()
-  const paragraphTags = new Map<
+  const containerTags = new Map<
     number,
     {
       readonly node: SyntaxNode
@@ -385,11 +478,11 @@ function htmlPreviewsInRanges(
     tree.iterate({
       ...(range ? { from: range.from, to: range.to } : {}),
       enter(node) {
-        if (node.name === "Paragraph" && range) {
-          const existing = paragraphTags.get(node.from)
+        if (inlineHtmlContainer(node.node) && range) {
+          const existing = containerTags.get(node.from)
           if (existing) existing.ranges.push(range)
           else
-            paragraphTags.set(node.from, {
+            containerTags.set(node.from, {
               node: node.node,
               ranges: [range],
               tags: [],
@@ -399,8 +492,8 @@ function htmlPreviewsInRanges(
           if (!includeBlocks) return false
           if (seenBlocks.has(node.from)) return false
           seenBlocks.add(node.from)
-          const source = state.sliceDoc(node.from, node.to)
-          if (basicHtmlSourceIsSupported(source)) {
+          const source = htmlBlockSource(state, node.node)
+          if (source != null && basicHtmlSourceIsSupported(source)) {
             previews.push({
               block: true,
               from: node.from,
@@ -413,16 +506,16 @@ function htmlPreviewsInRanges(
         if (node.name === "HTMLTag") {
           if (seenTags.has(node.from)) return false
           seenTags.add(node.from)
-          let paragraph = node.node.parent
-          while (paragraph && paragraph.name !== "Paragraph") {
-            paragraph = paragraph.parent
+          let container = node.node.parent
+          while (container && !inlineHtmlContainer(container)) {
+            container = container.parent
           }
-          if (!paragraph) return false
-          const existing = paragraphTags.get(paragraph.from)
+          if (!container) return false
+          const existing = containerTags.get(container.from)
           if (existing) existing.tags.push(node.node)
           else
-            paragraphTags.set(paragraph.from, {
-              node: paragraph,
+            containerTags.set(container.from, {
+              node: container,
               ranges: range ? [range] : [],
               tags: [node.node],
             })
@@ -438,20 +531,20 @@ function htmlPreviewsInRanges(
   }
   for (const {
     node,
-    ranges: paragraphRanges,
+    ranges: containerRanges,
     tags,
-  } of paragraphTags.values()) {
-    const completeParagraph =
+  } of containerTags.values()) {
+    const completeContainer =
       ranges == null ||
       ranges.some((range) => range.from <= node.from && range.to >= node.to)
-    let inline = inlinePreviewsForTags(state, tags, completeParagraph)
-    if (!completeParagraph) {
+    let inline = inlinePreviewsForTags(state, tags, completeContainer)
+    if (!completeContainer) {
       const covered = inlinePreviewTagStarts(inline)
       const incomplete = tags.some((tag) => !covered.has(tag.from))
       const includeVisibleOpenings = tags.length === 0 || incomplete
       const recovered = new Map(tags.map((tag) => [tag.from, tag]))
       let valid = true
-      for (const range of paragraphRanges) {
+      for (const range of containerRanges) {
         if (!includeVisibleOpenings && range.from <= node.from) continue
         const boundary = boundarySpanningHtmlTags(
           state,
@@ -473,7 +566,7 @@ function htmlPreviewsInRanges(
         inline = inlinePreviewsForTags(
           state,
           [...recovered.values()],
-          completeParagraph
+          completeContainer
         )
       }
     }
@@ -512,8 +605,8 @@ export function sanitizedHtmlBlockAt(
         node.from <= boundedPosition &&
         boundedPosition <= node.to
       ) {
-        const source = state.sliceDoc(node.from, node.to)
-        return basicHtmlSourceIsSupported(source)
+        const source = htmlBlockSource(state, node)
+        return source != null && basicHtmlSourceIsSupported(source)
           ? { block: true, from: node.from, source, to: node.to }
           : null
       }
@@ -953,8 +1046,8 @@ function htmlBlocksInTree(
         }
         if (seen.has(node.from)) return false
         seen.add(node.from)
-        const source = state.sliceDoc(node.from, node.to)
-        if (basicHtmlSourceIsSupported(source)) {
+        const source = htmlBlockSource(state, node.node)
+        if (source != null && basicHtmlSourceIsSupported(source)) {
           blocks.push({
             block: true,
             from: node.from,

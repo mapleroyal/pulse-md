@@ -1048,15 +1048,15 @@ function mathPresentationRange(
   const lastLine = state.doc.lineAt(
     Math.max(expression.from, expression.to - 1)
   )
+  const from = /^[\t ]*$/.test(state.sliceDoc(firstLine.from, expression.from))
+    ? firstLine.from
+    : expression.from
+  const to = /^[\t ]*$/.test(state.sliceDoc(expression.to, lastLine.to))
+    ? lastLine.to
+    : expression.to
   return {
-    from:
-      expression.from === firstLine.from && expression.from > 0
-        ? expression.from - 1
-        : expression.from,
-    to:
-      expression.to === lastLine.to && expression.to < state.doc.length
-        ? expression.to + 1
-        : expression.to,
+    from: from === firstLine.from && from > 0 ? from - 1 : from,
+    to: to === lastLine.to && to < state.doc.length ? to + 1 : to,
   }
 }
 
@@ -1135,8 +1135,8 @@ function selectionTouchesDisplayMathIndex(
       : range.to
     let touches = false
     index.between(
-      Math.max(0, probeFrom - 1),
-      Math.min(state.doc.length, probeTo + 1),
+      Math.max(0, state.doc.lineAt(probeFrom).from - 1),
+      Math.min(state.doc.length, state.doc.lineAt(probeTo).to + 1),
       (from, to, value) => {
         const presentation = mathPresentationRange(
           state,
@@ -1169,8 +1169,8 @@ function displayMathRangesForSelection(
       ? Math.min(state.doc.length, range.head + 1)
       : range.to
     index.between(
-      Math.max(0, probeFrom - 1),
-      Math.min(state.doc.length, probeTo + 1),
+      Math.max(0, state.doc.lineAt(probeFrom).from - 1),
+      Math.min(state.doc.length, state.doc.lineAt(probeTo).to + 1),
       (from, to, value) => {
         const presentation = mathPresentationRange(
           state,

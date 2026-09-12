@@ -151,6 +151,68 @@ function stateBackedTableWrapperCount(state: EditorState) {
 }
 
 describe("live Markdown decorations", () => {
+  test("renders parsed punctuation escapes, character references and hard-break markers", () => {
+    const doc =
+      String.raw`Escaped \* and &amp; &#65; &notARealEntity;.` +
+      "\n\nhard\\\nbreak"
+    const state = markdownState(doc)
+    const replacements: Array<{ from: number; to: number; text: string }> = []
+    buildLivePreviewDecorations(
+      state,
+      [{ from: 0, to: doc.length }],
+      false
+    ).between(0, doc.length, (from, to, decoration) => {
+      if (decoration.spec.markdownPreviewKind) {
+        replacements.push({
+          from,
+          to,
+          text: decoration.spec.widget?.text ?? "",
+        })
+      }
+    })
+    let rendered = ""
+    let cursor = 0
+    for (const replacement of replacements) {
+      rendered += doc.slice(cursor, replacement.from) + replacement.text
+      cursor = replacement.to
+    }
+    rendered += doc.slice(cursor)
+    expect(rendered).toBe("Escaped * and & A &notARealEntity;.\n\nhard\nbreak")
+    expect(
+      replacements.every(({ from, to }) => !doc.slice(from, to).includes("\n"))
+    ).toBe(true)
+  })
+
+  test("keeps literal code and active inline-token source editable", () => {
+    for (const doc of [String.raw`\*`, "&amp;", "hard\\\nbreak"]) {
+      const state = markdownState(doc, doc.includes("hard") ? 4 : 1)
+      expect(
+        decorationRanges(state).some(
+          ({ kind }) => kind === "character-reference" || kind === "delimiter"
+        )
+      ).toBe(false)
+    }
+    const source = "`" + String.raw`\* &amp;` + "`"
+    expect(
+      decorationRanges(markdownState(source), false).some(
+        ({ kind }) => kind === "character-reference"
+      )
+    ).toBe(false)
+  })
+
+  test("removes only one matching space from inactive code-span boundaries", () => {
+    const doc = "`  code  `"
+    const hiddenPadding = decorationRanges(markdownState(doc), false).filter(
+      ({ kind }) => kind === "inline-code-normalization"
+    )
+    expect(hiddenPadding.map(({ text }) => text)).toEqual([" ", " "])
+    expect(
+      decorationRanges(markdownState(doc, 4)).some(
+        ({ kind }) => kind === "inline-code-normalization"
+      )
+    ).toBe(false)
+  })
+
   test("uses rendered alt text and defers remote image loading", () => {
     const doc = "![*foo* &amp;](https://images.example.test/pixel.png)"
     const imageWidget = (state: EditorState) => {
