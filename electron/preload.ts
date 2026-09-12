@@ -34,6 +34,7 @@ import type {
   PulseMdApi,
   NewTabResult,
   OpenExistingLocalLinkRequest,
+  LocateDocumentResult,
   OpenDocumentResult,
   OpenLocalLinkResult,
   OpenScratchResult,
@@ -477,6 +478,11 @@ const pulseMd: PulseMdApi = {
       scratchId,
       disposition
     ) as Promise<OpenScratchResult | null>,
+  locateDocument: (tabId: TabId) =>
+    ipcRenderer.invoke(
+      ipcChannels.locateDocument,
+      tabId
+    ) as Promise<LocateDocumentResult | null>,
   openDocument: (replaceActive: boolean) =>
     ipcRenderer.invoke(
       ipcChannels.openDocument,

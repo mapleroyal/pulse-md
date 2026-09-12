@@ -148,6 +148,7 @@ import {
   type MarkdownExtensionSettings,
   type NewTabResult,
   type OpenExistingLocalLinkRequest,
+  type LocateDocumentResult,
   type OpenDocumentResult,
   type OpenLocalLinkResult,
   type OpenScratchResult,
@@ -298,6 +299,7 @@ import {
 import {
   ProfileNotFoundError,
   ProfileStore,
+  resolveProspectivePath,
   validateProfileFileIdentities,
 } from "./profile-store"
 import { runProfileDeleteTransaction } from "./profile-delete-transaction"
@@ -3195,7 +3197,10 @@ async function readDocument(
   }
 }
 
-async function preparedFileTab(filePath: string): Promise<PreparedTab> {
+async function preparedFileTab(
+  filePath: string,
+  allowMissingParents = false
+): Promise<PreparedTab> {
   const displayPath = path.resolve(filePath)
   try {
     const loaded = await readDocument(displayPath)
@@ -3222,12 +3227,18 @@ async function preparedFileTab(filePath: string): Promise<PreparedTab> {
     }
     if (entryExists) throw error
 
-    const canonicalDirectory = await realpath(path.dirname(displayPath))
-    const directoryStats = await stat(canonicalDirectory)
-    if (!directoryStats.isDirectory()) {
-      throw new Error("The target's parent path is not a directory", {
-        cause: error,
-      })
+    let ioPath: string
+    if (allowMissingParents) {
+      ioPath = (await resolveProspectivePath(displayPath)).canonicalPath
+    } else {
+      const canonicalDirectory = await realpath(path.dirname(displayPath))
+      const directoryStats = await stat(canonicalDirectory)
+      if (!directoryStats.isDirectory()) {
+        throw new Error("The target's parent path is not a directory", {
+          cause: error,
+        })
+      }
+      ioPath = path.join(canonicalDirectory, path.basename(displayPath))
     }
     return {
       backing: "file",
@@ -3240,7 +3251,7 @@ async function preparedFileTab(filePath: string): Promise<PreparedTab> {
         filePath: displayPath,
         kind: documentKindForPath(displayPath),
       },
-      ioPath: path.join(canonicalDirectory, path.basename(displayPath)),
+      ioPath,
     }
   }
 }
@@ -3509,7 +3520,7 @@ function preparedProfileTab(
   })
   switch (tab.kind) {
     case "file":
-      return preparedFileTab(tab.path).then(applyPresentation)
+      return preparedFileTab(tab.path, true).then(applyPresentation)
     case "untitled":
       return Promise.resolve(applyPresentation(preparedEmptyTab("untitled")))
     case "ephemeral":
@@ -4369,6 +4380,9 @@ function tabDescriptor(tab: TabState): TabDescriptor {
     dirty: tab.dirty,
     displayName: tab.title ?? tab.document.displayName,
     fileMissing: tab.fileMissing,
+    ...(tab.fileMissing && tab.diskContentHash !== null
+      ? { fileContentsRetained: true as const }
+      : {}),
     filePath: tab.document.filePath,
     kind: tab.document.kind,
     ...(tab.scratchIdentity
@@ -4684,6 +4698,7 @@ function tabDescriptorsMatch(
     left.dirty === right.dirty &&
     left.displayName === right.displayName &&
     left.fileMissing === right.fileMissing &&
+    left.fileContentsRetained === right.fileContentsRetained &&
     left.filePath === right.filePath &&
     left.kind === right.kind &&
     left.scratchId === right.scratchId
@@ -6232,7 +6247,8 @@ async function initialDocumentForWindow(
   win: BrowserWindow,
   filePath?: string,
   interactive = true,
-  allowEmptyFallback = true
+  allowEmptyFallback = true,
+  allowMissingParents = false
 ): Promise<{
   contentHash: string | null
   document: DocumentSnapshot
@@ -6248,7 +6264,7 @@ async function initialDocumentForWindow(
     }
   }
   try {
-    const prepared = await preparedFileTab(filePath)
+    const prepared = await preparedFileTab(filePath, allowMissingParents)
     return {
       contentHash: prepared.contentHash,
       document: prepared.document,
@@ -6311,7 +6327,8 @@ async function refreshPreparedFileForHydration(
     win,
     tab.document.filePath ?? tab.ioPath,
     interactive,
-    allowEmptyFallback
+    allowEmptyFallback,
+    tab.profileOrigin !== null
   )
   if (!loaded || !tabCanHydrateInState(state, tab)) return false
   tab.backing = loaded.document.filePath ? "file" : "untitled"
@@ -7754,7 +7771,10 @@ async function durablePreparedTabAfterRendererFailure(
     })
   }
   if (tab.backing === "file" && tab.document.filePath) {
-    const prepared = await preparedFileTab(tab.document.filePath)
+    const prepared = await preparedFileTab(
+      tab.document.filePath,
+      tab.profileOrigin !== null
+    )
     return {
       ...prepared,
       ...(tab.color ? { color: tab.color } : {}),
@@ -13107,6 +13127,129 @@ function registerIpc(): void {
           return null
         }
       })
+  )
+
+  ipcMain.handle(
+    ipcChannels.locateDocument,
+    async (event, rawTabId: unknown): Promise<LocateDocumentResult | null> => {
+      const { state, win } = stateForSender(event)
+      ensureWindowMutable(state)
+      const tab = ownedTabForState(state, rawTabId)
+      if (tab.backing !== "file" || !tab.fileMissing) return null
+      const originalPath = tab.document.filePath
+      const originalIoPath = tab.ioPath
+      const originalGeneration = tab.saveGeneration
+      const originalHash = tab.diskContentHash
+      const originalMtime = tab.document.mtimeMs
+      const isCurrent = () =>
+        tabStillOwnedByState(state, tab) &&
+        state.activeTabId === tab.id &&
+        !state.closeSequence &&
+        !state.allowClose &&
+        !state.recoverySurfaceActive &&
+        tab.backing === "file" &&
+        tab.fileMissing &&
+        tab.document.filePath === originalPath &&
+        tab.ioPath === originalIoPath &&
+        tab.saveGeneration === originalGeneration &&
+        tab.diskContentHash === originalHash &&
+        tab.document.mtimeMs === originalMtime &&
+        !pendingExternalDocumentChanges.has(tab.id)
+      if (!originalPath || !originalIoPath || !isCurrent()) return null
+      await waitForTabSaveIdle(tab)
+      ensureWindowMutable(state)
+      if (!isCurrent()) return null
+
+      // The renderer's document-open lease preserves its contents while the
+      // native dialogs are open. Do not hold a window or managed-resource lock
+      // across user interaction; revalidate after entering the commit queue.
+      const { existingAncestor } = await resolveProspectivePath(originalPath)
+      if (!isCurrent()) return null
+      const { canceled, filePaths } = await dialog.showOpenDialog(win, {
+        title: "Locate File",
+        defaultPath: existingAncestor,
+        properties: ["openFile"],
+        filters: DOCUMENT_OPEN_FILTERS,
+      })
+      if (canceled || filePaths.length !== 1 || !isCurrent()) return null
+      const loaded = await readDocument(filePaths[0]!)
+      if (!isCurrent()) return null
+      if (tab.dirty) {
+        const { response } = await dialog.showMessageBox(win, {
+          type: "warning",
+          title: "Replace Editor Contents",
+          message: `Load ${loaded.document.displayName} in this tab?`,
+          detail: `Unsaved changes in ${tab.title ?? tab.document.displayName} will be discarded. Cancel and save a copy first if you want to keep them.`,
+          buttons: ["Load Selected File", "Cancel"],
+          defaultId: 1,
+          cancelId: 1,
+          noLink: true,
+        })
+        if (response !== 0 || !isCurrent()) return null
+      }
+
+      return await serializeManagedResourceOperation(async () => {
+        await waitForTabMutation(state)
+        ensureWindowMutable(state)
+        if (!isCurrent() || tabSaveActive(tab)) return null
+        const releaseSaveTurn = await acquireTabSaveTurn(tab)
+        state.tabMutationLocked = true
+        abortPendingTransfersForTab(tab.id)
+        try {
+          if (!isCurrent()) return null
+          const origin = tab.profileOrigin
+          if (origin && state.profileId === origin.profileId) {
+            // Read the latest saved definition, not the immutable launch
+            // snapshot: repairing a path must not undo later profile edits.
+            const profile = await profileStore
+              .read(origin.profileId)
+              .catch((error: unknown) => {
+                if (missingProfileError(error, origin.profileId)) return null
+                throw error
+              })
+            const entry = profile?.tabs.find(({ id }) => id === origin.tabId)
+            if (!isCurrent()) return null
+            if (
+              profile &&
+              entry?.kind === "file" &&
+              entry.path === originalPath
+            ) {
+              await profileStore.save(
+                {
+                  ...profile,
+                  tabs: profile.tabs.map((candidate) =>
+                    candidate.id === entry.id
+                      ? { ...candidate, path: loaded.document.filePath! }
+                      : candidate
+                  ),
+                },
+                true
+              )
+            }
+          }
+          if (!isCurrent()) return null
+          unwatchTabDocument(tab.id)
+          state.approvedTabCloses.delete(tab.id)
+          state.tabHydrations.delete(tab.id)
+          tab.diskContentHash = loaded.contentHash
+          tab.diskFingerprint = loaded.fingerprint
+          tab.dirty = false
+          tab.document = loaded.document
+          tab.fileMissing = false
+          tab.ioPath = loaded.ioPath
+          tab.saveGeneration += 1
+          updateWindowNativeDocument(state)
+          const openedTab = bootstrapTab(tab)
+          tab.document.content = ""
+          watchTabDocument(tab)
+          if (tab.document.filePath) addRecentDocument(tab.document.filePath)
+          return { openedTab, window: windowSnapshot(state) }
+        } finally {
+          releaseSaveTurn()
+          unlockTabMutation(state)
+        }
+      })
+    }
   )
 
   ipcMain.handle(

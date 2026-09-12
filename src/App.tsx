@@ -3915,6 +3915,31 @@ export function App() {
     ]
   )
 
+  const locateDocument = React.useCallback(
+    async (tabId: TabId) => {
+      const tab = syncActiveSession()
+      if (!tab || tab.id !== tabId) return false
+      const releaseDocumentOpenLease = beginDocumentOpenLease()
+      try {
+        const result = await window.pulseMd.locateDocument(tabId)
+        if (!result || tabsRef.current.get(tabId) !== tab) return false
+        invalidateNavigationHistoryForTab(tabId, tab.navigationDocumentId)
+        return await acceptLinkedDocument(
+          { ...result.openedTab, initialEditorMode: tab.editor.mode },
+          result.window
+        )
+      } finally {
+        releaseDocumentOpenLease()
+      }
+    },
+    [
+      acceptLinkedDocument,
+      beginDocumentOpenLease,
+      invalidateNavigationHistoryForTab,
+      syncActiveSession,
+    ]
+  )
+
   const requestLocalLink = React.useCallback(
     async (
       sourceTabId: TabId,
@@ -7382,6 +7407,11 @@ export function App() {
           <FileMissingNotice
             key={activeTabDescriptor.id}
             displayName={activeTabDescriptor.displayName}
+            canSaveContents={
+              activeTabDescriptor.dirty ||
+              activeTabDescriptor.fileContentsRetained === true
+            }
+            onLocate={() => locateDocument(activeTabDescriptor.id)}
             onRecreate={() => saveTab(activeTabDescriptor.id)}
             onSaveAs={() => saveTab(activeTabDescriptor.id, true)}
           />

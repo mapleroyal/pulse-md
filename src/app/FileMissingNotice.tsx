@@ -6,23 +6,27 @@ import { Button } from "@/components/ui/button"
 
 interface FileMissingNoticeProps {
   displayName: string
+  canSaveContents: boolean
+  onLocate: () => Promise<boolean>
   onRecreate: () => Promise<boolean>
   onSaveAs: () => Promise<boolean>
 }
 
 export function FileMissingNotice({
   displayName,
+  canSaveContents,
+  onLocate,
   onRecreate,
   onSaveAs,
 }: FileMissingNoticeProps) {
   const [busyAction, setBusyAction] = React.useState<
-    "recreate" | "save-as" | null
+    "locate" | "recreate" | "save-as" | null
   >(null)
   const [error, setError] = React.useState<string | null>(null)
 
   const run = React.useCallback(
     async (
-      actionName: "recreate" | "save-as",
+      actionName: "locate" | "recreate" | "save-as",
       action: () => Promise<boolean>
     ) => {
       setBusyAction(actionName)
@@ -34,7 +38,9 @@ export function FileMissingNotice({
         setError(
           actionError instanceof Error && actionError.message.trim()
             ? actionError.message
-            : "The file could not be saved. Try again or choose another location."
+            : actionName === "locate"
+              ? "The file could not be located. Try again or choose another file."
+              : "The file could not be saved. Try again or choose another location."
         )
       } finally {
         setBusyAction(null)
@@ -58,23 +64,36 @@ export function FileMissingNotice({
         <strong className="font-medium">{displayName}</strong> was deleted or
         moved.
       </span>
-      <span className="ml-auto flex shrink-0 gap-1.5">
+      <span className="ml-auto flex flex-wrap justify-end gap-1.5">
+        {canSaveContents ? (
+          <>
+            <Button
+              disabled={busyAction !== null}
+              size="xs"
+              type="button"
+              variant="outline"
+              onClick={() => void run("recreate", onRecreate)}
+            >
+              {busyAction === "recreate" ? "Recreating…" : "Recreate File"}
+            </Button>
+            <Button
+              disabled={busyAction !== null}
+              size="xs"
+              type="button"
+              variant="outline"
+              onClick={() => void run("save-as", onSaveAs)}
+            >
+              {busyAction === "save-as" ? "Saving…" : "Save As…"}
+            </Button>
+          </>
+        ) : null}
         <Button
           disabled={busyAction !== null}
           size="xs"
           type="button"
-          variant="outline"
-          onClick={() => void run("recreate", onRecreate)}
+          onClick={() => void run("locate", onLocate)}
         >
-          {busyAction === "recreate" ? "Recreating…" : "Recreate File"}
-        </Button>
-        <Button
-          disabled={busyAction !== null}
-          size="xs"
-          type="button"
-          onClick={() => void run("save-as", onSaveAs)}
-        >
-          {busyAction === "save-as" ? "Saving…" : "Save As…"}
+          {busyAction === "locate" ? "Locating…" : "Locate File…"}
         </Button>
       </span>
       {error ? (

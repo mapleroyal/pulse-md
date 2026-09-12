@@ -77,7 +77,7 @@ interface ProspectivePathResolution {
   readonly existingAncestor: string
 }
 
-async function resolveProspectivePath(
+export async function resolveProspectivePath(
   candidatePath: string
 ): Promise<ProspectivePathResolution> {
   const missingComponents: string[] = []

@@ -1065,6 +1065,8 @@ export interface TabDescriptor {
   dirty: boolean
   displayName: string
   fileMissing: boolean
+  /** Present only when a missing file has a previously loaded text baseline. */
+  fileContentsRetained?: true
   filePath: string | null
   kind: DocumentKind
   scratchId?: string
@@ -1308,6 +1310,11 @@ export interface SaveDocumentAcknowledgement {
   tabId: TabId
 }
 
+export interface LocateDocumentResult {
+  openedTab: BootstrapTab
+  window: WindowTabsSnapshot
+}
+
 export interface OpenDocumentResult {
   openedTabs: BootstrapTab[]
   replacedTabId: TabId | null
@@ -1524,6 +1531,7 @@ export interface PulseMdApi {
     scratchId: string,
     disposition: ScratchOpenDisposition
   ): Promise<OpenScratchResult | null>
+  locateDocument(tabId: TabId): Promise<LocateDocumentResult | null>
   openDocument(replaceActive: boolean): Promise<OpenDocumentResult | null>
   openDroppedDocuments(
     files: readonly File[],

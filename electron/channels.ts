@@ -59,6 +59,7 @@ export const ipcChannels = {
   openLocalLink: "pulse-md:open-local-link",
   openScratchLink: "pulse-md:open-scratch-link",
   openScratch: "pulse-md:open-scratch",
+  locateDocument: "pulse-md:locate-document",
   openDocument: "pulse-md:open-document",
   openDroppedDocuments: "pulse-md:open-dropped-documents",
   previewAppearance: "pulse-md:preview-appearance",
