@@ -5253,6 +5253,11 @@ async function createWindowForCommand(
   if (win && behavior === "create-and-send") sendCommand(command, win)
 }
 
+function pasteWithoutFormatting(win: BrowserWindow): void {
+  const text = clipboard.readText()
+  if (text) win.webContents.send(ipcChannels.pastePlainText, text)
+}
+
 function commandMenuItem(
   label: string,
   command: EditorCommand,
@@ -5855,10 +5860,15 @@ function createApplicationMenu(): Menu {
         label:
           process.platform === "darwin"
             ? "Paste and Match Style"
-            : "Paste as Plain Text",
-        role: "pasteAndMatchStyle",
+            : "Paste Without Formatting",
         accelerator:
-          process.platform === "darwin" ? "Cmd+Alt+Shift+V" : undefined,
+          process.platform === "darwin" ? "Cmd+Alt+Shift+V" : "Ctrl+Shift+V",
+        click: (_item, win) => {
+          const target = win
+            ? BrowserWindow.fromId(win.id)
+            : BrowserWindow.getFocusedWindow()
+          if (target) pasteWithoutFormatting(target)
+        },
       },
       commandMenuItem("Select All", "select-all", "CmdOrCtrl+A", {
         id: EDIT_SELECT_ALL_MENU_ITEM_ID,
@@ -5924,9 +5934,14 @@ function createApplicationMenu(): Menu {
       },
       zoomStepMenuItem(ZOOM_OUT_MENU_ITEM_ID, "Zoom Out", "CmdOrCtrl+-", -1),
       { type: "separator" },
-      commandMenuItem("Show Raw Markdown", "toggle-mode", "CmdOrCtrl+Shift+V", {
-        id: VIEW_MODE_MENU_ITEM_ID,
-      }),
+      commandMenuItem(
+        "Show Raw Markdown",
+        "toggle-mode",
+        process.platform === "darwin" ? "Cmd+Shift+V" : "Ctrl+Alt+V",
+        {
+          id: VIEW_MODE_MENU_ITEM_ID,
+        }
+      ),
       commandMenuItem("Outline", "open-outline", "CmdOrCtrl+Shift+O", {
         id: VIEW_OUTLINE_MENU_ITEM_ID,
       }),
@@ -12184,6 +12199,17 @@ function registerIpc(): void {
   })
 
   registerOneWayIpcHandler(
+    ipcChannels.insertFocusedText,
+    (event, rawText: unknown): void => {
+      const { win } = stateForSender(event)
+      if (typeof rawText !== "string") {
+        throw new TypeError("Focused text must be a string")
+      }
+      void win.webContents.insertText(rawText)
+    }
+  )
+
+  registerOneWayIpcHandler(
     ipcChannels.editFocusedControl,
     (event, command: unknown): void => {
       const { win } = stateForSender(event)
@@ -12191,6 +12217,7 @@ function registerIpc(): void {
         command === "copy" ||
         command === "cut" ||
         command === "paste" ||
+        command === "paste-plain" ||
         command === "redo" ||
         command === "undo"
           ? command
@@ -12200,6 +12227,7 @@ function registerIpc(): void {
       if (action === "copy") win.webContents.copy()
       else if (action === "cut") win.webContents.cut()
       else if (action === "paste") win.webContents.paste()
+      else if (action === "paste-plain") pasteWithoutFormatting(win)
       else if (action === "undo") win.webContents.undo()
       else win.webContents.redo()
     }

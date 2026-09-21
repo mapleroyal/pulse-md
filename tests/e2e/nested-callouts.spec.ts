@@ -304,3 +304,147 @@ test("nested sibling callouts retain titles, folding, and visible boundaries @re
     }
   }
 })
+
+test("source drags follow individual rows across nested and parent titles @renderer-isolated", async () => {
+  await page.getByRole("button", { name: /Dental/ }).click()
+  const anchor = source.lastIndexOf("After") + "After".length
+  const start = await sourcePoint(page, anchor)
+  const positions = [
+    source.indexOf("Room 1001") + 4,
+    source.indexOf("Afternoon appointment") + 5,
+    source.indexOf("address") + 3,
+    source.indexOf("Morning appointment") + 7,
+    source.indexOf("TODO") + 2,
+  ]
+  await page.mouse.move(start.x, start.y)
+  await page.mouse.down()
+  // Repeat in both directions while held. Every body row must keep its own
+  // endpoint after crossing the neighboring rendered titles.
+  for (const head of [...positions, ...positions.toReversed()]) {
+    const point = await sourcePoint(page, head)
+    await page.mouse.move(point.x, point.y, { steps: 8 })
+    await expect
+      .poll(() => selectionSnapshot(page))
+      .toMatchObject({ anchor, head })
+    await expect(page.locator(".cm-md-callout")).toHaveCount(3)
+  }
+  await page.mouse.up()
+  await expect
+    .poll(() => selectionSnapshot(page))
+    .toMatchObject({ anchor, head: positions[0] })
+})
+
+test("native callout drags select title text precisely across editing boundaries @renderer-isolated", async () => {
+  const parent = page.locator(
+    '.cm-md-callout[data-callout-type="appointments"]'
+  )
+  const dental = parent.locator('.cm-md-callout[data-callout-type="dental"]')
+  await dental.getByRole("button", { name: /Dental/ }).click()
+  const pointInText = async (
+    selector: string,
+    textContent: string,
+    offset: number
+  ) =>
+    page.locator(selector).evaluate(
+      (element, request) => {
+        const walker = element.ownerDocument.createTreeWalker(
+          element,
+          NodeFilter.SHOW_TEXT
+        )
+        for (let text = walker.nextNode(); text; text = walker.nextNode()) {
+          if (text.textContent !== request.textContent) continue
+          const range = element.ownerDocument.createRange()
+          range.setStart(text, request.offset)
+          range.collapse(true)
+          const bounds = range.getBoundingClientRect()
+          return { x: bounds.left, y: bounds.top + bounds.height / 2 }
+        }
+        throw new Error("Rendered text position is unavailable")
+      },
+      { textContent, offset }
+    )
+  const dentalBodySelector = '[data-callout-type="dental"] .cm-md-callout-body'
+  const dentalTitleSelector =
+    '[data-callout-type="dental"] .cm-md-callout-title'
+  const before = await selectionSnapshot(page)
+  const start = await pointInText(dentalBodySelector, "Morning appointment", 7)
+  await page.mouse.move(start.x, start.y)
+  await page.mouse.down()
+  for (const offset of [3, 1, 5, 2]) {
+    const point = await pointInText(dentalTitleSelector, "Dental", offset)
+    await page.mouse.move(point.x, point.y, { steps: 4 })
+    await expect
+      .poll(() =>
+        dental.evaluate((element) => {
+          const selection = element.ownerDocument.getSelection()
+          return {
+            focus: selection?.focusNode?.textContent,
+            offset: selection?.focusOffset,
+            text: selection?.toString().replace(/\s+/g, " ").trim(),
+          }
+        })
+      )
+      .toEqual({
+        focus: "Dental",
+        offset,
+        text: `${"DENTAL".slice(offset)} Morning`,
+      })
+    await expect.poll(() => selectionSnapshot(page)).toEqual(before)
+  }
+  await page.mouse.up()
+  await expect(dental).toHaveAttribute("contenteditable", "false")
+  const copied = await page.locator(".cm-content").evaluate((content) => {
+    const clipboardData = new DataTransfer()
+    content.dispatchEvent(
+      new ClipboardEvent("copy", {
+        bubbles: true,
+        cancelable: true,
+        clipboardData,
+      })
+    )
+    return clipboardData.getData("text/plain").replace(/\s+/g, " ").trim()
+  })
+  expect(copied).toBe("NTAL Morning")
+
+  // A source click restores the card's ordinary inherited editability.
+  await page
+    .locator(".cm-line")
+    .filter({ hasText: /^After$/ })
+    .click()
+  await expect(dental).not.toHaveAttribute("contenteditable", "false")
+  await page.keyboard.press("Escape")
+
+  const parentTitleSelector =
+    '[data-callout-type="appointments"] > .cm-md-callout-header-line .cm-md-callout-title'
+  const parentStart = await pointInText(parentTitleSelector, "Appointments", 3)
+  const nestedEnd = await pointInText(
+    dentalBodySelector,
+    "Morning appointment",
+    7
+  )
+  await page.mouse.move(parentStart.x, parentStart.y)
+  await page.mouse.down()
+  await page.mouse.move(nestedEnd.x, nestedEnd.y, { steps: 8 })
+  await expect
+    .poll(() =>
+      parent.evaluate((element) =>
+        element.ownerDocument
+          .getSelection()
+          ?.toString()
+          .replace(/\s+/g, " ")
+          .trim()
+      )
+    )
+    .toBe("OINTMENTS DENTAL Morning")
+  const parentEnd = await pointInText(parentTitleSelector, "Appointments", 8)
+  await page.mouse.move(parentEnd.x, parentEnd.y, { steps: 8 })
+  await page.mouse.up()
+  await expect
+    .poll(() =>
+      parent.evaluate((element) =>
+        element.ownerDocument.getSelection()?.toString()
+      )
+    )
+    .toBe("OINTM")
+  await expect(page.locator(".cm-md-callout")).toHaveCount(3)
+})

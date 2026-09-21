@@ -970,7 +970,7 @@ test("raw Markdown uses VS Code multi-cursor mouse gestures", async () => {
     await editor.waitFor()
 
     await page.keyboard.press(
-      process.platform === "darwin" ? "Meta+Shift+V" : "Control+Shift+V"
+      process.platform === "darwin" ? "Meta+Shift+V" : "Control+Alt+V"
     )
     await expect(editor).toHaveClass(/cm-md-source/)
 
@@ -993,7 +993,7 @@ test("raw Markdown uses VS Code multi-cursor mouse gestures", async () => {
     await expect(page.locator(".cm-cursor")).toHaveCount(3)
 
     const modeShortcut =
-      process.platform === "darwin" ? "Meta+Shift+V" : "Control+Shift+V"
+      process.platform === "darwin" ? "Meta+Shift+V" : "Control+Alt+V"
     const undoShortcut = process.platform === "darwin" ? "Meta+Z" : "Control+Z"
     const redoShortcut =
       process.platform === "darwin" ? "Meta+Shift+Z" : "Control+Y"
@@ -1171,7 +1171,7 @@ test("raw Markdown uses VS Code multi-cursor mouse gestures", async () => {
     )
 
     await page.keyboard.press(
-      process.platform === "darwin" ? "Meta+Shift+V" : "Control+Shift+V"
+      process.platform === "darwin" ? "Meta+Shift+V" : "Control+Alt+V"
     )
     await expect(editor).toHaveClass(/cm-md-live/)
     await expect(page.locator(".cm-cursor")).toHaveCount(1)
@@ -1202,7 +1202,7 @@ test("raw Markdown keeps the first cursor as the column-selection origin", async
     const lines = page.locator(".cm-line")
     await editor.waitFor()
     await page.keyboard.press(
-      process.platform === "darwin" ? "Meta+Shift+V" : "Control+Shift+V"
+      process.platform === "darwin" ? "Meta+Shift+V" : "Control+Alt+V"
     )
 
     const origin = await textBoundary(lines.nth(0), 2)
@@ -1306,7 +1306,7 @@ test("raw Markdown column selection follows wrapped visual rows @renderer-isolat
       BrowserWindow.getAllWindows()[0]?.setSize(480, 560)
     })
     await page.keyboard.press(
-      process.platform === "darwin" ? "Meta+Shift+V" : "Control+Shift+V"
+      process.platform === "darwin" ? "Meta+Shift+V" : "Control+Alt+V"
     )
     await expect(editor).toHaveClass(/cm-md-source/)
 
@@ -1438,7 +1438,7 @@ test("raw Markdown keeps wrapped column geometry across virtualized rows @render
       BrowserWindow.getAllWindows()[0]?.setSize(480, 360)
     })
     await page.keyboard.press(
-      process.platform === "darwin" ? "Meta+Shift+V" : "Control+Shift+V"
+      process.platform === "darwin" ? "Meta+Shift+V" : "Control+Alt+V"
     )
     await expect(editor).toHaveClass(/cm-md-source/)
     // Source-mode transition restores its viewport on completion. Finish that
@@ -1526,7 +1526,7 @@ test("raw Markdown keeps bidi column geometry across virtualized rows @renderer-
       BrowserWindow.getAllWindows()[0]?.setSize(480, 900)
     })
     await page.keyboard.press(
-      process.platform === "darwin" ? "Meta+Shift+V" : "Control+Shift+V"
+      process.platform === "darwin" ? "Meta+Shift+V" : "Control+Alt+V"
     )
     await expect(editor).toHaveClass(/cm-md-source/)
     await page.locator(".cm-content").evaluate(async (content) => {

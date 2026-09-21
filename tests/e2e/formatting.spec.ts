@@ -22,7 +22,8 @@ const projectRoot = path.resolve(
 const commandModifier = process.platform === "darwin" ? "Meta" : "Control"
 const documentStart = `${commandModifier}+Home`
 const documentEnd = `${commandModifier}+End`
-const modeShortcut = `${commandModifier}+Shift+V`
+const modeShortcut =
+  process.platform === "darwin" ? "Meta+Shift+V" : "Control+Alt+V"
 const settingsShortcut = `${commandModifier}+,`
 const toolbarShortcut = `${commandModifier}+Shift+B`
 
@@ -485,8 +486,75 @@ test("the native clipboard converts rendered document content to Markdown", asyn
   }
 })
 
-test("Paste and Match Style inserts the native plain clipboard representation", async () => {
+test("presentation-only clipboard HTML preserves terminal lines and source punctuation @renderer-isolated", async () => {
   const { filePath, userData } = await createDocument("")
+  const app = await launchApplication(userData, filePath)
+  try {
+    const page = await app.firstWindow()
+    const content = page.locator(".cm-content")
+    await content.waitFor()
+    await content.focus()
+    const paste = async (plain: string, html: string) => {
+      await content.evaluate(
+        async (element, values) => {
+          const data = new DataTransfer()
+          data.setData("text/plain", values.plain)
+          data.setData("text/html", values.html)
+          element.dispatchEvent(
+            new ClipboardEvent("paste", {
+              bubbles: true,
+              cancelable: true,
+              clipboardData: data,
+            })
+          )
+          await new Promise<void>((resolve) =>
+            requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
+          )
+        },
+        { plain, html }
+      )
+    }
+    // Resolve one conversion first, so the following checks exercise the
+    // completed conversion rather than just the synchronous plain fallback.
+    await paste("Ready", "<h1>Ready</h1>")
+    await expect
+      .poll(async () => (await editorDocumentSelection(page)).doc)
+      .toBe("# Ready")
+    const terminal =
+      Array.from({ length: 200 }, (_, index) =>
+        [
+          "numid=" + index + ",iface=MIXER,name='Master'",
+          "  ; type=INTEGER,access=rw---R--,values=2,min=0,max=127",
+          "  : values=100,100",
+        ].join("\n")
+      ).join("\n") + "\n"
+    const source =
+      "# Title\n- [x] file_name\nC:\\Users\\name\n\n  indented\ttext\n"
+    for (const plain of [terminal, source]) {
+      await page.keyboard.press(commandModifier + "+A")
+      await page.keyboard.press("Backspace")
+      const html =
+        '<div style="white-space: pre-wrap; font-family: monospace"><span style="color: red;font-weight:700;font-style:italic">' +
+        plain
+          .replaceAll("&", "&amp;")
+          .replaceAll("<", "&lt;")
+          .replaceAll(">", "&gt;") +
+        "</span></div>"
+      await paste(plain, html)
+      expect((await editorDocumentSelection(page)).doc).toBe(plain)
+      await page.keyboard.press(commandModifier + "+Z")
+      await expect
+        .poll(async () => (await editorDocumentSelection(page)).doc)
+        .toBe("")
+    }
+  } finally {
+    await exitApplication(app)
+    await rm(userData, { force: true, recursive: true })
+  }
+})
+
+test("plain paste uses the platform shortcut and preserves raw content through both menus", async () => {
+  const { filePath, userData } = await createDocument("replace me")
   const app = await launchApplication(userData, filePath)
 
   try {
@@ -494,46 +562,98 @@ test("Paste and Match Style inserts the native plain clipboard representation", 
     const content = page.locator(".cm-content")
     await page.locator(".cm-editor").waitFor()
     await content.focus()
-
-    const menuItem = await app.evaluate(
-      ({ BrowserWindow, Menu, clipboard }) => {
-        const win = BrowserWindow.getFocusedWindow()
-        const item =
-          Menu.getApplicationMenu()?.getMenuItemById("edit-paste-plain")
-        if (!win || !item) {
-          throw new Error("Paste and Match Style is unavailable")
-        }
-        clipboard.write({
-          text: "# Exact **Markdown**",
-          html: "<h1>Rendered <strong>HTML</strong></h1>",
-        })
-        return {
-          accelerator: item.accelerator,
-          label: item.label,
-          role: item.role,
-        }
-      }
-    )
-
+    const label =
+      process.platform === "darwin"
+        ? "Paste and Match Style"
+        : "Paste Without Formatting"
+    const menuItem = await app.evaluate(({ Menu }) => {
+      const item =
+        Menu.getApplicationMenu()?.getMenuItemById("edit-paste-plain")
+      if (!item) throw new Error("Plain paste is unavailable")
+      return { accelerator: item.accelerator, label: item.label }
+    })
     expect(menuItem).toEqual({
       accelerator:
-        process.platform === "darwin"
-          ? "Cmd+Alt+Shift+V"
-          : "Shift+CommandOrControl+V",
-      label:
-        process.platform === "darwin"
-          ? "Paste and Match Style"
-          : "Paste as Plain Text",
-      role: "pasteandmatchstyle",
+        process.platform === "darwin" ? "Cmd+Alt+Shift+V" : "Ctrl+Shift+V",
+      label,
     })
-    await app.evaluate(({ BrowserWindow }) => {
-      const win = BrowserWindow.getFocusedWindow()
-      if (!win) throw new Error("Plain paste is unavailable")
-      win.webContents.pasteAndMatchStyle()
-    })
-    await expect
-      .poll(async () => (await editorDocumentSelection(page)).doc)
-      .toBe("# Exact **Markdown**")
+    const plain = "https://example.com/a_b"
+    const multiline =
+      "# Exact **Markdown**\n  indentation\tand tabs\nC:\\Users\\name\n"
+    for (const { route, text } of [
+      { route: "shortcut", text: plain },
+      { route: "native", text: plain },
+      { route: "menu", text: multiline },
+      { route: "menu", text: "*" },
+      { route: "context", text: "[" },
+    ]) {
+      await app.evaluate(
+        ({ clipboard }, text) =>
+          clipboard.write({
+            text,
+            html: "<h1>Wrong <strong>HTML</strong></h1>",
+          }),
+        text
+      )
+      await content.focus()
+      await page.keyboard.press(commandModifier + "+A")
+      if (route === "shortcut") {
+        await page.keyboard.press(
+          process.platform === "darwin" ? "Meta+Alt+Shift+V" : "Control+Shift+V"
+        )
+      } else if (route === "native") {
+        await app.evaluate(({ BrowserWindow }) => {
+          const win = BrowserWindow.getFocusedWindow()
+          if (!win) throw new Error("Plain paste is unavailable")
+          const modifiers: Array<"meta" | "alt" | "shift" | "control"> =
+            process.platform === "darwin"
+              ? ["meta", "alt", "shift"]
+              : ["control", "shift"]
+          win.webContents.sendInputEvent({
+            type: "keyDown",
+            keyCode: "V",
+            modifiers,
+          })
+          win.webContents.sendInputEvent({
+            type: "keyUp",
+            keyCode: "V",
+            modifiers,
+          })
+        })
+      } else if (route === "menu") {
+        await app.evaluate(({ BrowserWindow, Menu }) => {
+          const win = BrowserWindow.getFocusedWindow()
+          const item =
+            Menu.getApplicationMenu()?.getMenuItemById("edit-paste-plain")
+          if (!win || !item) throw new Error("Plain paste is unavailable")
+          item.click(undefined, win, undefined)
+        })
+      } else {
+        await content.click({ button: "right" })
+        await page
+          .getByRole("menu", { name: "Editor context menu" })
+          .getByRole("menuitem", { name: new RegExp("^" + label) })
+          .click()
+      }
+      await expect
+        .poll(async () => (await editorDocumentSelection(page)).doc)
+        .toBe(text)
+      await expect(page.locator(".cm-editor")).not.toHaveClass(/cm-md-source/)
+      await page.keyboard.press(commandModifier + "+Z")
+      await expect
+        .poll(async () => (await editorDocumentSelection(page)).doc)
+        .toBe("replace me")
+    }
+    await page.keyboard.press(commandModifier + "+f")
+    const find = page.getByRole("textbox", { name: "Find", exact: true })
+    await expect(find).toBeFocused()
+    await app.evaluate(({ clipboard }) =>
+      clipboard.write({ text: "[", html: "<strong>Wrong</strong>" })
+    )
+    await page.keyboard.press(
+      process.platform === "darwin" ? "Meta+Alt+Shift+V" : "Control+Shift+V"
+    )
+    await expect(find).toHaveValue("[")
   } finally {
     await exitApplication(app)
     await rm(userData, { force: true, recursive: true })

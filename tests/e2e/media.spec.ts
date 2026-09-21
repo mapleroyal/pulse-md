@@ -106,14 +106,18 @@ test("live preview loads document-relative, absolute, file, and web images", asy
     )
     await page.locator(".cm-content").focus()
     const modifier = process.platform === "darwin" ? "Meta" : "Control"
-    await page.keyboard.press(`${modifier}+Shift+V`)
+    await page.keyboard.press(
+      process.platform === "darwin" ? "Meta+Shift+V" : "Control+Alt+V"
+    )
     await page.keyboard.press(`${modifier}+End`)
     await page.keyboard.press("Enter")
     await page.keyboard.press("Enter")
     await page.keyboard.insertText(
       "![*Web* &amp;](https://images.example.test/pixel.png)"
     )
-    await page.keyboard.press(`${modifier}+Shift+V`)
+    await page.keyboard.press(
+      process.platform === "darwin" ? "Meta+Shift+V" : "Control+Alt+V"
+    )
     await page.keyboard.press(`${modifier}+,`)
     const images = page.locator(".cm-md-image")
     await expect(images).toHaveCount(4)

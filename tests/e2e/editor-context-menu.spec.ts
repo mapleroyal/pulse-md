@@ -102,7 +102,10 @@ test("the shadcn editor menu preserves selection for clipboard and formatting ac
       "Formatting",
     ]) {
       await expect(
-        menu.getByRole("menuitem", { name: new RegExp(`^${item}`) })
+        menu.getByRole("menuitem", {
+          name:
+            item === "Paste" ? /^Paste\s*(?:⌘|Ctrl)/ : new RegExp("^" + item),
+        })
       ).toBeVisible()
     }
     await menu.getByRole("menuitem", { name: /^Copy/ }).click()
@@ -117,7 +120,9 @@ test("the shadcn editor menu preserves selection for clipboard and formatting ac
     await expect(content).toHaveText("")
 
     await content.click({ button: "right" })
-    const paste = editorMenu(page).getByRole("menuitem", { name: /^Paste/ })
+    const paste = editorMenu(page).getByRole("menuitem", {
+      name: /^Paste\s*(?:⌘|Ctrl)/,
+    })
     await expect(paste).toBeEnabled()
     await paste.click()
     await expect(content).toContainText("alpha beta")

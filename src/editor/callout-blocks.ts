@@ -2303,6 +2303,9 @@ const calloutBlockTheme = EditorView.baseTheme({
     fontSize: "var(--editor-callout-title-font-size, 20px)",
     lineHeight: "1.15",
     minWidth: "0",
+    // Keep title text above the disclosure button's expanded hit area so
+    // Chromium can resolve a precise native selection endpoint in its text.
+    position: "relative",
     textTransform: "uppercase",
   },
   "&.cm-md-live .cm-md-callout-palette-info": {
@@ -2748,19 +2751,6 @@ export function calloutBlockExtension(
   }
   const deepestPointerSelection = (target: Element) =>
     resolvePointerSelection(target.closest<HTMLElement>(".cm-md-callout"))
-  const outermostPointerSelection = (target: Element) => {
-    let element = target.closest<HTMLElement>(".cm-md-callout")
-    if (!element) return null
-    for (
-      let parent =
-        element.parentElement?.closest<HTMLElement>(".cm-md-callout");
-      parent;
-      parent = element.parentElement?.closest<HTMLElement>(".cm-md-callout")
-    ) {
-      element = parent
-    }
-    return resolvePointerSelection(element)
-  }
   const pointerSelection = semanticPreviewSelectionResolvers.of({
     priority: 100,
     resolveTarget(view, target, pointer) {
@@ -2779,10 +2769,27 @@ export function calloutBlockExtension(
           return null
         }
       }
-      // A source-origin drag treats a nested card as part of the complete
-      // outer rendered unit it first entered. Rendered-origin gestures still
-      // use the deepest card below through the precise resolver.
-      return outermostPointerSelection(target)
+      // The body is ordinary source-backed line DOM, including nested card
+      // bodies. Only a replaced header (and its folded body, when hidden)
+      // needs semantic edges for a source-origin drag.
+      const headerLine = target.closest<HTMLElement>(
+        ".cm-md-callout-header-line"
+      )
+      const header = headerLine?.querySelector<HTMLElement>(
+        ".cm-md-callout-header"
+      )
+      if (!headerLine || !header) return null
+      const callout = deepestPointerSelection(header)
+      if (!callout) return null
+      const sourceLine = view.state.doc.lineAt(view.posAtDOM(header))
+      return {
+        dragSelection: "atomic" as const,
+        element: headerLine,
+        from: sourceLine.from,
+        to: header.classList.contains("cm-md-callout-toggle-collapsed")
+          ? callout.to
+          : sourceLine.to,
+      }
     },
     resolve(view, target, position) {
       const editing = view.state.facet(calloutEditingRange)

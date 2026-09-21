@@ -136,7 +136,9 @@ test("live preview renders inline and multiline LaTeX and reveals its source", a
       String.raw`\int_a^b x^2 \, dx = \frac{b^3-a^3}{3}`
     )
 
-    await page.keyboard.press(`${modifier}+Shift+V`)
+    await page.keyboard.press(
+      process.platform === "darwin" ? "Meta+Shift+V" : "Control+Alt+V"
+    )
     await expect(page.locator(".cm-editor")).toHaveClass(/cm-md-source/)
     await expect(page.locator(".cm-md-math")).toHaveCount(0)
     await expect(page.locator(".cm-line")).toHaveText(lines)
@@ -243,10 +245,14 @@ test("display delimiter whitespace keeps rendered geometry and source navigation
     ).toBe(1)
     await page.keyboard.press("Escape")
     await assertGeometry()
-    await page.keyboard.press(`${modifier}+Shift+V`)
+    await page.keyboard.press(
+      process.platform === "darwin" ? "Meta+Shift+V" : "Control+Alt+V"
+    )
     await expect(page.locator(".cm-editor")).toHaveClass(/cm-md-source/)
     await expect(page.locator(".cm-line")).toHaveText(source.split("\n"))
-    await page.keyboard.press(`${modifier}+Shift+V`)
+    await page.keyboard.press(
+      process.platform === "darwin" ? "Meta+Shift+V" : "Control+Alt+V"
+    )
     await assertGeometry()
   } finally {
     await exitApplication(app)

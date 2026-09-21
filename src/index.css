@@ -562,10 +562,6 @@ html[data-formatting-animations] .app-shell .editor-mount {
   transition: clip-path 150ms ease-out;
 }
 
-html[data-formatting-animations] .app-shell .editor-mount .cm-content {
-  transition: padding-top 150ms ease-out;
-}
-
 .app-shell:is([data-formatting-bar], [data-tab-drag-shelf]) .editor-mount {
   --editor-clip-top: var(--top-drawer-height);
 }
@@ -718,12 +714,13 @@ html[data-formatting-animations] .app-shell .editor-mount .cm-content {
 .top-chrome-tab-drag-shelf::after {
   position: absolute;
   right: 0;
-  bottom: 0;
+  top: calc(var(--top-drawer-height) - 1px);
   left: 0;
   height: 1px;
   background: color-mix(in oklab, var(--document-foreground) 10%, transparent);
   content: "";
   opacity: 0;
+  transform: translateY(-8px);
 }
 
 .top-chrome:is([data-formatting-bar], [data-tab-drag-shelf])
@@ -734,6 +731,7 @@ html[data-formatting-animations] .app-shell .editor-mount .cm-content {
 .top-chrome:is([data-formatting-bar], [data-tab-drag-shelf])
   .top-chrome-tab-drag-shelf::after {
   opacity: 1;
+  transform: translateY(0);
 }
 
 .top-chrome[data-tab-drag-shelf] .top-chrome-tab-drag-shelf {
@@ -741,18 +739,10 @@ html[data-formatting-animations] .app-shell .editor-mount .cm-content {
   -webkit-app-region: drag;
 }
 
-html[data-formatting-animations] .top-chrome-tab-drag-shelf {
-  transition: height 150ms ease-out;
-}
-
 html[data-formatting-animations] .top-chrome-tab-drag-shelf::after {
-  transition: opacity 0ms linear 150ms;
-}
-
-html[data-formatting-animations]
-  .top-chrome:is([data-formatting-bar], [data-tab-drag-shelf])
-  .top-chrome-tab-drag-shelf::after {
-  transition-delay: 0ms;
+  transition:
+    opacity 150ms ease-out,
+    transform 150ms ease-out;
 }
 
 .top-chrome-hover-region {
@@ -1770,6 +1760,7 @@ button.window-profile-tab-preview {
 
   [data-windows-controls-drawer] .top-chrome-tab-drag-shelf::after {
     opacity: 1;
+    transform: translateY(0);
   }
 
   [data-windows-controls-drawer] .editor-mount {

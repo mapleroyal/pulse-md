@@ -568,7 +568,7 @@ test("Save As activates deferred Markdown UI and rendering after a plain launch"
     ).toBeVisible()
     await content.click()
     await page.keyboard.press(
-      process.platform === "darwin" ? "Meta+Shift+V" : "Control+Shift+V"
+      process.platform === "darwin" ? "Meta+Shift+V" : "Control+Alt+V"
     )
     await expect(page.locator('[data-status-item="mode"]')).toHaveText(
       "Rendered"

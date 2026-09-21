@@ -2317,7 +2317,7 @@ test("current-window composition preserves tab order, modes, and starting tab", 
     await page.keyboard.press("Control+2")
     await expect(page).toHaveTitle("second.md")
     await page.keyboard.press(
-      process.platform === "darwin" ? "Meta+Shift+V" : "Control+Shift+V"
+      process.platform === "darwin" ? "Meta+Shift+V" : "Control+Alt+V"
     )
     await expect(page.locator(".cm-editor")).toHaveClass(/cm-md-source/)
     await page.mouse.move(0, 0)

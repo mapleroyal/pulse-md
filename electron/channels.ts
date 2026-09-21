@@ -31,6 +31,8 @@ export const ipcChannels = {
   editorReady: "pulse-md:editor-ready",
   editorContextMenu: "pulse-md:editor-context-menu",
   editFocusedControl: "pulse-md:edit-focused-control",
+  insertFocusedText: "pulse-md:insert-focused-text",
+  pastePlainText: "pulse-md:paste-plain-text",
   exportSettings: "pulse-md:export-settings",
   exitLaunchBenchmark: "pulse-md:exit-launch-benchmark",
   externalDocumentChange: "pulse-md:external-document-change",

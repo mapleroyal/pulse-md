@@ -615,7 +615,7 @@ test("rendered link hit testing stays constant with many mounted links", async (
   }
 })
 
-test("a source drag chooses the outer callout and keeps edge autoscrolling", async () => {
+test("a source drag tracks nested callout rows and keeps edge autoscrolling", async () => {
   const userData = await mkdtemp(
     path.join(os.tmpdir(), "pulse-md-callout-autoscroll-")
   )
@@ -655,12 +655,14 @@ test("a source drag chooses the outer callout and keeps edge autoscrolling", asy
     await expect(outer).toBeVisible()
     await expect(nested).toBeVisible()
 
-    const outerFrom = Number(await outer.getAttribute("data-callout-from"))
     const outside = page
       .locator(".cm-line")
       .filter({ hasText: "Outside before." })
     const outsideBounds = await outside.boundingBox()
-    const nestedBounds = await nested.boundingBox()
+    const nestedBounds = await nested
+      .locator(".cm-line")
+      .filter({ hasText: "Nested body." })
+      .boundingBox()
     if (!outsideBounds || !nestedBounds) {
       throw new Error("Nested callout drag geometry is unavailable")
     }
@@ -669,12 +671,12 @@ test("a source drag chooses the outer callout and keeps edge autoscrolling", asy
       outsideBounds.y + outsideBounds.height / 2
     )
     await page.mouse.down()
-    // Deliberately use one sampled move so the first opaque target is nested.
+    // Enter a nested body directly; its endpoint remains the source row.
     await page.mouse.move(
       nestedBounds.x + nestedBounds.width / 2,
       nestedBounds.y + nestedBounds.height / 2
     )
-    await expect(outer).toHaveAttribute("data-semantic-boundary-target", "")
+    await expect(outer).not.toHaveAttribute("data-semantic-boundary-target", "")
     await expect(nested).not.toHaveAttribute(
       "data-semantic-boundary-target",
       ""
@@ -692,7 +694,9 @@ test("a source drag chooses the outer callout and keeps edge autoscrolling", asy
       if (!view) throw new Error("CodeMirror view is unavailable")
       return { head: view.state.selection.main.head }
     })
-    expect(nestedEntrySelection.head).toBe(outerFrom)
+    expect(nestedEntrySelection.head).toBe(
+      source.indexOf("Nested body.") + "Nested body.".length
+    )
     const outerBounds = await outer.boundingBox()
     const scrollerBounds = await scroller.boundingBox()
     if (!outerBounds || !scrollerBounds) {

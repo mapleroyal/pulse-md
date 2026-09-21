@@ -681,6 +681,21 @@ export function EditorContextMenu({
                   </ContextMenuShortcut>
                 </ContextMenuItem>
                 <ContextMenuItem
+                  disabled={
+                    !snapshot.editable ||
+                    (spelling != null && !spelling.editFlags.canPaste)
+                  }
+                  onClick={() => runEditCommand("paste-plain")}
+                >
+                  <ClipboardPasteIcon />
+                  {platform === "darwin"
+                    ? "Paste and Match Style"
+                    : "Paste Without Formatting"}
+                  <ContextMenuShortcut>
+                    {shortcut(platform, "⌥⇧⌘V", "Ctrl+Shift+V")}
+                  </ContextMenuShortcut>
+                </ContextMenuItem>
+                <ContextMenuItem
                   disabled={!snapshot.hasText}
                   onClick={() => runEditCommand("select-all")}
                 >

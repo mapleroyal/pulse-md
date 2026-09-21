@@ -1293,7 +1293,7 @@ export function TopChrome({
                     {editorMode === "live"
                       ? "Switch to Raw Markdown"
                       : "Switch to Rendered Markdown"}{" "}
-                    ({platform === "darwin" ? "⌘⇧V" : "Ctrl+Shift+V"})
+                    ({platform === "darwin" ? "⌘⇧V" : "Ctrl+Alt+V"})
                   </TooltipContent>
                 </Tooltip>
               </TopControlContextMenu>

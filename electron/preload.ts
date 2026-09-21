@@ -357,6 +357,10 @@ const pulseMd: PulseMdApi = {
     >,
   editFocusedControl: (command: FocusedEditCommand) =>
     ipcRenderer.send(ipcChannels.editFocusedControl, command),
+  insertFocusedText: (text: string) =>
+    ipcRenderer.send(ipcChannels.insertFocusedText, text),
+  onPastePlainText: (listener: (text: string) => void) =>
+    onMessage(ipcChannels.pastePlainText, listener),
   commitSettingsImport: async (
     importId: string,
     settings: AppSettings,

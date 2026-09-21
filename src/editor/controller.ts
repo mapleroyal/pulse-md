@@ -1675,6 +1675,7 @@ export class MarkdownEditorController implements MarkdownEditorHandle {
   private semanticBoundaryCaret: HTMLElement | null = null
   private semanticBoundaryTarget: HTMLElement | null = null
   private renderedSemanticSelection: HTMLElement | null = null
+  private renderedSemanticSelectionEditable: string | null = null
   private semanticDisjointSelection: {
     readonly doc: StateText
     readonly selection: EditorSelection
@@ -3121,6 +3122,23 @@ export class MarkdownEditorController implements MarkdownEditorHandle {
 
   selectAll() {
     return selectAll(this.view)
+  }
+
+  pastePlainText(text: string) {
+    if (
+      this.destroyed ||
+      this.view.state.readOnly ||
+      !this.view.state.facet(EditorView.editable)
+    )
+      return
+    this.showCaret()
+    const { state } = this.view
+    this.view.dispatch(
+      state.update(state.replaceSelection(normalizeEditorContent(text)), {
+        scrollIntoView: true,
+        userEvent: "input.paste",
+      })
+    )
   }
 
   focus() {
@@ -4635,7 +4653,26 @@ export class MarkdownEditorController implements MarkdownEditorHandle {
       .observer
     observer.ignore(() => {
       previous?.removeAttribute("data-semantic-native-selection")
-      element?.setAttribute("data-semantic-native-selection", "")
+      if (previous) {
+        if (this.renderedSemanticSelectionEditable == null) {
+          previous.removeAttribute("contenteditable")
+        } else {
+          previous.setAttribute(
+            "contenteditable",
+            this.renderedSemanticSelectionEditable
+          )
+        }
+      }
+      this.renderedSemanticSelectionEditable =
+        element?.getAttribute("contenteditable") ?? null
+      if (element) {
+        // Callout bodies normally inherit the editable CodeMirror root, but
+        // their title widgets are noneditable. Chromium omits those titles
+        // from a native range crossing that boundary. Give the rendered-only
+        // selection one editing boundary until source interaction resumes.
+        element.setAttribute("contenteditable", "false")
+        element.setAttribute("data-semantic-native-selection", "")
+      }
     })
   }
 
@@ -4809,11 +4846,9 @@ export class MarkdownEditorController implements MarkdownEditorHandle {
     }
     const start = gesture.startPosition
     if (start != null) {
-      // CodeMirror's active mouse session can otherwise advance through the
-      // source-backed lines inside a rendered callout while the boundary
-      // caret is showing. Rendered units move only between their complete
-      // source edges, while atomic inner-bound previews remain clamped at the
-      // edge where the drag entered them.
+      // Keep the mouse session outside a replacement's hidden source while
+      // its boundary caret is showing. Rendered HTML chooses a complete edge;
+      // atomic previews stay at the edge where the source drag entered them.
       const entryEdge = start <= semantic.from ? semantic.from : semantic.to
       const head =
         semantic.dragSelection === "rendered"
@@ -5041,10 +5076,9 @@ export class MarkdownEditorController implements MarkdownEditorHandle {
         pending.gesture.pointerScroll.scrollTop = scrollDOM.scrollTop
       }
 
-      // CodeMirror's own scroll loop also replays selection after each tick,
-      // but that would enter source rows inside the callout. Re-hit-test the
-      // stationary pointer and move only between complete semantic edges (or
-      // resume an ordinary source endpoint once the card has passed it).
+      // Re-hit-test the stationary pointer after scrolling and retain the
+      // replacement's semantic edge, or resume an ordinary source endpoint
+      // once that replacement has passed the pointer.
       // Cancel a mousemove measurement queued before this scroll first; that
       // frame still owns the pre-scroll callout and must not reinstate it after
       // this coordinate-based update. Re-hit-test even at the scroll limit so
@@ -5234,9 +5268,8 @@ export class MarkdownEditorController implements MarkdownEditorHandle {
       // from the stationary pointer during the same animation frame.
       this.queueSemanticBoundaryEndpoint(gesture, event, targetSemantic)
       if (targetSemantic) {
-        // The first opaque unit entered owns the rest of its nested DOM for
-        // this source-origin gesture. Crossing a nested callout must not turn
-        // one outer-card selection into a sequence of partial inner ranges.
+        // A replacement owns its nested DOM until the pointer reaches the
+        // next source row; a rendered callout body is not a replacement.
         gesture.boundarySemantic = targetSemantic
         // Capturing this move bypasses CodeMirror's MouseSelection.move.
         // Neutralize any edge-autoscroll interval armed by the preceding
@@ -5244,10 +5277,9 @@ export class MarkdownEditorController implements MarkdownEditorHandle {
         const inputState = (this.view as unknown as PinnedEditorViewInternals)
           .inputState
         inputState.mouseSelection?.setScrollSpeed(0, 0)
-        // A callout contains ordinary editable line DOM, so CodeMirror can
-        // otherwise select a partial source endpoint before the queued
-        // semantic clamp runs. Stop that document-level mousemove while the
-        // target-only resolver passes the complete unit to the next frame.
+        // A replaced callout header still occupies an editable source row.
+        // Stop CodeMirror's document-level move from entering that hidden
+        // syntax before the queued semantic clamp runs.
         event.preventDefault()
         event.stopPropagation()
         this.queueSemanticBoundaryAutoScroll(gesture, event)
@@ -5282,10 +5314,13 @@ export class MarkdownEditorController implements MarkdownEditorHandle {
     })
     return position == null
       ? null
-      : semanticPreviewSelectionAtPointer(this.view, hitTarget, position, {
-          x: event.clientX,
-          y: event.clientY,
-        })
+      : semanticPreviewSelectionAtPointer(
+          this.view,
+          hitTarget,
+          position,
+          { x: event.clientX, y: event.clientY },
+          "source"
+        )
   }
 
   private sourceLinePositionAtPointer(event: MouseEvent) {

@@ -150,10 +150,14 @@ export function semanticPreviewSelectionAtPointer(
   view: EditorView,
   target: Element,
   position: number,
-  pointer: { readonly x: number; readonly y: number }
+  pointer: { readonly x: number; readonly y: number },
+  origin: "source" | "rendered" = "rendered"
 ): SemanticPreviewSelection | null {
   for (const resolver of view.state.facet(semanticPreviewSelectionResolvers)) {
-    const resolved = resolver.resolve(view, target, position, pointer)
+    const resolved =
+      origin === "source" && resolver.resolveTarget
+        ? resolver.resolveTarget(view, target, pointer)
+        : resolver.resolve(view, target, position, pointer)
     if (resolved && resolved.from < resolved.to) return resolved
   }
   return null

@@ -695,6 +695,7 @@ interface RendererTab {
   revision: number
   cleanDocument: Text
   editor: MarkdownEditorSession
+  topDrawerCompensated?: boolean
 }
 
 interface PendingImport {
@@ -1382,6 +1383,8 @@ export function App() {
   }>({ tabId: null, visible: false })
   const topDrawerCompensationContextRef = React.useRef({
     active: false,
+    paddingTop: 0,
+    scrollTop: 0,
     tabId: null as TabId | null,
   })
   const [windowZoomFactor, setWindowZoomFactor] = React.useState(1)
@@ -1525,8 +1528,12 @@ export function App() {
       void activeTabId
       const scrollDOM = controllerRef.current?.view.scrollDOM
       if (!scrollDOM) return () => undefined
-      scrollDOM.addEventListener("scroll", onStoreChange, { passive: true })
-      return () => scrollDOM.removeEventListener("scroll", onStoreChange)
+      const onScroll = () => {
+        topDrawerCompensationContextRef.current.scrollTop = scrollDOM.scrollTop
+        onStoreChange()
+      }
+      scrollDOM.addEventListener("scroll", onScroll, { passive: true })
+      return () => scrollDOM.removeEventListener("scroll", onScroll)
     },
     [activeTabId]
   )
@@ -2424,6 +2431,11 @@ export function App() {
     const tab = tabId ? tabsRef.current.get(tabId) : undefined
     if (!controller || !tab) return tab
     tab.editor = controller.captureSession(tab.revision)
+    // Capture committed spacing with the viewport, before queued React
+    // updates for the incoming tab can replace either presentation value.
+    tab.topDrawerCompensated = controller.view.dom
+      .closest(".app-shell")
+      ?.hasAttribute("data-top-drawer-compensated")
     return tab
   }, [])
 
@@ -3150,12 +3162,9 @@ export function App() {
       prepareFormattingToolbarForDocument(next.document.kind)
       setControllerReadOnlyRespectingLocks(controller, false, tabId)
       window.pulseMd.reportLineWrapping(controller.getLineWrapping())
-      if (
-        next.document.kind === "markdown" &&
-        settingsRef.current.chrome.showFormattingBar
-      ) {
-        setTopDrawerCompensated(shouldCompensateTopDrawer())
-      }
+      setTopDrawerCompensated(
+        next.topDrawerCompensated || shouldCompensateTopDrawer()
+      )
       controller.clearSearch()
       activeTabIdRef.current = tabId
       setActiveTabId(tabId)
@@ -3721,7 +3730,9 @@ export function App() {
               savedDescriptor.kind === "markdown" &&
               settingsRef.current.chrome.showFormattingBar
             ) {
-              setTopDrawerCompensated(shouldCompensateTopDrawer())
+              setTopDrawerCompensated(
+                (compensated) => compensated || shouldCompensateTopDrawer()
+              )
             } else if (savedDescriptor.kind === "plain-text") {
               outlineOpenRef.current = false
               setOutlineOpen(false)
@@ -5666,6 +5677,18 @@ export function App() {
         platformRef.current === "darwin"
           ? event.metaKey && !event.ctrlKey
           : event.ctrlKey && !event.metaKey
+      const pasteWithoutFormattingShortcut =
+        primaryModifierPressed &&
+        event.code === "KeyV" &&
+        event.shiftKey &&
+        (platformRef.current === "darwin" ? event.altKey : !event.altKey)
+      if (pasteWithoutFormattingShortcut) {
+        event.preventDefault()
+        event.stopPropagation()
+        clearHeadingChord()
+        window.pulseMd.editFocusedControl("paste-plain")
+        return
+      }
       const tabDigitIndex = tabIndexForDigitShortcut(event, platformRef.current)
       if (
         settingsOpenRef.current ||
@@ -5886,15 +5909,24 @@ export function App() {
         openSearch({ expanded: true })
         return
       }
+      const rawMarkdownShortcut =
+        markdownDocument &&
+        primaryModifierPressed &&
+        event.code === "KeyV" &&
+        (platformRef.current === "darwin"
+          ? event.shiftKey && !event.altKey
+          : event.altKey && !event.shiftKey)
+      if (rawMarkdownShortcut) {
+        event.preventDefault()
+        controllerRef.current?.toggleMode()
+        return
+      }
       if (!primaryModifierPressed || event.altKey) return
 
       const key = event.key.toLowerCase()
       if (markdownDocument && event.shiftKey && key === "o") {
         event.preventDefault()
         openOutline()
-      } else if (markdownDocument && event.shiftKey && key === "v") {
-        event.preventDefault()
-        controllerRef.current?.toggleMode()
       } else if (markdownDocument && event.shiftKey && key === "b") {
         event.preventDefault()
         void toggleFormattingBar()
@@ -5970,6 +6002,16 @@ export function App() {
     return () =>
       window.removeEventListener("mousedown", handleNavigationMouseButton, true)
   }, [navigateAppHistory])
+
+  React.useEffect(
+    () =>
+      window.pulseMd.onPastePlainText((text) => {
+        const controller = controllerRef.current
+        if (controller?.view.hasFocus) controller.pastePlainText(text)
+        else window.pulseMd.insertFocusedText(text)
+      }),
+    []
+  )
 
   React.useEffect(
     () => window.pulseMd.onCommand(handleCommand),
@@ -7089,100 +7131,54 @@ export function App() {
     topDrawerPresence.visible !== topDrawerVisible
   ) {
     setTopDrawerPresence({ tabId: activeTabId, visible: topDrawerVisible })
-    setTopDrawerCompensated(topDrawerVisible && topDrawerAtTopEdge)
+    setTopDrawerCompensated(
+      topDrawerVisible &&
+        (topDrawerPresence.tabId !== activeTabId
+          ? topDrawerCompensated || topDrawerAtTopEdge
+          : topDrawerAtTopEdge)
+    )
   }
   const topDrawerCompensationActive = topDrawerVisible && topDrawerCompensated
 
   React.useLayoutEffect(() => {
+    const controller = controllerRef.current
+    if (!controller) return
+
+    const { contentDOM, scrollDOM } = controller.view
+    const paddingTop = Number.parseFloat(
+      getComputedStyle(contentDOM).paddingTop
+    )
     const previous = topDrawerCompensationContextRef.current
     topDrawerCompensationContextRef.current = {
       active: topDrawerCompensationActive,
+      paddingTop,
+      scrollTop: scrollDOM.scrollTop,
       tabId: activeTabId,
     }
-    if (
-      !previous.active ||
-      topDrawerCompensationActive ||
-      previous.tabId !== activeTabId
-    ) {
-      return
-    }
 
-    const scrollDOM = controllerRef.current?.view.scrollDOM
-    const content = controllerRef.current?.view.contentDOM
+    // Drawer geometry settles before CodeMirror restores a tab's viewport.
+    // On an in-place collapse, retain the line the user is reading by removing
+    // the same amount from scrollTop as from the document's leading padding.
     if (
-      !scrollDOM ||
-      !content ||
-      scrollDOM.scrollTop <= TOP_DRAWER_TOP_EDGE_THRESHOLD
+      previous.active &&
+      !topDrawerCompensationActive &&
+      previous.tabId === activeTabId &&
+      previous.scrollTop > TOP_DRAWER_TOP_EDGE_THRESHOLD
     ) {
-      return
-    }
-
-    const paddingAnimation = content
-      .getAnimations()
-      .find((animation) =>
-        (animation.effect as KeyframeEffect | null)
-          ?.getKeyframes()
-          .some((keyframe) => keyframe.paddingTop != null)
+      // Use the last observed offset: layout may already have clamped the
+      // scroller to its shorter maximum, so subtracting from it would remove
+      // the padding twice at the bottom of the document.
+      scrollDOM.scrollTop = Math.max(
+        0,
+        previous.scrollTop - (previous.paddingTop - paddingTop)
       )
-    const keyframes = (
-      paddingAnimation?.effect as KeyframeEffect | null
-    )?.getKeyframes()
-    const startPadding = Number.parseFloat(String(keyframes?.[0]?.paddingTop))
-    const endPadding = Number.parseFloat(String(keyframes?.at(-1)?.paddingTop))
-    if (
-      !paddingAnimation ||
-      !Number.isFinite(startPadding) ||
-      !Number.isFinite(endPadding) ||
-      startPadding <= endPadding
-    ) {
-      return
+      topDrawerCompensationContextRef.current.scrollTop = scrollDOM.scrollTop
     }
-
-    // Away from the document start, collapsing the drawer should reveal more
-    // viewport without moving the line the user is reading. Resolve the
-    // padding transition immediately and offset the removed space before the
-    // browser paints this render; the drawer line can continue its own motion.
-    paddingAnimation.cancel()
-    scrollDOM.scrollTo({
-      behavior: "auto",
-      top: Math.max(0, scrollDOM.scrollTop - (startPadding - endPadding)),
-    })
-  }, [activeTabId, topDrawerCompensationActive])
-
-  React.useLayoutEffect(() => {
-    const controller = controllerRef.current
-    const content = controller?.view.contentDOM
-    if (!controller || !content) return
-
-    let frame: number | null = null
-    let settledFrames = 0
-    const updateDrawnGeometry = () => {
-      controller.requestMeasure()
-      const paddingAnimation = content
-        .getAnimations()
-        .find((animation) =>
-          (animation.effect as KeyframeEffect | null)
-            ?.getKeyframes()
-            .some((keyframe) => keyframe.paddingTop != null)
-        )
-      if (
-        paddingAnimation?.pending ||
-        paddingAnimation?.playState === "running"
-      ) {
-        settledFrames = 0
-        frame = requestAnimationFrame(updateDrawnGeometry)
-      } else if (settledFrames < 1) {
-        settledFrames += 1
-        frame = requestAnimationFrame(updateDrawnGeometry)
-      } else {
-        frame = null
-      }
-    }
-
-    frame = requestAnimationFrame(updateDrawnGeometry)
-    return () => {
-      if (frame !== null) cancelAnimationFrame(frame)
-    }
+    controller.requestMeasure()
+    // Resolve the caret geometry before paint. This public layout read flushes
+    // CodeMirror's pending measurement, so its separate selection layer cannot
+    // spend one frame at the old padding after the content has moved.
+    controller.view.coordsAtPos(controller.view.state.selection.main.head)
   }, [activeTabId, topDrawerCompensationActive])
 
   React.useEffect(() => {
@@ -7219,6 +7215,7 @@ export function App() {
   )
   const handleTabDragShelfVisibleChange = React.useCallback(
     (visible: boolean) => {
+      if (!tabDragShelfContext) return
       setTopDrawerCompensated(visible && shouldCompensateTopDrawer())
       setTabDragShelfHoverContext(visible ? tabDragShelfContext : null)
     },

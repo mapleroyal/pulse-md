@@ -458,9 +458,8 @@ test("rendering chrome, lists, and fenced-code controls stay structural", async 
         tab.evaluate((element) => getComputedStyle(element).backgroundColor)
       )
       .not.toBe(tabRestingBackground)
-    // Leave the transient top drawer and let its near-top compensation settle
-    // before testing document clicks. Otherwise the synthetic pointer jump
-    // can race the intentional content-padding transition.
+    // Leave the transient top drawer and wait for its near-top compensation
+    // before testing document clicks, so coordinates reflect the final layout.
     await page.mouse.move(400, 160)
     await expect(page.locator(".top-chrome-tab-drag-shelf")).toHaveCSS(
       "height",
@@ -1789,7 +1788,7 @@ test("rendering chrome, lists, and fenced-code controls stay structural", async 
     ).toBe(true)
 
     await page.keyboard.press(
-      process.platform === "darwin" ? "Meta+Shift+V" : "Control+Shift+V"
+      process.platform === "darwin" ? "Meta+Shift+V" : "Control+Alt+V"
     )
     await expect(page.locator(".cm-editor")).toHaveClass(/cm-md-source/)
     const sourceGutter = await page.evaluate(() => {

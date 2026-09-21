@@ -25,7 +25,7 @@ export interface SemanticPreviewSelection {
 export interface SemanticPreviewSelectionResolver {
   /** Higher-priority semantic containers own anything rendered inside them. */
   readonly priority: number
-  /** Optional fast path for source drags before CodeMirror handles mousemove. */
+  /** Source-origin semantics, also resolved before CodeMirror handles mousemove. */
   resolveTarget?(
     view: EditorView,
     target: Element,

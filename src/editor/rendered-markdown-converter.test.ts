@@ -3,6 +3,7 @@ import domino from "@mixmark-io/domino"
 
 import {
   renderedDomContainsBlock,
+  renderedDomNeedsConversion,
   renderedDomToMarkdown,
 } from "./rendered-markdown-converter"
 
@@ -327,5 +328,33 @@ describe("rendered HTML to Markdown", () => {
         "<style>.secret { color: red }</style><script>alert(1)</script><p>Visible</p>"
       )
     ).toBe("Visible")
+  })
+})
+
+describe("clipboard HTML representation", () => {
+  it("keeps terminal and source-editor presentation separate from Markdown structure", () => {
+    for (const html of [
+      '<span style="white-space:pre">first\\n  second\\nthird</span>',
+      '<div style="font-family:monospace;white-space:pre-wrap"><span style="color:red"># Heading\\n- [x] file_name</span></div>',
+      "<p>file_name and [brackets] and C:\\\\Users\\\\name</p>",
+      '<b style="font-weight:normal"><span>Unformatted source</span></b>',
+      '<div style="font-family:Consolas;white-space:pre"><div><span style="font-weight:bold"># Heading</span></div><div><span style="font-style:italic">file_name</span></div></div>',
+    ]) {
+      expect(renderedDomNeedsConversion(renderedRoot(html))).toBe(false)
+    }
+  })
+
+  it("continues converting semantic Markdown and intentional inline formatting", () => {
+    for (const html of [
+      "<h2>Heading</h2>",
+      "<p><strong>Bold</strong> and <em>italic</em></p>",
+      '<span style="font-weight:700">Bold</span>',
+      '<a href="https://example.com">Link</a>',
+      "<pre><code>first\\nsecond</code></pre>",
+      "<blockquote>Quote</blockquote>",
+      "<table><tr><td>Cell</td></tr></table>",
+    ]) {
+      expect(renderedDomNeedsConversion(renderedRoot(html))).toBe(true)
+    }
   })
 })

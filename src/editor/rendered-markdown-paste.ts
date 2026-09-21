@@ -134,7 +134,7 @@ export function renderedMarkdownPasteExtension(): Extension {
 
           void loadRenderedMarkdownConverter()
             .then(({ renderedHtmlToMarkdown }) =>
-              renderedHtmlToMarkdown(ownerDocument, html)
+              renderedHtmlToMarkdown(ownerDocument, html, fallback)
             )
             .then(
               ({ block, markdown: converted }) => {

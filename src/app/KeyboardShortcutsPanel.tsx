@@ -383,14 +383,10 @@ function platformShortcuts(
         { label: "Cut", keys: [[[primary, "X"]]] },
         { label: "Copy", keys: [[[primary, "C"]]] },
         { label: "Paste", keys: [[[primary, "V"]]] },
-        ...(mac
-          ? ([
-              {
-                label: "Paste and Match Style (plain text)",
-                keys: [[[primary, alt, shift, "V"]]],
-              },
-            ] satisfies ShortcutItem[])
-          : []),
+        {
+          label: mac ? "Paste and Match Style" : "Paste Without Formatting",
+          keys: [mac ? [[primary, alt, shift, "V"]] : [[primary, shift, "V"]]],
+        },
         { label: "Select all", keys: [[[primary, "A"]]] },
         { label: "Bold", keys: [[[primary, "B"]]] },
         { label: "Italic", keys: [[[primary, "I"]]] },
@@ -419,7 +415,7 @@ function platformShortcuts(
       items: [
         {
           label: "Toggle Rendered / Raw Markdown",
-          keys: [[[...shiftedPrimary, "V"]]],
+          keys: [mac ? [[...shiftedPrimary, "V"]] : [[primary, alt, "V"]]],
         },
         { label: "Toggle line wrapping", keys: [[[alt, "Z"]]] },
         {

@@ -293,15 +293,14 @@ async function readDrawerCaretTrace(page: Page) {
 
 function expectDrawerCaretToTrackText(samples: DrawerCaretSample[]) {
   expect(samples.length).toBeGreaterThan(3)
-  const lineTops = samples.map((sample) => sample.lineTop)
-  expect(Math.max(...lineTops) - Math.min(...lineTops)).toBeGreaterThan(20)
   const cursorOffsets = samples.map(
     (sample) => sample.cursorTop - sample.lineTop
   )
-  // The line's fractional CSS transition and CodeMirror's separately measured
-  // cursor can land on opposite subpixel boundaries without visible drift.
+  // Fractional line metrics and CodeMirror's separately measured cursor can
+  // land on opposite subpixel boundaries without visible drift.
   expect(
-    Math.max(...cursorOffsets) - Math.min(...cursorOffsets)
+    Math.max(...cursorOffsets) - Math.min(...cursorOffsets),
+    JSON.stringify(samples)
   ).toBeLessThanOrEqual(2)
 }
 
@@ -567,7 +566,7 @@ test("the frameless surface edits live Markdown and exposes intentional UI", asy
 
     await activateWindow(page)
     await page.keyboard.press(
-      process.platform === "darwin" ? "Meta+Shift+V" : "Control+Shift+V"
+      process.platform === "darwin" ? "Meta+Shift+V" : "Control+Alt+V"
     )
     await expect(editor).toHaveClass(/cm-md-source/)
     await expect(page.locator(".cm-lineNumbers")).toHaveCount(1)
@@ -4292,7 +4291,7 @@ test("opening into a disposable tab keeps the document start below visible tabs 
   }
 })
 
-test("tab-strip hover reveals a top-origin drawer without covering the first line @renderer-isolated", async () => {
+test("tab-strip hover reveals a drawer with a fading divider without covering the first line @renderer-isolated", async () => {
   const userData = await createTestUserData()
   const app = await launchApplication(userData, samplePath)
 
@@ -4381,45 +4380,55 @@ test("tab-strip hover reveals a top-origin drawer without covering the first lin
     await page.mouse.move(tabPoint.x, tabPoint.y)
     await expect(appShell).toHaveAttribute("data-tab-drag-shelf", "true")
     const shelfAnimation = await shelf.evaluate((element) => {
-      const animation = element
-        .getAnimations()
-        .find((candidate) =>
-          (candidate.effect as KeyframeEffect | null)
-            ?.getKeyframes()
-            .some((keyframe) => keyframe.height != null)
-        )
-      const effect = animation?.effect as KeyframeEffect | null
-      if (!animation || !effect) {
-        throw new Error("The drawer height animation is unavailable")
+      const animations = element.getAnimations({ subtree: true })
+      const framesFor = (animation: Animation) =>
+        (animation.effect as KeyframeEffect | null)?.getKeyframes() ?? []
+      const opacityAnimation = animations.find((animation) =>
+        framesFor(animation).some((keyframe) => keyframe.opacity != null)
+      )
+      const transformAnimation = animations.find((animation) =>
+        framesFor(animation).some((keyframe) => keyframe.transform != null)
+      )
+      if (!opacityAnimation || !transformAnimation) {
+        throw new Error("The drawer divider animation is unavailable")
       }
-      const duration = Number(effect.getTiming().duration)
-      animation.pause()
-      const samples = [0, duration / 2, duration].map((currentTime) => {
-        animation.currentTime = currentTime
+      const dividerAnimations = [opacityAnimation, transformAnimation]
+      for (const animation of dividerAnimations) animation.pause()
+      const samples = [0, 0.5, 1].map((progress) => {
+        for (const animation of dividerAnimations) {
+          animation.currentTime =
+            Number(animation.effect!.getTiming().duration) * progress
+        }
         const bounds = element.getBoundingClientRect()
         const line = getComputedStyle(element, "::after")
         return {
           bottom: bounds.bottom,
-          lineBottomOffset: line.bottom,
-          lineOpacity: line.opacity,
+          lineTopOffset: Number.parseFloat(line.top),
+          lineOpacity: Number.parseFloat(line.opacity),
+          lineTranslateY: new DOMMatrixReadOnly(line.transform).m42,
         }
       })
-      animation.play()
+      for (const animation of dividerAnimations) animation.play()
       return {
-        keyframes: effect.getKeyframes().map((keyframe) => keyframe.height),
+        animatesHeight: animations.some((animation) =>
+          framesFor(animation).some((keyframe) => keyframe.height != null)
+        ),
         samples,
       }
     })
-    expect(shelfAnimation.keyframes.at(0)).toBe("0px")
-    expect(shelfAnimation.keyframes.at(-1)).toBe("74px")
-    expect(shelfAnimation.samples[0]?.bottom).toBeCloseTo(0, 5)
-    expect(shelfAnimation.samples[1]?.bottom).toBeGreaterThan(0)
-    expect(shelfAnimation.samples[1]?.bottom).toBeLessThan(74)
-    expect(shelfAnimation.samples[2]?.bottom).toBeCloseTo(74, 5)
+    expect(shelfAnimation.animatesHeight).toBe(false)
     for (const sample of shelfAnimation.samples) {
-      expect(sample.lineBottomOffset).toBe("0px")
-      expect(sample.lineOpacity).toBe("1")
+      expect(sample.bottom).toBeCloseTo(74, 5)
+      expect(sample.lineTopOffset).toBeCloseTo(73, 5)
     }
+    expect(shelfAnimation.samples[0]?.lineOpacity).toBe(0)
+    expect(shelfAnimation.samples[1]?.lineOpacity).toBeGreaterThan(0)
+    expect(shelfAnimation.samples[1]?.lineOpacity).toBeLessThan(1)
+    expect(shelfAnimation.samples[2]?.lineOpacity).toBe(1)
+    expect(shelfAnimation.samples[0]?.lineTranslateY).toBeCloseTo(-8, 5)
+    expect(shelfAnimation.samples[1]?.lineTranslateY).toBeGreaterThan(-8)
+    expect(shelfAnimation.samples[1]?.lineTranslateY).toBeLessThan(0)
+    expect(shelfAnimation.samples[2]?.lineTranslateY).toBeCloseTo(0, 5)
     await waitForSubtreeAnimations(shelf)
     expectDrawerCaretToTrackText(await readDrawerCaretTrace(page))
 
@@ -4585,23 +4594,7 @@ test("formatting drawer overlays a scrolled document without displacing it @rend
       "data-top-drawer-compensated",
       "true"
     )
-    const formattingDrawerKeyframes = await drawer.evaluate((element) => {
-      const animation = element
-        .getAnimations()
-        .find((candidate) =>
-          (candidate.effect as KeyframeEffect | null)
-            ?.getKeyframes()
-            .some((keyframe) => keyframe.height != null)
-        )
-      if (!animation) {
-        throw new Error("The formatting drawer height animation is unavailable")
-      }
-      return (animation.effect as KeyframeEffect)
-        .getKeyframes()
-        .map((keyframe) => keyframe.height)
-    })
-    expect(formattingDrawerKeyframes.at(0)).toBe("0px")
-    expect(formattingDrawerKeyframes.at(-1)).toBe("74px")
+    await expect(drawer).toHaveCSS("height", "74px")
     await waitForSubtreeAnimations(drawer)
 
     await expect(content).toHaveCSS("padding-top", "46px")
@@ -5975,7 +5968,9 @@ test("edit commands follow focus while Settings isolates document commands", asy
     const tabs = page.locator(".document-tab")
     const tabCount = await tabs.count()
     await page.keyboard.press(`${primary}+T`)
-    await page.keyboard.press(`${primary}+Shift+V`)
+    await page.keyboard.press(
+      process.platform === "darwin" ? "Meta+Shift+V" : "Control+Alt+V"
+    )
     await page.keyboard.press(`${primary}+F`)
     await page.keyboard.press(`${primary}+W`)
     await page.keyboard.press("Alt+Z")
@@ -6009,7 +6004,9 @@ test("edit commands follow focus while Settings isolates document commands", asy
     await expect(fontSize).toHaveValue("22")
 
     await page.keyboard.press(`${primary}+T`)
-    await page.keyboard.press(`${primary}+Shift+V`)
+    await page.keyboard.press(
+      process.platform === "darwin" ? "Meta+Shift+V" : "Control+Alt+V"
+    )
     await page.keyboard.press(`${primary}+F`)
     await page.keyboard.press(`${primary}+W`)
     await expect(typography).toBeVisible()
@@ -6352,7 +6349,7 @@ test("live Markdown collapses reference-definition blocks without leaving line g
     expect(Math.abs(gaps.definitions - gaps.baseline)).toBeLessThanOrEqual(0.5)
 
     const modeShortcut =
-      process.platform === "darwin" ? "Meta+Shift+V" : "Control+Shift+V"
+      process.platform === "darwin" ? "Meta+Shift+V" : "Control+Alt+V"
     await page.keyboard.press(modeShortcut)
     await expect(content).toContainText("[first]: /one")
     const firstDefinition = page
@@ -6438,7 +6435,7 @@ test("live Markdown exposes semantic rules, editable tasks, and safe web links",
 
     await page.locator("body").focus()
     await page.keyboard.press(
-      process.platform === "darwin" ? "Meta+Shift+V" : "Control+Shift+V"
+      process.platform === "darwin" ? "Meta+Shift+V" : "Control+Alt+V"
     )
     await expect(page.locator(".cm-editor")).toHaveClass(/cm-md-source/)
     await expect(page.locator(".cm-content")).toContainText(
@@ -6448,7 +6445,7 @@ test("live Markdown exposes semantic rules, editable tasks, and safe web links",
       "- [ ] Completed task"
     )
     await page.keyboard.press(
-      process.platform === "darwin" ? "Meta+Shift+V" : "Control+Shift+V"
+      process.platform === "darwin" ? "Meta+Shift+V" : "Control+Alt+V"
     )
     await expect(page.locator(".cm-editor")).toHaveClass(/cm-md-live/)
 
@@ -6473,7 +6470,7 @@ test("live Markdown exposes semantic rules, editable tasks, and safe web links",
     const linkTooltip = page.locator('[data-slot="tooltip-content"][data-open]')
     await expect(linkTooltip).toHaveText("Open example")
     const modeShortcut =
-      process.platform === "darwin" ? "Meta+Shift+V" : "Control+Shift+V"
+      process.platform === "darwin" ? "Meta+Shift+V" : "Control+Alt+V"
     await page.keyboard.press(modeShortcut)
     await expect(page.locator(".cm-editor")).toHaveClass(/cm-md-source/)
     await expect(linkTooltip).toHaveCount(0)
@@ -7610,7 +7607,7 @@ test("Tab edits the active document and source indentation is configurable @rend
     const editor = page.locator(".cm-editor")
     const content = page.locator(".cm-content")
     const modeShortcut =
-      process.platform === "darwin" ? "Meta+Shift+V" : "Control+Shift+V"
+      process.platform === "darwin" ? "Meta+Shift+V" : "Control+Alt+V"
     const documentEnd =
       process.platform === "darwin" ? "Meta+End" : "Control+End"
     const settingsShortcut =
@@ -8320,7 +8317,7 @@ test("live Markdown renders nested quotes and foldable callout cards", async () 
     )
 
     const modeShortcut =
-      process.platform === "darwin" ? "Meta+Shift+V" : "Control+Shift+V"
+      process.platform === "darwin" ? "Meta+Shift+V" : "Control+Alt+V"
     await clickVisibleText(page, questionBody)
     await expect(question).toHaveCount(0)
     await page.keyboard.press(modeShortcut)
@@ -8664,7 +8661,7 @@ test("mode switching anchors the current cursor or viewport passage", async () =
 
     const passageBefore = await centerSection()
     await page.keyboard.press(
-      process.platform === "darwin" ? "Meta+Shift+V" : "Control+Shift+V"
+      process.platform === "darwin" ? "Meta+Shift+V" : "Control+Alt+V"
     )
     await waitForScrollToSettle()
     expect(await centerSection()).toBe(passageBefore)
@@ -8672,7 +8669,7 @@ test("mode switching anchors the current cursor or viewport passage", async () =
     // A physical scroll gesture must immediately take ownership from any
     // queued restoration work created by the mode change.
     await page.keyboard.press(
-      process.platform === "darwin" ? "Meta+Shift+V" : "Control+Shift+V"
+      process.platform === "darwin" ? "Meta+Shift+V" : "Control+Alt+V"
     )
     await scroller.hover()
     const beforeWheel = await scroller.evaluate((element) => element.scrollTop)
@@ -8729,7 +8726,7 @@ test("mode switching anchors the current cursor or viewport passage", async () =
       )
     }
     await page.keyboard.press(
-      process.platform === "darwin" ? "Meta+Shift+V" : "Control+Shift+V"
+      process.platform === "darwin" ? "Meta+Shift+V" : "Control+Alt+V"
     )
     await waitForScrollToSettle()
     const cursorAfter = await cursor.evaluate(
@@ -8797,7 +8794,7 @@ test("wrapped source lines keep their gutters and click geometry aligned after f
 
     await activateWindow(page)
     await page.keyboard.press(
-      process.platform === "darwin" ? "Meta+Shift+V" : "Control+Shift+V"
+      process.platform === "darwin" ? "Meta+Shift+V" : "Control+Alt+V"
     )
     await expect(page.locator(".cm-editor")).toHaveClass(/cm-md-source/)
     await page.evaluate(async () => {
@@ -9878,7 +9875,7 @@ test("appearance and typography persist without a mismatched launch surface", as
       .toBe("rgb(125, 52, 219)")
     await activateWindow(page)
     await page.keyboard.press(
-      process.platform === "darwin" ? "Meta+Shift+V" : "Control+Shift+V"
+      process.platform === "darwin" ? "Meta+Shift+V" : "Control+Alt+V"
     )
     await expect(page.locator(".cm-editor")).toHaveClass(/cm-md-source/)
     const firstLine = page.locator(".cm-line").first()

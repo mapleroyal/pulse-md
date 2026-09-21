@@ -1401,7 +1401,8 @@ export interface EditorContextMenuDetails {
   x: number
   y: number
 }
-export type FocusedEditCommand = "copy" | "cut" | "paste" | "redo" | "undo"
+export type FocusedEditCommand =
+  "copy" | "cut" | "paste" | "paste-plain" | "redo" | "undo"
 export type RecoveryAction = "quit" | "reload" | "reopen"
 export type WindowAction = "close" | "minimize" | "toggle-maximize"
 
@@ -1487,6 +1488,8 @@ export interface PulseMdApi {
     path: string
   ): Promise<readonly PathCompletionEntry[]>
   editFocusedControl(command: FocusedEditCommand): void
+  insertFocusedText(text: string): void
+  onPastePlainText(listener: (text: string) => void): () => void
   commitSettingsImport(
     importId: string,
     settings: AppSettings,

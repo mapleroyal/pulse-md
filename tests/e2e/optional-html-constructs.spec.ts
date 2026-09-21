@@ -79,12 +79,16 @@ test("HTML renders within headings, cells, and nested quotes without changing so
     expect(selected).toBe("<pre>\n> > > literal\n> >   indented\n> > </pre>")
     await page.keyboard.press("Escape")
     await assertRendered()
-    await page.keyboard.press("ControlOrMeta+Shift+V")
+    await page.keyboard.press(
+      process.platform === "darwin" ? "Meta+Shift+V" : "Control+Alt+V"
+    )
     await expect(page.locator(".cm-editor")).toHaveClass(/cm-md-source/)
     await expect(
       page.locator(".cm-md-html-inline, .cm-md-html-block")
     ).toHaveCount(0)
-    await page.keyboard.press("ControlOrMeta+Shift+V")
+    await page.keyboard.press(
+      process.platform === "darwin" ? "Meta+Shift+V" : "Control+Alt+V"
+    )
     await assertRendered()
     expect(
       await content.evaluate((element) =>

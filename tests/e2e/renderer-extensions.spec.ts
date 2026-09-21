@@ -1534,7 +1534,7 @@ test("footnotes use the shared tooltip and Mod-click navigation policy", async (
     await checkbox.click()
     await expect(checkbox).toBeChecked()
     const modeShortcut =
-      process.platform === "darwin" ? "Meta+Shift+V" : "Control+Shift+V"
+      process.platform === "darwin" ? "Meta+Shift+V" : "Control+Alt+V"
     await page.locator("body").focus()
     await page.keyboard.press(modeShortcut)
     await expect(page.locator(".cm-editor")).toHaveClass(/cm-md-source/)

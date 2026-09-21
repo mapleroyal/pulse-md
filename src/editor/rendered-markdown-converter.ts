@@ -794,13 +794,49 @@ export function renderedDomContainsBlock(source: ParentNode) {
   )
 }
 
+const semanticClipboardSelector =
+  "a[href], blockquote, code, details, h1, h2, h3, h4, h5, h6, hr, img, li, ol, pre, table, ul"
+
+/** Source editors and terminals also publish HTML, purely to carry their theme. */
+export function renderedDomNeedsConversion(source: ParentNode) {
+  if (source.querySelector(semanticClipboardSelector)) return true
+  const elements = Array.from(source.querySelectorAll<HTMLElement>("*"))
+  const text = (source as Node).textContent?.trim()
+  if (
+    elements.some((node) => {
+      if (node.nodeName !== "DIV") return false
+      const style = node.getAttribute("style") ?? ""
+      // Source editors wrap the complete selection in a font/whitespace
+      // container. Bold and italic child spans are syntax highlighting there.
+      return (
+        /(?:^|;)\s*white-space\s*:\s*(?:pre(?:-wrap)?|break-spaces)\s*(?:;|$)/i.test(
+          style
+        ) &&
+        /(?:^|;)\s*font-family\s*:/i.test(style) &&
+        node.textContent?.trim() === text
+      )
+    })
+  )
+    return false
+  return elements.some((node) =>
+    inlineFormats.some((format) => introducesInlineFormat(node, format))
+  )
+}
+
 export async function renderedHtmlToMarkdown(
   ownerDocument: Document,
-  source: string
+  source: string,
+  plainText = ""
 ) {
   const fragment = await sanitizedFragment(ownerDocument, source, {
     FORBID_TAGS: [...discardedTags],
   })
+  // The plain representation already preserves source newlines, indentation,
+  // and Markdown punctuation. Running presentation-only HTML through Turndown
+  // collapses CSS-preserved whitespace and escapes the user's source text.
+  if (plainText && !renderedDomNeedsConversion(fragment)) {
+    return { block: false, markdown: plainText }
+  }
   return {
     block: renderedDomContainsBlock(fragment),
     markdown: renderedDomToMarkdown(fragment),
