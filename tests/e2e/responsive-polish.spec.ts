@@ -184,6 +184,50 @@ test("desktop application menu supports access mode and sibling navigation @rend
 
     await page.keyboard.press("ArrowRight")
     await expect(menu.locator("button[data-active]")).toHaveText("Edit")
+    await expect(menu.getByRole("menuitem", { name: "Edit" })).toBeFocused()
+    await page.keyboard.press("ArrowDown")
+    const menuPopup = page.locator('[data-slot="menubar-content"][data-open]')
+    const enabledItems = menuPopup.locator(
+      '[role^="menuitem"]:not([aria-disabled="true"]):not([data-disabled])'
+    )
+    await expect(enabledItems.first()).toBeFocused()
+    await page.keyboard.press("ArrowDown")
+    await expect(enabledItems.nth(1)).toBeFocused()
+    expect(
+      await page.evaluate(
+        () =>
+          new Promise<number>((resolve) => {
+            let focusChanges = 0
+            const onFocus = () => (focusChanges += 1)
+            document.addEventListener("focusin", onFocus)
+            setTimeout(() => {
+              document.removeEventListener("focusin", onFocus)
+              resolve(focusChanges)
+            }, 500)
+          })
+      )
+    ).toBe(0)
+    await page.keyboard.press("Escape")
+    await page.keyboard.press("Alt")
+    await expect(menu.getByRole("menuitem", { name: "File" })).toBeFocused()
+    await page.keyboard.press("ArrowUp")
+    await expect(enabledItems.last()).toBeFocused()
+    await page.keyboard.press("Escape")
+
+    // Retain an entry key that arrives before the async menu snapshot, too.
+    await page.evaluate(() => {
+      for (const [type, key] of [
+        ["keydown", "Alt"],
+        ["keyup", "Alt"],
+        ["keydown", "ArrowUp"],
+        ["keyup", "ArrowUp"],
+      ]) {
+        window.dispatchEvent(
+          new KeyboardEvent(type, { bubbles: true, cancelable: true, key })
+        )
+      }
+    })
+    await expect(enabledItems.last()).toBeFocused()
     await page.keyboard.press("Escape")
     await expect(menu).toBeHidden()
     await page.keyboard.press("F10")

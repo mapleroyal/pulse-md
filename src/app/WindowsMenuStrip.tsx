@@ -258,6 +258,10 @@ export function WindowsMenuStrip({
     null
   )
   const previousFocusRef = React.useRef<HTMLElement | null>(null)
+  const pendingItemFocusRef = React.useRef<{
+    menu: WindowsMenuId
+    edge: "first" | "last"
+  } | null>(null)
   const sessionGenerationRef = React.useRef(0)
   const reduceMotion = window.matchMedia(
     "(prefers-reduced-motion: reduce)"
@@ -301,6 +305,7 @@ export function WindowsMenuStrip({
     sessionGenerationRef.current += 1
     snapshotPromiseRef.current = null
     snapshotRef.current = null
+    pendingItemFocusRef.current = null
     setSnapshot(null)
     setOpenMenuState(null)
   }, [setOpenMenuState])
@@ -354,6 +359,7 @@ export function WindowsMenuStrip({
           }
           const pendingOpenMenu = openMenuRef.current
           if (pendingOpenMenu && !nextSnapshot[pendingOpenMenu].enabled) {
+            pendingItemFocusRef.current = null
             setOpenMenuState(null)
           } else if (pendingOpenMenu) {
             buttonRefs.current
@@ -394,9 +400,10 @@ export function WindowsMenuStrip({
   }, [ensureSnapshot, onVisibleChange, setOpenMenuState])
 
   const revealAndOpen = React.useCallback(
-    (menu: WindowsMenuId) => {
+    (menu: WindowsMenuId, edge: "first" | "last" = "first") => {
       if (!menuEnabled(menu)) return
       beginSession()
+      pendingItemFocusRef.current = { menu, edge }
       setActiveMenu(menu)
       if (snapshotRef.current) {
         buttonRefs.current.get(menu)?.focus({ preventScroll: true })
@@ -436,6 +443,7 @@ export function WindowsMenuStrip({
       snapshotPromiseRef.current = null
       snapshotRef.current = null
       openMenuRef.current = null
+      pendingItemFocusRef.current = null
       previousFocusRef.current = null
     }
   }, [visible])
@@ -568,13 +576,28 @@ export function WindowsMenuStrip({
         event.key === "Enter" ||
         event.key === " "
       ) {
+        // Once the snapshot is ready, the focused trigger owns opening and
+        // item selection through Base UI's original keyboard event. A key
+        // pressed during snapshot loading retains only its entry intent.
+        if (
+          event.key !== "ArrowUp" &&
+          event.target === buttonRefs.current.get(activeMenuRef.current)
+        ) {
+          pendingItemFocusRef.current = {
+            menu: activeMenuRef.current,
+            edge: "first",
+          }
+          return
+        }
         consumeMenuKey(event)
-        revealAndOpen(activeMenu)
+        revealAndOpen(
+          activeMenuRef.current,
+          event.key === "ArrowUp" ? "last" : "first"
+        )
         return
       }
 
-      // Access mode intentionally leaves the prior editor/input focused until
-      // a dropdown opens. Suppress unrelated typing while that mode is active.
+      // Suppress unrelated typing while menu access mode is active.
       consumeMenuKey(event)
     }
 
@@ -630,8 +653,18 @@ export function WindowsMenuStrip({
   }, [dismiss, openMenu, visible])
 
   React.useLayoutEffect(() => {
-    if (visible) revealMenuButton(activeMenu)
-  }, [activeMenu, revealMenuButton, visible])
+    if (!visible) return
+    revealMenuButton(activeMenu)
+    // Preserve document/input focus until its semantic snapshot is frozen,
+    // then hand keyboard navigation to the menubar's actual trigger.
+    if (snapshot && !openMenu) {
+      // Menu.Root synchronizes disabled state through its own store commit.
+      const frame = window.requestAnimationFrame(() => {
+        buttonRefs.current.get(activeMenu)?.focus({ preventScroll: true })
+      })
+      return () => window.cancelAnimationFrame(frame)
+    }
+  }, [activeMenu, openMenu, revealMenuButton, snapshot, visible])
 
   return (
     <Menubar
@@ -708,6 +741,9 @@ export function WindowsMenuStrip({
                     ? "var(--document-foreground)"
                     : "color-mix(in oklab, var(--document-foreground) 82%, transparent)",
               }}
+              onFocus={() => {
+                if (visibleRef.current) setActiveMenu(definition.id)
+              }}
               onPointerEnter={(event) => {
                 if (!enabled) return
                 setActiveMenu(definition.id)
@@ -726,7 +762,35 @@ export function WindowsMenuStrip({
               </span>
               {definition.label.slice(mnemonicIndex + 1)}
             </MenubarTrigger>
-            <MenubarContent className={menuContentClassName} sideOffset={0}>
+            <MenubarContent
+              className={menuContentClassName}
+              sideOffset={0}
+              onFocusCapture={(event) => {
+                const pending = pendingItemFocusRef.current
+                if (pending?.menu !== definition.id) return
+                pendingItemFocusRef.current = null
+                const popup = event.currentTarget
+                // The asynchronous snapshot mounts the item list on opening.
+                // Complete one requested entry after its initial focus event;
+                // subsequent navigation stays with Base UI.
+                queueMicrotask(() => {
+                  if (
+                    !popup.isConnected ||
+                    openMenuRef.current !== pending.menu
+                  ) {
+                    return
+                  }
+                  const items = popup.querySelectorAll<HTMLElement>(
+                    '[role^="menuitem"]:not([aria-disabled="true"]):not([data-disabled])'
+                  )
+                  const item =
+                    pending.edge === "first"
+                      ? items[0]
+                      : items[items.length - 1]
+                  item?.focus({ preventScroll: true })
+                })
+              }}
+            >
               {snapshot ? (
                 <WindowsMenuItems
                   items={snapshot[definition.id].items}

@@ -129,6 +129,8 @@
       var(--formatting-toolbar-overlap)
   );
   --status-overlay-height: 28px;
+  --scrollbar-size: 10px;
+  --editor-scrollbar-gutter: 0px;
   --typography-dock-height: 0px;
   --window-chrome-height: 46px;
   --window-controls-safe-inset: 86px;
@@ -442,6 +444,30 @@ html[data-launch-transition="running"] .launch-tint-cover {
   transition: clip-path 120ms ease;
 }
 
+.app-shell:has(> .editor-mount > [data-horizontal-scrollbar]) {
+  --editor-scrollbar-gutter: var(--scrollbar-size);
+}
+
+/* Clip document content behind status chrome while preserving the native
+   horizontal scrollbar below it. The rectangles meet along the left edge. */
+.editor-mount:has(> [data-horizontal-scrollbar]) {
+  --status-top: calc(
+    100% - var(--editor-scrollbar-gutter) - var(--editor-clip-bottom)
+  );
+  --scrollbar-top: calc(100% - var(--editor-scrollbar-gutter));
+
+  clip-path: polygon(
+    0 var(--editor-clip-top),
+    100% var(--editor-clip-top),
+    100% var(--status-top),
+    0 var(--status-top),
+    0 var(--scrollbar-top),
+    100% var(--scrollbar-top),
+    100% 100%,
+    0 100%
+  );
+}
+
 .editor-mount .cm-content {
   padding-top: var(--editor-content-top-padding, var(--window-chrome-height));
 }
@@ -451,8 +477,8 @@ html[data-launch-transition="running"] .launch-tint-cover {
    the track transparent and the thumb quiet until hover. The document surface
    still fills the window, so chrome remains an overlay. */
 .editor-mount .cm-scroller::-webkit-scrollbar {
-  width: 10px;
-  height: 10px;
+  width: var(--scrollbar-size);
+  height: var(--scrollbar-size);
 }
 
 .editor-mount .cm-scroller::-webkit-scrollbar-track {
@@ -1908,9 +1934,10 @@ html[data-formatting-animations] .app-shell .formatting-toolbar {
   position: fixed;
   z-index: 35;
   right: 0;
-  bottom: 0;
+  bottom: var(--editor-scrollbar-gutter);
   left: 0;
   height: var(--status-overlay-height);
+  overflow: hidden;
   cursor: default;
   -webkit-app-region: no-drag;
 }

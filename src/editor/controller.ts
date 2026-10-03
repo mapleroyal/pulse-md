@@ -131,6 +131,7 @@ import {
 import { syntaxThemeExtension } from "./syntax-theme"
 import { editorStatus, wordCountExtension, wordCountField } from "./status"
 import { contentLayoutTheme, markdownEditorTheme } from "./theme"
+import { scrollbarGeometry } from "./scrollbar-geometry"
 import { delimiterAppearanceExtension } from "./delimiter-appearance"
 import {
   MAX_SOURCE_INDENT_SIZE,
@@ -3878,6 +3879,7 @@ export class MarkdownEditorController implements MarkdownEditorHandle {
       selectionAppearanceExtension,
       dropCursor(),
       markdownEditorTheme,
+      scrollbarGeometry,
       documentChromeScrollMargins,
       EditorView.editorAttributes.of({ class: "cm-md-editor" }),
       this.caretVisibility.of(this.caretExtension(caretVisible)),
