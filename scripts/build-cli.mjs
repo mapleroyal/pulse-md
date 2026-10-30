@@ -263,13 +263,14 @@ for (const variant of variants) {
         "-o",
         temporaryPath,
       ])
-      await run("xcrun", [
-        "lipo",
-        temporaryPath,
-        "-verify_arch",
-        "arm64",
-        "x86_64",
-      ])
+      for (const architecture of ["arm64", "x86_64"]) {
+        await run("xcrun", [
+          "lipo",
+          temporaryPath,
+          "-verify_arch",
+          architecture,
+        ])
+      }
     } else {
       await run(process.env.CC || "cc", [
         sourcePath,

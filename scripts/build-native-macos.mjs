@@ -67,7 +67,9 @@ try {
     "-o",
     temporaryPath,
   ])
-  await run("xcrun", ["lipo", temporaryPath, "-verify_arch", "arm64", "x86_64"])
+  for (const architecture of ["arm64", "x86_64"]) {
+    await run("xcrun", ["lipo", temporaryPath, "-verify_arch", architecture])
+  }
   await rename(temporaryPath, outputPath)
 } finally {
   await rm(temporaryPath, { force: true })
