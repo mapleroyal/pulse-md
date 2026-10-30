@@ -26,7 +26,9 @@ const budgets = {
   // the shared editor graph (about 31 kB raw / 11 kB gzip). Its path-specific
   // source remains deferred; this allowance keeps measured headroom without
   // relaxing the stricter aggregate launch-payload ceiling below.
-  initialJavaScriptRawBytes: 1_440_000,
+  // Nested code scrolling adds about 1.7 kB for bounded caret geometry and
+  // native scrollbar input ownership; the aggregate ceiling remains fixed.
+  initialJavaScriptRawBytes: 1_442_000,
   // Windows' renderer menubar and rail-less, chrome-aware scrollbar add a
   // small platform CSS surface while the aggregate launch budget stays fixed.
   initialCssRawBytes: 152_000,

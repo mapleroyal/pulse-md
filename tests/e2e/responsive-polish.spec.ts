@@ -1,3 +1,4 @@
+import type { EditorView } from "@codemirror/view"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
 import { mkdtemp, rm, writeFile } from "node:fs/promises"
@@ -880,6 +881,78 @@ test("scrollbars show only thumbs and clear editor overlay chrome @renderer-isol
         await page.mouse.up()
       }
     }
+  } finally {
+    await exitApplication(app)
+    await rm(userData, { force: true, recursive: true })
+  }
+})
+
+test("code scrollbar dragging preserves selection and text hit testing @renderer-isolated", async () => {
+  const userData = await mkdtemp(
+    path.join(os.tmpdir(), "pulse-md-code-scrollbar-")
+  )
+  const documentPath = path.join(userData, "code-scrollbar.md")
+  await writeFile(
+    documentPath,
+    ["```", "longCodeLine".repeat(120), "```"].join("\n")
+  )
+  const app = await electron.launch({
+    args: [projectRoot, `--user-data-dir=${userData}`, documentPath],
+    cwd: projectRoot,
+  })
+  try {
+    const page = await app.firstWindow()
+    const code = page.locator(".cm-md-code-block")
+    await expect(code).toBeVisible()
+    await code.locator(".cm-md-code-content-line").click({
+      position: { x: 100, y: 10 },
+    })
+    const selection = () =>
+      page.locator(".cm-content").evaluate((element) => {
+        const view = (
+          element as HTMLElement & { cmTile?: { view?: EditorView } }
+        ).cmTile?.view
+        if (!view) throw new Error("CodeMirror view is unavailable")
+        return view.state.selection.toJSON()
+      })
+    const originalSelection = await selection()
+    const gutter = await code.evaluate((element) => {
+      const bounds = element.getBoundingClientRect()
+      const scale = bounds.height / (element as HTMLElement).offsetHeight
+      const top =
+        bounds.top + (element.clientTop + element.clientHeight) * scale
+      return {
+        x: bounds.left + 15,
+        y: (top + bounds.bottom) / 2,
+        textX: bounds.left + 180,
+        textY:
+          element
+            .querySelector(".cm-md-code-content-line")!
+            .getBoundingClientRect().top + 10,
+      }
+    })
+    await page.mouse.move(gutter.x, gutter.y)
+    expect(
+      await code.evaluate(
+        (element) =>
+          getComputedStyle(element, "::-webkit-scrollbar-thumb").cursor
+      )
+    ).toBe("default")
+    await page.mouse.down()
+    expect(await selection()).toEqual(originalSelection)
+    await expect(code).not.toHaveAttribute("data-code-pointer-selecting")
+    await page.mouse.move(gutter.x + 120, gutter.y, { steps: 5 })
+    await page.mouse.up()
+    await expect
+      .poll(() => code.evaluate((element) => element.scrollLeft))
+      .toBeGreaterThan(0)
+    expect(await selection()).toEqual(originalSelection)
+    await page.mouse.click(gutter.textX, gutter.textY)
+    expect(await selection()).not.toEqual(originalSelection)
+    await expect(code.locator(".cm-md-code-content-line")).toHaveCSS(
+      "cursor",
+      "text"
+    )
   } finally {
     await exitApplication(app)
     await rm(userData, { force: true, recursive: true })

@@ -788,8 +788,8 @@ for (const { lineWrapping, length } of [
           () =>
             new Promise<
               Array<{
-                cursorLeft: number
-                cursorRight: number
+                cursorLeft: number | null
+                cursorRight: number | null
                 blockLeft: number
                 blockRight: number
               }>
@@ -805,8 +805,8 @@ for (const { lineWrapping, length } of [
                     return
                   document.removeEventListener("keydown", onKeyDown, true)
                   const samples: Array<{
-                    cursorLeft: number
-                    cursorRight: number
+                    cursorLeft: number | null
+                    cursorRight: number | null
                     blockLeft: number
                     blockRight: number
                   }> = []
@@ -817,9 +817,27 @@ for (const { lineWrapping, length } of [
                     const cursor = document
                       .querySelector(".cm-cursor-primary")!
                       .getBoundingClientRect()
+                    const layer = document.querySelector(".cm-cursorLayer")!
+                    const layerStyle = getComputedStyle(layer)
+                    const insets = layerStyle.clipPath
+                      .match(/^inset\((.*)\)$/)?.[1]
+                      .split(" ")
+                      .map(Number.parseFloat)
+                    const layerBounds = layer.getBoundingClientRect()
+                    const clipLeft =
+                      insets && layerStyle.overflow === "clip"
+                        ? layerBounds.left +
+                          (insets[3] ?? insets[1] ?? insets[0]!)
+                        : -Infinity
+                    const clipRight =
+                      insets && layerStyle.overflow === "clip"
+                        ? layerBounds.right - (insets[1] ?? insets[0]!)
+                        : Infinity
+                    const left = Math.max(cursor.left, clipLeft)
+                    const right = Math.min(cursor.right, clipRight)
                     samples.push({
-                      cursorLeft: cursor.left,
-                      cursorRight: cursor.right,
+                      cursorLeft: right > left ? left : null,
+                      cursorRight: right > left ? right : null,
                       blockLeft: block.left,
                       blockRight: block.right,
                     })
@@ -853,10 +871,27 @@ for (const { lineWrapping, length } of [
             head: target.position,
           })
           for (const frame of frames) {
+            if (frame.cursorLeft == null) continue
             expect(frame.cursorLeft).toBeGreaterThanOrEqual(frame.blockLeft - 1)
             expect(frame.cursorRight).toBeLessThanOrEqual(frame.blockRight + 1)
           }
           const block = page.locator(".cm-md-code-block")
+          await expect
+            .poll(() =>
+              page.evaluate(() => {
+                const cursor = document
+                  .querySelector(".cm-cursor-primary")!
+                  .getBoundingClientRect()
+                const block = document
+                  .querySelector(".cm-md-code-block")!
+                  .getBoundingClientRect()
+                return (
+                  cursor.left >= block.left - 1 &&
+                  cursor.right <= block.right + 1
+                )
+              })
+            )
+            .toBe(true)
           const scrollLeft = await block.evaluate(
             (element) => element.scrollLeft
           )
@@ -886,6 +921,146 @@ for (const { lineWrapping, length } of [
           })
         }
       }
+    } finally {
+      await exitApplication(app)
+      await rm(userData, { recursive: true, force: true })
+    }
+  })
+}
+
+for (const lineWrapping of [false, true]) {
+  test(`manual code scrolling clips the caret and keeps the chosen viewport (document wrapping ${lineWrapping})`, async () => {
+    const code = `const value = "${"0123456789".repeat(240)}";`
+    const content = ["before", "", "```ts", code, "```", "", "after"].join("\n")
+    const { app, page, userData } = await launchNoWrapEditor(
+      content,
+      lineWrapping
+    )
+
+    try {
+      await app.evaluate(({ BrowserWindow }) => {
+        BrowserWindow.getAllWindows()[0]?.focus()
+      })
+      const line = page.locator(".cm-md-code-content-line")
+      await line.click({ position: { x: 100, y: 10 } })
+      const head = content.indexOf(code) + 450
+      await page.locator(".cm-content").evaluate((element, anchor) => {
+        const view = (
+          element as HTMLElement & { cmTile?: { view?: EditorView } }
+        ).cmTile?.view
+        if (!view) throw new Error("CodeMirror view is unavailable")
+        view.dispatch({ selection: { anchor }, scrollIntoView: true })
+        view.focus()
+      }, head)
+      await settleGeometry(page, 8)
+
+      const snapshot = () =>
+        page.locator(".cm-content").evaluate((element) => {
+          const view = (
+            element as HTMLElement & { cmTile?: { view?: EditorView } }
+          ).cmTile?.view
+          if (!view) throw new Error("CodeMirror view is unavailable")
+          const block = element.querySelector<HTMLElement>(".cm-md-code-block")!
+          const bounds = block.getBoundingClientRect()
+          const cursor = view.scrollDOM
+            .querySelector(".cm-cursor-primary")!
+            .getBoundingClientRect()
+          return {
+            head: view.state.selection.main.head,
+            scrollLeft: block.scrollLeft,
+            outerWidth: view.scrollDOM.scrollWidth,
+            outerScroll: view.scrollDOM.scrollLeft,
+            left: bounds.left,
+            right: bounds.right,
+            cursorLeft: cursor.left,
+            cursorRight: cursor.right,
+          }
+        })
+      const caretPainted = async () => {
+        const layer = page.locator(".cm-cursorLayer")
+        await layer.evaluate((element) => {
+          const style = (element as HTMLElement).style
+          style.animation = "none"
+          style.opacity = "1"
+        })
+        const caretBounds = await page
+          .locator(".cm-cursor-primary")
+          .boundingBox()
+        if (!caretBounds) throw new Error("Caret geometry is unavailable")
+        const clip = {
+          x: 0,
+          y: Math.floor(caretBounds.y),
+          width: await page.evaluate(() => innerWidth),
+          height: Math.ceil(caretBounds.height),
+        }
+        const visible = await page.screenshot({ clip })
+        await layer.evaluate((element) => {
+          ;(element as HTMLElement).style.visibility = "hidden"
+        })
+        const hidden = await page.screenshot({ clip })
+        await layer.evaluate((element) => {
+          ;(element as HTMLElement).style.visibility = ""
+        })
+        return !visible.equals(hidden)
+      }
+      const baseline = await snapshot()
+      expect(await caretPainted()).toBe(true)
+      const lineBounds = await line.boundingBox()
+      if (!lineBounds) throw new Error("Code line geometry is unavailable")
+      await page.mouse.move(
+        (baseline.left + baseline.right) / 2,
+        lineBounds.y + lineBounds.height / 2
+      )
+
+      for (const target of [
+        baseline.scrollLeft - (baseline.right + 20 - baseline.cursorLeft),
+        baseline.scrollLeft - 500,
+        baseline.scrollLeft + (baseline.cursorLeft - baseline.left + 20),
+        baseline.scrollLeft,
+      ]) {
+        const before = await snapshot()
+        await page.mouse.wheel(target - before.scrollLeft, 0)
+        await expect
+          .poll(async () => Math.abs((await snapshot()).scrollLeft - target))
+          .toBeLessThanOrEqual(1)
+        await settleGeometry(page, 20)
+        const after = await snapshot()
+        expect(Math.abs(after.scrollLeft - target)).toBeLessThanOrEqual(1)
+        expect(after.head).toBe(head)
+        expect(after.outerWidth).toBe(baseline.outerWidth)
+        expect(after.outerScroll).toBe(baseline.outerScroll)
+        expect(await caretPainted()).toBe(target === baseline.scrollLeft)
+      }
+
+      await page.mouse.wheel(-500, 0)
+      await settleGeometry(page, 8)
+      await page.keyboard.press("ArrowRight")
+      await settleGeometry(page, 8)
+      const moved = await snapshot()
+      expect(moved.head).toBe(head + 1)
+      expect(moved.cursorLeft).toBeGreaterThanOrEqual(moved.left - 1)
+      expect(moved.cursorRight).toBeLessThanOrEqual(moved.right + 1)
+      expect(await caretPainted()).toBe(true)
+
+      await page.mouse.wheel(-500, 0)
+      await settleGeometry(page, 8)
+      await page.keyboard.type("x")
+      await settleGeometry(page, 8)
+      const typed = await snapshot()
+      expect(typed.head).toBe(head + 2)
+      expect(typed.cursorLeft).toBeGreaterThanOrEqual(typed.left - 1)
+      expect(typed.cursorRight).toBeLessThanOrEqual(typed.right + 1)
+      expect(await caretPainted()).toBe(true)
+
+      await page.locator(".cm-content").evaluate((element) => {
+        const view = (
+          element as HTMLElement & { cmTile?: { view?: EditorView } }
+        ).cmTile?.view
+        if (!view) throw new Error("CodeMirror view is unavailable")
+        view.dispatch({ selection: { anchor: 2 }, scrollIntoView: true })
+      })
+      await settleGeometry(page, 8)
+      expect(await caretPainted()).toBe(true)
     } finally {
       await exitApplication(app)
       await rm(userData, { recursive: true, force: true })

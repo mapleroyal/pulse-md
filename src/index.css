@@ -481,6 +481,7 @@ html[data-launch-transition="running"] .launch-tint-cover {
 }
 
 ::-webkit-scrollbar-track {
+  cursor: default;
   background: transparent;
 }
 
@@ -493,6 +494,7 @@ html[data-launch-transition="running"] .launch-tint-cover {
 }
 
 ::-webkit-scrollbar-thumb {
+  cursor: default;
   min-width: 36px;
   min-height: 36px;
   border: 3px solid transparent;
@@ -513,6 +515,7 @@ html[data-launch-transition="running"] .launch-tint-cover {
 }
 
 ::-webkit-scrollbar-corner {
+  cursor: default;
   background: transparent;
 }
 

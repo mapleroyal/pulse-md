@@ -1435,6 +1435,29 @@ export function buildCodeBlockDecorations(
   return ranges.length === 0 ? Decoration.none : Decoration.set(ranges, true)
 }
 
+function isCodeScrollbarPointer(event: MouseEvent) {
+  const target = event.target
+  if (
+    !(target instanceof HTMLElement) ||
+    !target.classList.contains("cm-md-code-block") ||
+    target.scrollWidth <= target.clientWidth ||
+    target.offsetHeight <= target.clientHeight
+  ) {
+    return false
+  }
+
+  const bounds = target.getBoundingClientRect()
+  const scale = bounds.height / target.offsetHeight
+  const contentBottom =
+    bounds.top + (target.clientTop + target.clientHeight) * scale
+  return (
+    event.clientX >= bounds.left &&
+    event.clientX < bounds.right &&
+    event.clientY >= contentBottom &&
+    event.clientY < bounds.bottom
+  )
+}
+
 class CodeBlockDecorationPlugin {
   decorations: DecorationSet
 
@@ -1442,6 +1465,8 @@ class CodeBlockDecorationPlugin {
   private readonly view: EditorView
   private refreshingDrawnSelection = false
   private selectionRefreshFrame: number | null = null
+  private revealingBlock: HTMLElement | null = null
+  private revealedScrollLeft = 0
   private pointerBlock: HTMLElement | null = null
   private pointerId: number | null = null
   private drag:
@@ -1463,7 +1488,7 @@ class CodeBlockDecorationPlugin {
     view.dom.addEventListener("scroll", this.handleNestedScroll, true)
     view.dom.addEventListener("mousedown", this.handleMouseDown, true)
     view.dom.addEventListener("pointerdown", this.handlePointerDown, true)
-    this.updateNativeCodeSelection()
+    this.updateNativeCodeSelection(true)
   }
 
   update(update: ViewUpdate) {
@@ -1486,7 +1511,7 @@ class CodeBlockDecorationPlugin {
         update.focusChanged ||
         update.startState.field(this.field) !== update.state.field(this.field))
     ) {
-      this.updateNativeCodeSelection()
+      this.updateNativeCodeSelection(update.docChanged || update.selectionSet)
     }
   }
 
@@ -1572,28 +1597,80 @@ class CodeBlockDecorationPlugin {
     })
   }
 
-  private updateNativeCodeSelection() {
+  private updateNativeCodeSelection(revealSelection: boolean) {
     const useNativeRendering = this.selectionUsesNativeRendering()
     this.view.dom.toggleAttribute(
       "data-code-native-selection",
       useNativeRendering
     )
-    // Nested horizontal scrolling is still needed for CodeMirror's drawn
-    // caret. It is independent of whether a mounted text selection can use
-    // native painting.
-    if (this.selectionHeadBlock()) {
+    this.view.requestMeasure(this.caretClipMeasure)
+    const block = this.selectionHeadBlock()
+    if (revealSelection) {
+      this.revealingBlock = block
+      this.revealedScrollLeft = block?.scrollLeft ?? 0
+    }
+    // Keep an editing action's reveal coherent through geometry changes.
+    // The first independently changed scroll position gives ownership back
+    // to manual scrolling until the next editing/selection action.
+    if (block && block === this.revealingBlock) {
       this.view.requestMeasure(this.revealSelectionMeasure)
     }
+  }
+
+  private readonly caretClipMeasure = {
+    read: (view: EditorView) => {
+      const layer = view.scrollDOM.querySelector<HTMLElement>(".cm-cursorLayer")
+      if (!layer) return null
+      const block = this.selectionHeadBlock()
+      if (!block) return { layer, clip: null }
+      const bounds = block.getBoundingClientRect()
+      const origin = layer.getBoundingClientRect()
+      const scaleX = block.offsetWidth ? bounds.width / block.offsetWidth : 1
+      const scaleY = block.offsetHeight ? bounds.height / block.offsetHeight : 1
+      const left = bounds.left + block.clientLeft * scaleX - origin.left
+      const top = bounds.top + block.clientTop * scaleY - origin.top
+      return {
+        layer,
+        clip: {
+          left: Math.max(0, left),
+          top: Math.max(0, top),
+          right: Math.max(0, left + block.clientWidth * scaleX),
+          bottom: Math.max(0, top + block.clientHeight * scaleY),
+        },
+      }
+    },
+    write: (
+      measurement: {
+        layer: HTMLElement
+        clip: {
+          left: number
+          top: number
+          right: number
+          bottom: number
+        } | null
+      } | null
+    ) => {
+      if (!measurement) return
+      const { layer, clip } = measurement
+      // CodeMirror's caret layer sits outside the nested scrolling block.
+      // A bounded overflow clip keeps both its paint and its scrollable
+      // overflow in that viewport; clip-path alone only clips the paint.
+      layer.style.width = clip ? `${clip.right}px` : ""
+      layer.style.height = clip ? `${clip.bottom}px` : ""
+      layer.style.overflow = clip ? "clip" : ""
+      layer.style.clipPath = clip
+        ? `inset(${clip.top}px 0 0 ${clip.left}px)`
+        : ""
+    },
   }
 
   private readonly revealSelectionMeasure = {
     key: this,
     read: (view: EditorView) => {
       const activeBlock = this.selectionHeadBlock()
+      if (!activeBlock || activeBlock !== this.revealingBlock) return null
       const measurement = codeSelectionHeadMeasurement(view)
-      return activeBlock && measurement?.block === activeBlock
-        ? measurement
-        : null
+      return measurement?.block === activeBlock ? measurement : null
     },
     write: (
       measurement: { block: HTMLElement; scrollLeft: number } | null,
@@ -1603,6 +1680,7 @@ class CodeBlockDecorationPlugin {
       const { block, scrollLeft } = measurement
       const previousScrollLeft = block.scrollLeft
       block.scrollLeft = scrollLeft
+      this.revealedScrollLeft = block.scrollLeft
       if (Math.abs(block.scrollLeft - previousScrollLeft) >= 0.5) {
         view.requestMeasure(this.revealSelectionMeasure)
         if (!view.dom.hasAttribute("data-code-native-selection")) {
@@ -1634,6 +1712,12 @@ class CodeBlockDecorationPlugin {
   }
 
   private readonly handlePointerDown = (event: PointerEvent) => {
+    if (event.button === 0 && isCodeScrollbarPointer(event)) {
+      // Keep the browser's native scrollbar drag while excluding editor
+      // pointer-selection handlers, including other capture listeners.
+      event.stopImmediatePropagation()
+      return
+    }
     if (event.button !== 0 || !event.isPrimary) return
     const target = event.target
     const block =
@@ -1681,6 +1765,12 @@ class CodeBlockDecorationPlugin {
   }
 
   private readonly handleMouseDown = (event: MouseEvent) => {
+    if (event.button === 0 && isCodeScrollbarPointer(event)) {
+      // Keep the browser's native scrollbar drag while excluding editor
+      // pointer-selection handlers, including other capture listeners.
+      event.stopImmediatePropagation()
+      return
+    }
     const target = event.target
     if (
       event.button !== 0 ||
@@ -1843,6 +1933,19 @@ class CodeBlockDecorationPlugin {
     ) {
       return
     }
+    if (
+      target === this.revealingBlock &&
+      Math.abs(target.scrollLeft - this.revealedScrollLeft) >= 0.5 &&
+      // Rebuilding a virtualized line can shrink its scroll range and make
+      // Chromium clamp our last reveal. That is geometry, not manual input.
+      !(
+        this.revealedScrollLeft > target.scrollLeft &&
+        target.scrollLeft >= target.scrollWidth - target.clientWidth - 0.5
+      )
+    ) {
+      this.revealingBlock = null
+    }
+    this.view.requestMeasure(this.caretClipMeasure)
     if (!this.view.dom.hasAttribute("data-code-native-selection")) {
       this.queueDrawnSelectionRefresh()
     }
@@ -1858,6 +1961,9 @@ class CodeBlockDecorationPlugin {
       this.selectionRefreshFrame = null
     }
     this.view.dom.removeAttribute("data-code-native-selection")
+    const layer =
+      this.view.scrollDOM.querySelector<HTMLElement>(".cm-cursorLayer")
+    if (layer) this.caretClipMeasure.write({ layer, clip: null })
     this.view.dom.removeEventListener("scroll", this.handleNestedScroll, true)
     this.view.dom.removeEventListener("mousedown", this.handleMouseDown, true)
     this.view.dom.removeEventListener(
