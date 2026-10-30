@@ -2222,7 +2222,6 @@ const calloutBlockTheme = EditorView.baseTheme({
     maxWidth: boundedPreviewMaxWidth,
     overflowX: "auto",
     paddingInlineStart: "0.85rem",
-    scrollbarWidth: "thin",
   },
   "&.cm-md-live .cm-md-quote-block .cm-md-quote-block": {
     marginInlineStart: "0.25rem",
@@ -2272,7 +2271,6 @@ const calloutBlockTheme = EditorView.baseTheme({
     minWidth: "0",
     overflowX: "auto",
     overscrollBehaviorInline: "contain",
-    scrollbarWidth: "thin",
   },
   "&.cm-md-live .cm-md-callout:has(> .cm-md-callout-header-line.cm-md-list-line)":
     {

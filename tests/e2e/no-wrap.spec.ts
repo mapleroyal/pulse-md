@@ -1,3 +1,4 @@
+import type { EditorView } from "@codemirror/view"
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
@@ -67,11 +68,11 @@ const markdown = [
   "```",
 ].join("\n")
 
-async function launchNoWrapEditor(content = markdown) {
+async function launchNoWrapEditor(content = markdown, lineWrapping = false) {
   const userData = await mkdtemp(path.join(os.tmpdir(), "pulse-md-no-wrap-"))
   const filePath = path.join(userData, "no-wrap.md")
   const settings = cloneAppSettings(DEFAULT_APP_SETTINGS)
-  settings.lineWrapping = false
+  settings.lineWrapping = lineWrapping
   settings.markdownExtensions.latex = true
   settings.markdownExtensions.mermaid = true
   settings.markdownExtensions.sanitizedHtml = true
@@ -721,3 +722,173 @@ test("no-wrap keeps callout keyboard selection visible", async () => {
     await closeNoWrapEditor(app, userData)
   }
 })
+
+for (const { lineWrapping, length } of [
+  { lineWrapping: false, length: 2400 },
+  { lineWrapping: false, length: 20000 },
+  { lineWrapping: true, length: 2400 },
+  { lineWrapping: true, length: 20000 },
+]) {
+  test(`code line boundaries keep the caret inside the block (${length} characters, document wrapping ${lineWrapping})`, async () => {
+    const code = `const value = "${"0123456789".repeat(length / 10)}";`
+    const content = [
+      "before",
+      "",
+      "```ts",
+      code,
+      "short",
+      "```",
+      "",
+      "after",
+    ].join("\n")
+    const { app, page, userData } = await launchNoWrapEditor(
+      content,
+      lineWrapping
+    )
+
+    try {
+      await app.evaluate(({ BrowserWindow }) => {
+        BrowserWindow.getAllWindows()[0]?.focus()
+      })
+      await page
+        .locator(".cm-md-code-content-line")
+        .first()
+        .click({
+          position: { x: 100, y: 10 },
+        })
+      const start = content.indexOf(code)
+      const end = start + code.length
+      const middle = start + 450
+      const selectMiddle = async () => {
+        await page.locator(".cm-content").evaluate((element, anchor) => {
+          const view = (
+            element as HTMLElement & {
+              cmTile?: { view?: EditorView }
+            }
+          ).cmTile?.view
+          if (!view) throw new Error("CodeMirror view is unavailable")
+          view.dispatch({ selection: { anchor }, scrollIntoView: true })
+          view.focus()
+        }, middle)
+        await settleGeometry(page, 6)
+      }
+      const selection = () =>
+        page.locator(".cm-content").evaluate((element) => {
+          const view = (
+            element as HTMLElement & {
+              cmTile?: { view?: EditorView }
+            }
+          ).cmTile?.view
+          if (!view) throw new Error("CodeMirror view is unavailable")
+          const { anchor, head } = view.state.selection.main
+          return { anchor, head }
+        })
+      const pressAndSampleCaret = async (key: string) => {
+        const frames = page.evaluate(
+          () =>
+            new Promise<
+              Array<{
+                cursorLeft: number
+                cursorRight: number
+                blockLeft: number
+                blockRight: number
+              }>
+            >((resolve) => {
+              document.addEventListener(
+                "keydown",
+                function onKeyDown(event) {
+                  if (
+                    !["Home", "End", "ArrowLeft", "ArrowRight"].includes(
+                      event.key
+                    )
+                  )
+                    return
+                  document.removeEventListener("keydown", onKeyDown, true)
+                  const samples: Array<{
+                    cursorLeft: number
+                    cursorRight: number
+                    blockLeft: number
+                    blockRight: number
+                  }> = []
+                  const sample = () => {
+                    const block = document
+                      .querySelector(".cm-md-code-block")!
+                      .getBoundingClientRect()
+                    const cursor = document
+                      .querySelector(".cm-cursor-primary")!
+                      .getBoundingClientRect()
+                    samples.push({
+                      cursorLeft: cursor.left,
+                      cursorRight: cursor.right,
+                      blockLeft: block.left,
+                      blockRight: block.right,
+                    })
+                    if (samples.length < 8) requestAnimationFrame(sample)
+                    else resolve(samples)
+                  }
+                  requestAnimationFrame(sample)
+                },
+                { capture: true }
+              )
+            })
+        )
+        await page.keyboard.press(key)
+        return frames
+      }
+      const keys = [
+        { start: "Home", end: "End" },
+        ...(process.platform === "darwin"
+          ? [{ start: "Meta+ArrowLeft", end: "Meta+ArrowRight" }]
+          : []),
+      ]
+      for (const boundary of keys) {
+        await selectMiddle()
+        for (const target of [
+          { key: boundary.end, position: end },
+          { key: boundary.start, position: start },
+        ]) {
+          const frames = await pressAndSampleCaret(target.key)
+          expect(await selection()).toEqual({
+            anchor: target.position,
+            head: target.position,
+          })
+          for (const frame of frames) {
+            expect(frame.cursorLeft).toBeGreaterThanOrEqual(frame.blockLeft - 1)
+            expect(frame.cursorRight).toBeLessThanOrEqual(frame.blockRight + 1)
+          }
+          const block = page.locator(".cm-md-code-block")
+          const scrollLeft = await block.evaluate(
+            (element) => element.scrollLeft
+          )
+          await settleGeometry(page, 12)
+          expect(await block.evaluate((element) => element.scrollLeft)).toBe(
+            scrollLeft
+          )
+          await block.evaluate((element, atEnd) => {
+            element.scrollLeft = atEnd ? 0 : element.scrollWidth
+          }, target.position === end)
+          await settleGeometry(page, 4)
+          await page.keyboard.press(target.key)
+          await expect
+            .poll(() => block.evaluate((element) => element.scrollLeft))
+            .toBe(scrollLeft)
+          await settleGeometry(page, 6)
+        }
+        for (const target of [
+          { key: boundary.end, position: end },
+          { key: boundary.start, position: start },
+        ]) {
+          await selectMiddle()
+          await page.keyboard.press(`Shift+${target.key}`)
+          expect(await selection()).toEqual({
+            anchor: middle,
+            head: target.position,
+          })
+        }
+      }
+    } finally {
+      await exitApplication(app)
+      await rm(userData, { recursive: true, force: true })
+    }
+  })
+}

@@ -368,8 +368,10 @@ function codeBlockElementAt(view: EditorView, position: number) {
   )
 }
 
-function codeSelectionHeadMeasurement(view: EditorView) {
-  const selection = view.state.selection.main
+function codeSelectionHeadMeasurement(
+  view: EditorView,
+  selection = view.state.selection.main
+) {
   const side: -1 | 1 =
     selection.assoc || (selection.head > selection.anchor ? -1 : 1)
   let position: ReturnType<EditorView["domAtPos"]>
@@ -406,6 +408,19 @@ function codeSelectionHeadMeasurement(view: EditorView) {
       y: character.top,
       width: 0,
       height: character.height,
+    })
+  }
+
+  if (caret.height === 0) {
+    // A virtualized long-line gap has no DOM text range. CodeMirror still
+    // knows its source boundary and can supply the placeholder edge.
+    const coordinates = view.coordsAtPos(selection.head, side)
+    if (!coordinates) return null
+    caret = DOMRect.fromRect({
+      x: coordinates.left,
+      y: coordinates.top,
+      width: coordinates.right - coordinates.left,
+      height: coordinates.bottom - coordinates.top,
     })
   }
 
@@ -528,7 +543,18 @@ function moveCodeSelectionToLineBoundary(
     ? EditorSelection.range(range.anchor, head)
     : EditorSelection.cursor(head, forward ? -1 : 1)
   const selection = EditorSelection.create([moved])
-  if (selection.eq(state.selection, true)) return true
+  // Move the nested viewport before CodeMirror measures the new drawn caret.
+  // Scrolling it in a later measure write leaves one painted frame at the
+  // old, offscreen text coordinates.
+  const measurement = codeSelectionHeadMeasurement(view, moved)
+  const previousScrollLeft = measurement?.block.scrollLeft
+  if (measurement) measurement.block.scrollLeft = measurement.scrollLeft
+  if (
+    selection.eq(state.selection, true) &&
+    measurement?.block.scrollLeft === previousScrollLeft
+  ) {
+    return true
+  }
   view.dispatch({
     selection,
     effects: EditorView.scrollIntoView(head),
@@ -2474,6 +2500,20 @@ export function codeBlockExtension(
 
   const boundaryKeys = Prec.highest(
     keymap.of([
+      {
+        key: "Home",
+        run: (view) =>
+          moveCodeSelectionToLineBoundary(view, field, false, false),
+        shift: (view) =>
+          moveCodeSelectionToLineBoundary(view, field, false, true),
+      },
+      {
+        key: "End",
+        run: (view) =>
+          moveCodeSelectionToLineBoundary(view, field, true, false),
+        shift: (view) =>
+          moveCodeSelectionToLineBoundary(view, field, true, true),
+      },
       {
         mac: "Cmd-ArrowLeft",
         run: (view) =>

@@ -588,12 +588,18 @@ test("desktop app controls share the narrow formatting lane without covering doc
   }
 })
 
-test("editor scrollbar clears overlay chrome and stays rail-less @renderer-isolated", async () => {
+test("scrollbars show only thumbs and clear editor overlay chrome @renderer-isolated", async () => {
   const userData = await mkdtemp(path.join(os.tmpdir(), "pulse-md-scrollbar-"))
   const documentPath = path.join(userData, "scrollbar.md")
   await writeFile(
     documentPath,
-    Array.from({ length: 400 }, (_, index) => `Line ${index + 1}`).join("\n"),
+    [
+      "```",
+      "longCodeLine".repeat(120),
+      "```",
+      "",
+      ...Array.from({ length: 400 }, (_, index) => `Line ${index + 1}`),
+    ].join("\n"),
     "utf8"
   )
   const app = await electron.launch({
@@ -612,6 +618,29 @@ test("editor scrollbar clears overlay chrome and stays rail-less @renderer-isola
         )
       )
       .toBe(true)
+
+    const code = page.locator(".cm-md-code-block").first()
+    await expect(code).toBeVisible()
+    const codeScrollbar = await code.evaluate((element) => ({
+      overflows: element.scrollWidth > element.clientWidth,
+      width: getComputedStyle(element).scrollbarWidth,
+      color: getComputedStyle(element).scrollbarColor,
+      track: getComputedStyle(element, "::-webkit-scrollbar-track")
+        .backgroundColor,
+      buttons: getComputedStyle(element, "::-webkit-scrollbar-button").display,
+      thumb: getComputedStyle(element, "::-webkit-scrollbar-thumb")
+        .backgroundColor,
+      height: getComputedStyle(element, "::-webkit-scrollbar").height,
+    }))
+    expect(codeScrollbar).toMatchObject({
+      overflows: true,
+      width: "auto",
+      color: "auto",
+      track: "rgba(0, 0, 0, 0)",
+      buttons: "none",
+      height: "10px",
+    })
+    expect(codeScrollbar.thumb).not.toBe("rgba(0, 0, 0, 0)")
 
     const scrollbarStyles = () =>
       scroller.evaluate((element) => {
@@ -693,7 +722,7 @@ test("editor scrollbar clears overlay chrome and stays rail-less @renderer-isola
         for (const rule of rules) {
           if (
             rule instanceof CSSStyleRule &&
-            rule.selectorText.includes(".cm-scroller::-webkit-scrollbar")
+            rule.selectorText.includes("::-webkit-scrollbar")
           ) {
             matched.push({
               cssText: rule.style.cssText,

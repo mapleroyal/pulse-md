@@ -472,16 +472,15 @@ html[data-launch-transition="running"] .launch-tint-cover {
   padding-top: var(--editor-content-top-padding, var(--window-chrome-height));
 }
 
-/* Use the same inset Chromium scrollbar on every platform, including macOS:
-   its default overlay thumb otherwise runs behind the clipped chrome. Keep
-   the track transparent and the thumb quiet until hover. The document surface
-   still fills the window, so chrome remains an overlay. */
-.editor-mount .cm-scroller::-webkit-scrollbar {
+/* All scrollable surfaces share a thumb-only Chromium scrollbar. Keep
+   scrollbar-width at auto so native thin scrollbars cannot restore arrows or
+   opaque tracks, which also flatten scrollable cards' bottom corners. */
+::-webkit-scrollbar {
   width: var(--scrollbar-size);
   height: var(--scrollbar-size);
 }
 
-.editor-mount .cm-scroller::-webkit-scrollbar-track {
+::-webkit-scrollbar-track {
   background: transparent;
 }
 
@@ -493,7 +492,7 @@ html[data-launch-transition="running"] .launch-tint-cover {
   margin-block-end: var(--editor-clip-bottom, 0px);
 }
 
-.editor-mount .cm-scroller::-webkit-scrollbar-thumb {
+::-webkit-scrollbar-thumb {
   min-width: 36px;
   min-height: 36px;
   border: 3px solid transparent;
@@ -502,18 +501,18 @@ html[data-launch-transition="running"] .launch-tint-cover {
     padding-box;
 }
 
-.editor-mount .cm-scroller::-webkit-scrollbar-thumb:hover {
+::-webkit-scrollbar-thumb:hover {
   background: color-mix(in oklab, var(--document-foreground) 48%, transparent)
     padding-box;
 }
 
-.editor-mount .cm-scroller::-webkit-scrollbar-button {
+::-webkit-scrollbar-button {
   display: none;
   width: 0;
   height: 0;
 }
 
-.editor-mount .cm-scroller::-webkit-scrollbar-corner {
+::-webkit-scrollbar-corner {
   background: transparent;
 }
 
@@ -2010,7 +2009,6 @@ html[data-formatting-animations] .app-shell .formatting-toolbar {
   max-height: calc(100dvh - var(--window-chrome-height) - 8px);
   overflow-y: auto;
   overscroll-behavior: contain;
-  scrollbar-width: thin;
   -webkit-app-region: no-drag;
 }
 

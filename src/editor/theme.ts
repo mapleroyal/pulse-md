@@ -371,7 +371,6 @@ export const markdownEditorTheme = EditorView.baseTheme({
     overflowX: "auto",
     overflowY: "clip",
     overscrollBehaviorInline: "contain",
-    scrollbarWidth: "thin",
     width: "100%",
   },
   "&.cm-md-live .cm-md-yaml-frontmatter-line": {
@@ -452,7 +451,6 @@ export const markdownEditorTheme = EditorView.baseTheme({
     backgroundColor:
       "var(--code-block-surface-background, color-mix(in oklab, currentColor 6%, transparent))",
     cornerShape: appCornerShape,
-    scrollbarWidth: "thin",
   },
   "&.cm-md-live .cm-md-code-block[data-code-wrap=true]": {
     overflowX: "hidden",
